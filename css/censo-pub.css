@@ -1,0 +1,98 @@
+/*
+ * PC Hotelería — Censo Público (standalone page styles)
+ * Removes admin shell, provides a clean mobile-only layout.
+ */
+
+/* ── Clean body — no app shell ──────────────────── */
+.censo-pub-body {
+    background: #f4f5f7;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+/* ── Branded header ─────────────────────────────── */
+.cpub-header {
+    background: linear-gradient(135deg, #c0392b 0%, #e74c3c 50%, #ff6b6b 100%);
+    color: #fff;
+    padding: 16px 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    box-shadow: 0 4px 20px rgba(192, 57, 43, 0.30);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    flex-shrink: 0;
+}
+
+.cpub-logo {
+    font-size: 28px;
+    width: 44px;
+    height: 44px;
+    background: rgba(255, 255, 255, 0.20);
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.cpub-header-text {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.cpub-brand {
+    font-size: 16px;
+    font-weight: 800;
+    letter-spacing: 0.2px;
+}
+
+.cpub-subtitle {
+    font-size: 12px;
+    opacity: 0.85;
+    font-weight: 500;
+}
+
+/* ── Main content area ──────────────────────────── */
+.cpub-main {
+    flex: 1;
+    padding: 20px 16px;
+    max-width: 680px;
+    width: 100%;
+    margin: 0 auto;
+}
+
+/* ── Loading state ──────────────────────────────── */
+.cpub-loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 60px 20px;
+    color: #a0aec0;
+}
+
+.cpub-loading-icon {
+    font-size: 48px;
+}
+
+.cpub-loading p {
+    font-size: 14px;
+    font-weight: 500;
+}
+
+/* ── Override censo-main padding for standalone ─── */
+.cpub-main .censo-main {
+    padding-bottom: 24px;
+}
+
+/* ── Hide the logout button label on very small screens */
+@media (max-width: 360px) {
+    .cpub-brand {
+        font-size: 14px;
+    }
+}

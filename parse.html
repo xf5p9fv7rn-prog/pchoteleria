@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Parse XLSX</title>
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+    <script>
+        fetch('11.xlsx')
+            .then(res => res.arrayBuffer())
+            .then(buffer => {
+                const wb = XLSX.read(buffer, {type: 'array'});
+                const wsName = wb.SheetNames[0];
+                const ws = wb.Sheets[wsName];
+                const data = XLSX.utils.sheet_to_json(ws, {header: 1});
+                
+                // Format the output
+                const result = [];
+                for(let i=0; i<Math.min(10, data.length); i++) {
+                    result.push(data[i]);
+                }
+                console.log("PARSE_RESULT_START");
+                console.log(JSON.stringify(result));
+                console.log("PARSE_RESULT_END");
+            })
+            .catch(console.error);
+    </script>
+</body>
+</html>

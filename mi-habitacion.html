@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mi Habitación — PC Hotelería</title>
+    <link rel="stylesheet" href="css/main.css">
+    <link rel="stylesheet" href="css/premium.css">
+    <style>
+        body {
+            background-color: var(--bg-body);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            color: var(--text-primary);
+        }
+        .pub-container { max-width: 450px; margin: 40px auto; padding: 20px; }
+        .ticket {
+            background: rgba(255, 255, 255, 0.9);
+            backdrop-filter: blur(16px);
+            border-radius: 24px;
+            padding: 0;
+            overflow: hidden;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.12);
+            border: 1px solid rgba(255, 255, 255, 0.8);
+            position: relative;
+            animation: slideUp 0.6s cubic-bezier(0.2, 0.8, 0.2, 1);
+        }
+        @keyframes slideUp { from { transform: translateY(40px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        
+        .ticket-header {
+            background: var(--grad-red);
+            padding: 24px;
+            color: #fff;
+            text-align: center;
+        }
+        .ticket-header h2 { font-size: 20px; margin-bottom: 4px; font-weight: 800; }
+        .ticket-header p { opacity: 0.9; font-size: 13px; font-weight: 500; }
+
+        .ticket-body { padding: 24px; }
+        .ticket-row { display: flex; justify-content: space-between; margin-bottom: 20px; }
+        .ticket-row label { display: block; font-size: 11px; text-transform: uppercase; color: var(--text-secondary); font-weight: 700; margin-bottom: 4px; }
+        .ticket-row .val { font-size: 16px; font-weight: 800; color: var(--text-primary); }
+
+        .room-main {
+            background: var(--red-50);
+            border-radius: 16px;
+            padding: 20px;
+            text-align: center;
+            border: 1px solid var(--red-100);
+            margin-bottom: 24px;
+        }
+        .room-main .num { font-size: 56px; font-weight: 800; color: var(--red-600); line-height: 1; }
+        .room-main .sub { font-size: 15px; font-weight: 700; color: var(--red-700); margin-top: 4px; }
+
+        .ticket-footer {
+            padding: 24px;
+            border-top: 2px dashed var(--border);
+            background: #fafafa;
+            text-align: center;
+        }
+        .ticket-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 20px;
+            background: #f0fff4;
+            color: #276749;
+            border-radius: 999px;
+            font-weight: 800;
+            font-size: 14px;
+            border: 2px solid #c6f6d5;
+            margin-bottom: 15px;
+        }
+
+        .search-area { text-align: center; margin-bottom: 40px; }
+        .search-area h1 { font-size: 28px; margin-bottom: 8px; font-weight: 800; color: var(--text-primary); }
+        .search-area p { color: var(--text-secondary); margin-bottom: 24px; font-size: 15px; }
+
+        .punch-hole {
+            position: absolute;
+            width: 24px;
+            height: 24px;
+            background: var(--bg-body);
+            border-radius: 50%;
+            top: 52%;
+            z-index: 10;
+        }
+        .punch-left { left: -12px; }
+        .punch-right { right: -12px; }
+    </style>
+</head>
+<body>
+    <div class="pub-container" id="search-view">
+        <div class="search-area">
+            <div style="font-size: 56px; margin-bottom: 16px; animation: slideUp 0.5s ease-out;">🏠</div>
+            <h1>Buscador de Habitaciones</h1>
+            <p>Ingresa tu RUT para consultar tu alojamiento en el campamento.</p>
+            
+            <div class="form-group" style="display:flex; flex-direction:column; text-align:left; background: white; padding: 20px; border-radius: 16px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border: 1px solid var(--border);">
+                <label style="font-weight:800; color:var(--text-primary); margin-bottom:8px; font-size:14px;">RUT DEL TRABAJADOR</label>
+                <input type="text" id="rut-input" class="form-input" placeholder="Ej: 12345678-9" style="font-size:18px; padding: 12px; font-weight: 600; text-align: center; letter-spacing: 1px;">
+                
+                <button class="btn btn-primary btn-full mt-4" style="height: 48px; font-size: 16px; font-weight: 800;" onclick="window.searchRoom()">
+                    🔍 Consultar Asignación
+                </button>
+            </div>
+        </div>
+        
+        <div id="no-result" style="display:none; text-align:center; padding: 16px; background: #fff5f5; border: 1px solid #feb2b2; border-radius: 12px; color: var(--red-700); font-weight: 700; margin-top: 20px;">
+            ❌ No se encontró una habitación asignada para el RUT ingresado. Por favor, verifica en recepción.
+        </div>
+    </div>
+
+    <div class="pub-container" id="ticket-view" style="display:none">
+        <div class="ticket">
+            <div class="ticket-header">
+                <h2>Ticket de Alojamiento</h2>
+                <p>PC Hotelería — Oficial</p>
+            </div>
+            
+            <div class="ticket-body">
+                <div class="room-main">
+                    <div class="sub" style="color:var(--text-secondary); margin-bottom: 4px;">HABITACIÓN ASIGNADA</div>
+                    <div class="num" id="t-room">-</div>
+                    <div class="sub" id="t-building" style="margin-top: 8px;">-</div>
+                </div>
+                
+                <div class="ticket-row">
+                    <div>
+                        <label>Residente</label>
+                        <div class="val" id="t-name">-</div>
+                        <div style="font-size: 12px; color: var(--text-secondary); font-weight: 600; margin-top: 2px;" id="t-rut">-</div>
+                    </div>
+                    <div style="text-align:right">
+                        <label>Turno</label>
+                        <div class="val" id="t-shift">-</div>
+                        <div style="font-size: 12px; color: var(--text-secondary); font-weight: 600; margin-top: 2px;" id="t-bed">-</div>
+                    </div>
+                </div>
+
+                <div class="ticket-row" style="margin-bottom: 0;">
+                    <div>
+                        <label>Empresa</label>
+                        <div class="val" id="t-company">-</div>
+                    </div>
+                    <div style="text-align:right">
+                        <label>Piso</label>
+                        <div class="val" id="t-floor">-</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="punch-hole punch-left"></div>
+            <div class="punch-hole punch-right"></div>
+
+            <div class="ticket-body" style="padding-top: 20px; border-top: 2px dashed var(--border);">
+                <div class="ticket-row" style="margin-bottom: 0;">
+                    <div>
+                        <label>Fecha de Ingreso</label>
+                        <div class="val" id="t-arrival" style="color: #2b6cb0;">-</div>
+                    </div>
+                    <div style="text-align:right">
+                        <label>Fecha de Salida</label>
+                        <div class="val" id="t-departure" style="color: var(--red-600);">-</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="ticket-footer">
+                <div id="checkin-section">
+                    <p style="font-size: 12px; color: var(--text-secondary); font-weight: 600; margin-bottom: 12px; line-height: 1.4;">
+                        Para validar tu ingreso al campamento, por favor confirma tu llegada.
+                    </p>
+                    <button class="btn btn-primary btn-full" id="btn-checkin" style="height: 50px; font-size: 15px; font-weight: 800; background: #276749; border-color: #276749; box-shadow: 0 4px 12px rgba(39, 103, 73, 0.3);" onclick="window.marcarAsistencia()">
+                        ✅ CONFIRMAR LLEGADA A HABITACIÓN
+                    </button>
+                </div>
+
+                <div id="success-section" style="display: none;">
+                    <div class="ticket-status">
+                        🟢 LLEGADA CONFIRMADA
+                    </div>
+                    <p style="font-size: 12px; color: var(--text-secondary); font-weight: 600; margin-top: 8px;">
+                        Asistencia registrada a las <span id="t-time"></span> hrs.
+                    </p>
+                </div>
+                
+                <div style="margin-top: 20px; font-size: 10px; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: 1px;">
+                    ID TRANSACCIÓN: <span id="t-id">0000</span>
+                </div>
+            </div>
+        </div>
+        
+        <button class="btn btn-secondary btn-full mt-4" style="background: white; border: 1px solid var(--border); font-weight: 700; color: var(--text-primary); box-shadow: 0 2px 4px rgba(0,0,0,0.02);" onclick="location.reload()">
+            ⬅️ Consultar otro RUT
+        </button>
+    </div>
+
+    <script type="module">
+        import { getAll, put } from './js/db.js';
+        import { toChileanDate } from './js/utils.js';
+
+        // Variables globales para guardar quién inició sesión
+        window._currentRoomData = null;
+        window._currentBedKey = null;
+
+        window.searchRoom = async () => {
+            const btn = document.querySelector('#search-view button');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '⏳ Buscando...';
+            btn.disabled = true;
+
+            const rutInputOriginal = document.getElementById('rut-input').value.trim();
+            if (!rutInputOriginal) {
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+                return;
+            }
+
+            // Normalizamos el RUT ingresado (quitamos puntos y guiones para que coincida siempre)
+            const rutBuscado = rutInputOriginal.replace(/[^0-9Kk]/g, '').toUpperCase();
+
+            try {
+                const rooms = await getAll('rooms');
+                const buildings = await getAll('buildings');
+                
+                let foundBed = null;
+                let roomInfo = null;
+                let bedKey = null;
+
+                for (const r of rooms) {
+                    const day = r.beds?.day;
+                    const night = r.beds?.night;
+                    
+                    // Función para revisar si el trabajador está en esta cama
+                    const checkBed = (bed) => {
+                        if (!bed || !bed.occupant) return false;
+                        
+                        // Si guardamos el RUT oficial
+                        if (bed.rut) {
+                            const bedRut = String(bed.rut).replace(/[^0-9Kk]/g, '').toUpperCase();
+                            if (bedRut === rutBuscado || bedRut.includes(rutBuscado)) return true;
+                        }
+                        
+                        // Si el RUT se guardó pegado al nombre "Juan Perez (12345678-9)"
+                        const bedName = String(bed.occupant).replace(/[^0-9Kk]/g, '').toUpperCase();
+                        if (bedName.includes(rutBuscado)) return true;
+
+                        return false;
+                    };
+
+                    if (checkBed(day)) { foundBed = day; roomInfo = r; bedKey = 'day'; break; }
+                    if (checkBed(night)) { foundBed = night; roomInfo = r; bedKey = 'night'; break; }
+                }
+
+                if (foundBed && roomInfo) {
+                    const b = buildings.find(x => x.id == roomInfo.buildingId);
+                    
+                    // Guardar datos en memoria para el Check-in
+                    window._currentRoomData = roomInfo;
+                    window._currentBedKey = bedKey;
+                    
+                    // Llenar el Ticket
+                    document.getElementById('t-room').textContent = roomInfo.number;
+                    document.getElementById('t-building').textContent = (b ? b.name : 'Edificio');
+                    document.getElementById('t-name').textContent = foundBed.occupant.split('(')[0].trim();
+                    document.getElementById('t-rut').textContent = foundBed.rut || rutInputOriginal;
+                    document.getElementById('t-shift').textContent = foundBed.shift || 'Sin Turno';
+                    document.getElementById('t-bed').textContent = bedKey === 'day' ? '🛏️ Cama 1 (A)' : '🛏️ Cama 2 (B)';
+                    document.getElementById('t-company').textContent = foundBed.company || 'Empresa Colaboradora';
+                    document.getElementById('t-floor').textContent = roomInfo.floor;
+                    document.getElementById('t-arrival').textContent = foundBed.arrivalDate ? toChileanDate(foundBed.arrivalDate) : 'Hoy';
+                    document.getElementById('t-departure').textContent = foundBed.departureDate ? toChileanDate(foundBed.departureDate) : 'Por definir';
+                    document.getElementById('t-id').textContent = Math.floor(100000 + Math.random() * 900000);
+
+                    // Si ya había marcado asistencia antes, mostramos directo el ticket verde
+                    if (foundBed.present) {
+                        document.getElementById('checkin-section').style.display = 'none';
+                        document.getElementById('success-section').style.display = 'block';
+                        
+                        const date = new Date(foundBed.lastCheckIn);
+                        const timeString = isNaN(date) ? '--:--' : date.toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
+                        document.getElementById('t-time').textContent = timeString;
+                    } else {
+                        document.getElementById('checkin-section').style.display = 'block';
+                        document.getElementById('success-section').style.display = 'none';
+                    }
+
+                    // Mostrar ticket
+                    document.getElementById('search-view').style.display = 'none';
+                    document.getElementById('no-result').style.display = 'none';
+                    document.getElementById('ticket-view').style.display = 'block';
+                } else {
+                    document.getElementById('no-result').style.display = 'block';
+                }
+            } catch (error) {
+                console.error("Error buscando RUT:", error);
+                document.getElementById('no-result').textContent = "⚠️ Error de conexión. Intente nuevamente.";
+                document.getElementById('no-result').style.display = 'block';
+            }
+
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        };
+
+        // Función del botón Verde de Check-in
+        window.marcarAsistencia = async () => {
+            const btn = document.getElementById('btn-checkin');
+            btn.innerHTML = '⏳ Guardando...';
+            btn.disabled = true;
+
+            try {
+                const roomInfo = window._currentRoomData;
+                const bedKey = window._currentBedKey;
+
+                if (roomInfo && bedKey && roomInfo.beds[bedKey]) {
+                    const now = new Date();
+                    
+                    // Modificamos la cama específica
+                    roomInfo.beds[bedKey].present = true;
+                    roomInfo.beds[bedKey].lastCheckIn = now.toISOString();
+                    
+                    // Guardamos la pieza entera en Supabase
+                    await put('rooms', roomInfo);
+
+                    // Actualizamos la vista
+                    document.getElementById('checkin-section').style.display = 'none';
+                    document.getElementById('success-section').style.display = 'block';
+                    document.getElementById('t-time').textContent = now.toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
+                }
+            } catch (error) {
+                console.error("Error al marcar asistencia:", error);
+                alert("Hubo un error al guardar. Por favor, intenta de nuevo.");
+                btn.innerHTML = '✅ CONFIRMAR LLEGADA A HABITACIÓN';
+                btn.disabled = false;
+            }
+        };
+
+        // Permitir buscar apretando "Enter"
+        document.getElementById('rut-input')?.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') window.searchRoom();
+        });
+    </script>
+</body>
+</html>

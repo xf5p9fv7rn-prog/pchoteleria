@@ -1,0 +1,208 @@
+/* ===================================================
+   PC Hotelería — Premium UI Extensions
+   Glassmorphism, Animations, Advanced UI
+   =================================================== */
+
+/* ── Keyframes ──────────────────────────────────── */
+@keyframes fadeInSlideUp {
+    0% { opacity: 0; transform: translateY(20px); }
+    100% { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulseGlow {
+    0% { box-shadow: 0 0 0 0 rgba(192, 57, 43, 0.4); }
+    70% { box-shadow: 0 0 0 10px rgba(192, 57, 43, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(192, 57, 43, 0); }
+}
+
+@keyframes glassShimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+}
+
+/* ── Base Enhancements ──────────────────────────── */
+body {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Premium Buttons ────────────────────────────── */
+.btn {
+    position: relative;
+    overflow: hidden;
+    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+.btn::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 300%;
+    height: 300%;
+    background: rgba(255,255,255,0.1);
+    transform: translate(-50%, -50%) scale(0);
+    border-radius: 50%;
+    transition: transform 0.5s;
+}
+
+.btn:active::after {
+    transform: translate(-50%, -50%) scale(1);
+    transition: 0s;
+}
+
+.btn-primary {
+    background: linear-gradient(135deg, #c0392b 0%, #e74c3c 100%);
+    box-shadow: 0 4px 15px rgba(192, 57, 43, 0.3);
+    border: none;
+}
+
+.btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(192, 57, 43, 0.45);
+    background: linear-gradient(135deg, #a93226 0%, #c0392b 100%);
+}
+
+.btn-secondary {
+    background: rgba(255,255,255,0.7);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(0,0,0,0.1);
+}
+
+.btn-secondary:hover {
+    background: rgba(255,255,255,1);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+}
+
+/* ── Glassmorphism Modals & Drawers ─────────────── */
+.modal-overlay,
+.side-drawer-overlay {
+    background: rgba(15, 23, 42, 0.4);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+}
+
+.modal,
+.side-drawer {
+    background: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.3);
+}
+
+.modal {
+    border-radius: 24px;
+    animation: fadeInSlideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.side-drawer {
+    border-radius: 24px 0 0 24px;
+    border-right: none;
+}
+
+.modal-header,
+.side-drawer-header {
+    background: transparent;
+    border-bottom: 1px solid rgba(0,0,0,0.05);
+}
+
+/* ── Floating Inputs ────────────────────────────── */
+.form-group.floating {
+    position: relative;
+    margin-bottom: 24px;
+}
+
+.form-group.floating .form-input,
+.form-group.floating .form-select {
+    height: 56px;
+    padding: 24px 16px 8px;
+    background: rgba(255, 255, 255, 0.7);
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    border-radius: 12px;
+    font-size: 15px;
+    font-weight: 500;
+    backdrop-filter: blur(10px);
+    transition: all 0.3s ease;
+}
+
+.form-group.floating .form-input:focus,
+.form-group.floating .form-select:focus {
+    background: #fff;
+    border-color: var(--red-600);
+    box-shadow: 0 0 0 4px rgba(192, 57, 43, 0.1);
+}
+
+.form-group.floating label {
+    position: absolute;
+    top: 18px;
+    left: 16px;
+    font-size: 14px;
+    color: var(--text-secondary);
+    pointer-events: none;
+    transition: all 0.2s ease;
+    font-weight: 500;
+}
+
+.form-group.floating .form-input:focus ~ label,
+.form-group.floating .form-input:not(:placeholder-shown) ~ label,
+.form-group.floating .form-select:focus ~ label,
+.form-group.floating .form-select:not([value=""]) ~ label {
+    top: 6px;
+    font-size: 11px;
+    color: var(--red-600);
+    font-weight: 700;
+}
+
+/* ── Premium Cards & Tickets ────────────────────── */
+.premium-card {
+    background: rgba(255, 255, 255, 0.7);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.8);
+    border-radius: 24px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.08);
+    overflow: hidden;
+    position: relative;
+}
+
+.premium-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0; height: 4px;
+    background: linear-gradient(90deg, #c0392b, #e74c3c, #ff6b6b);
+}
+
+.animated-ticket {
+    animation: fadeInSlideUp 0.6s cubic-bezier(0.2, 0.8, 0.2, 1);
+    transform-origin: top center;
+}
+
+.bed-card-pro {
+    background: rgba(255, 255, 255, 0.6);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255,255,255,0.9);
+    box-shadow: 0 4px 15px rgba(0,0,0,0.03);
+    border-radius: 16px;
+    padding: 16px;
+    transition: transform 0.3s;
+}
+
+.bed-card-pro:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(0,0,0,0.08);
+}
+
+/* ── Delete Modal Fix ───────────────────────────── */
+#delete-req-modal {
+    align-items: center !important;
+    justify-content: center !important;
+}
+
+#delete-req-modal .modal {
+    margin: 0 auto !important;
+    max-height: 85vh;
+    overflow-y: auto;
+}

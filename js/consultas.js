@@ -1,0 +1,1176 @@
+/**
+ * PC Hotelería — Motor de Consultas en Lenguaje Natural
+ * Interpreta preguntas en español y genera informes con datos reales de IndexedDB
+ * Funciona 100% offline, sin API externas.
+ */
+
+const DB_NAME = 'campmanager_db';
+// Intentamos con la versión actual; si falla usamos la que ya existe
+const DB_VERSION = 3;
+
+let _db = null;
+
+// ── Abrir IndexedDB ────────────────────────────────────────────────────
+// NOTA: consultas.js abre la misma DB que app.js en modo solo-lectura.
+// Es fundamental NO hacer upgrade de versión aquí para no interferir.
+function openDB() {
+    if (_db) return Promise.resolve(_db);
+    return new Promise((resolve, reject) => {
+        // Primero intentamos abrir sin especificar versión
+        // para evitar disparar onupgradeneeded accidentalmente
+        const reqProbe = indexedDB.open(DB_NAME);
+        reqProbe.onsuccess = (e) => {
+            const db = e.target.result;
+            const existingVersion = db.version;
+            db.close();
+
+            // Ahora abrimos con la versión que ya existe en disco
+            const req = indexedDB.open(DB_NAME, existingVersion);
+            req.onupgradeneeded = (ev) => {
+                // Crear stores faltantes si es necesario (no debe ocurrir normalmente)
+                const d = ev.target.result;
+                const stores = ['buildings', 'rooms', 'assignments', 'census',
+                                'b2b_requests', 'sync_queue', 'users', 'logs', 'census_records'];
+                stores.forEach(s => {
+                    if (!d.objectStoreNames.contains(s)) {
+                        d.createObjectStore(s, {
+                            keyPath: s === 'users' ? 'username' : 'id',
+                            autoIncrement: s !== 'users'
+                        });
+                    }
+                });
+            };
+            req.onsuccess = (ev) => { _db = ev.target.result; resolve(_db); };
+            req.onerror = (ev) => reject(ev.target.error);
+        };
+        reqProbe.onerror = (e) => reject(e.target.error);
+    });
+}
+
+// getAll con manejo robusto de errores: siempre devuelve [] en caso de fallo
+function getAll(storeName) {
+    return new Promise(async (resolve) => {
+        try {
+            const db = await openDB();
+            // Verificar que el objectStore existe antes de acceder
+            if (!db.objectStoreNames.contains(storeName)) {
+                resolve([]);
+                return;
+            }
+            const tx = db.transaction(storeName, 'readonly');
+            const req = tx.objectStore(storeName).getAll();
+            req.onsuccess = () => resolve(req.result || []);
+            req.onerror = (e) => {
+                console.warn(`[Consultas] Error leyendo '${storeName}':`, e.target.error);
+                resolve([]);
+            };
+            tx.onerror = (e) => {
+                console.warn(`[Consultas] Error de transacción '${storeName}':`, e.target.error);
+                resolve([]);
+            };
+        } catch (e) {
+            console.warn(`[Consultas] Error abriendo DB para '${storeName}':`, e);
+            resolve([]);
+        }
+    });
+}
+
+// ── Cargar todos los datos del sistema ────────────────────────────────
+async function cargarDatos() {
+    const [rooms, buildings, requests, census, quotas] = await Promise.all([
+        getAll('rooms'),
+        getAll('buildings'),
+        getAll('b2b_requests'),
+        getAll('census_records'),
+        getAll('gerencia_quotas').catch(() => []),
+    ]);
+    return { rooms, buildings, requests, census, quotas };
+}
+
+// ── Normalización de texto ─────────────────────────────────────────────
+function normalizar(str) {
+    if (!str) return '';
+    return String(str)
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, ''); // quitar tildes
+}
+
+// ── Detección de intención ─────────────────────────────────────────────
+function detectarIntencion(pregunta) {
+    const q = normalizar(pregunta);
+
+    // ── Detección de habitación específica (número en la pregunta) ──────────
+    const matchHab = q.match(/\b(hab(?:itacion)?[\s#\-]*(\d{3,5})|cuarto[\s#\-]*(\d{3,5})|(\d{3,5})[\s]*(hab|cuarto|pieza|room))\b/);
+    const habNumero = matchHab
+        ? (matchHab[2] || matchHab[3] || matchHab[4])
+        : (/\b(\d{3,5})\b/.test(q) && !q.includes('cama') && !q.includes('%') ? q.match(/\b(\d{3,5})\b/)?.[1] : null);
+
+    const intenciones = [
+        { id: 'RESUMEN_GENERAL', palabras: ['resumen', 'general', 'overview', 'todo', 'completo', 'informe', 'estado actual', 'situacion', 'como esta el campa', 'reporte'] },
+        { id: 'CAMAS_PERDIDAS', palabras: ['camas perdidas', 'cama perdida', 'perdida', 'perdidas', 'desperdicio', 'desperdiciada', 'sola', 'solo en la habitacion', 'habitacion con uno', 'media habitacion', 'medio llena', 'subutilizada', 'subutilizado', 'inefici'] },
+        { id: 'HABITACIONES_LIBRES', palabras: ['libre', 'disponible', 'vacia', 'vacias', 'sin ocupar', 'desocupada'] },
+        { id: 'HABITACIONES_OCUPADAS', palabras: ['ocupad', 'full', 'completa', 'llena', 'con gente'] },
+        { id: 'CUPOS_GERENCIA', palabras: ['cupo', 'gerencia', 'cupos por gerencia', 'por gerencia', 'limite gerencia', 'disponibles por gerencia', 'camas gerencia', 'cuantas camas tiene', 'cupos disponibles'] },
+        { id: 'TURNO_DIA_NOCHE', palabras: ['camas dia', 'camas de dia', 'camas noche', 'camas de noche', 'turno dia', 'turno noche', 'disponibles de dia', 'disponibles de noche', 'pabellon noche', 'pabellon dia', 'camas por turno', 'turno', 'dia disponible', 'noche disponible'] },
+        { id: 'CAMAS_CAPACIDAD', palabras: ['capacidad', 'espacio', 'cuantas camas', 'total camas', 'camas disponibles', 'camas libres'] },
+        { id: 'TRABAJADORES_EMPRESA', palabras: ['trabajador', 'personal', 'emplead', 'gente', 'quien esta', 'quien hay', 'cuantos son', 'anglo', 'aramark', 'constructora', 'empresa'] },
+        { id: 'SOLICITUDES', palabras: ['solicitud', 'reserva', 'pedido', 'solicitudes', 'b2b', 'pendiente', 'aprobad', 'rechazad'] },
+        { id: 'EDIFICIO_DETALLE', palabras: ['pabellon', 'edificio', 'p-1', 'p-2', 'p-3', 'p-4', 'p-5', 'p-6', 'p-7', 'p-8', '220', 'pab'] },
+        { id: 'GENERO_BREAKDOWN', palabras: ['mujer', 'hombre', 'femenin', 'masculin', 'genero', 'sexo', 'dama'] },
+        { id: 'ALERTAS', palabras: ['alerta', 'problema', 'error', 'issue', 'bloqueada', 'mantenimiento', 'sin asignar'] },
+    ];
+
+    // Si detectamos un número de habitación concreto, priorizar ese intent
+    if (habNumero && (q.includes('hab') || q.includes('cuarto') || q.includes('pieza') || q.includes('room') || /^[\s\d]+$/.test(q.trim()) || q.match(/\b\d{3,5}\b/))) {
+        return { id: 'HABITACION_DETALLE', edificioFiltro: null, empresaFiltro: null, habNumero };
+    }
+
+    // Detectar también edificio específico
+    let edificioFiltro = null;
+    const matchPab = q.match(/pabellon\s*(\d+)|p-?(\d+)/);
+    const match220 = q.includes('220');
+    if (matchPab) edificioFiltro = `P-${matchPab[1] || matchPab[2]}`;
+    if (match220) edificioFiltro = '220';
+
+    // Detectar empresa específica mencionada
+    let empresaFiltro = null;
+    const empresasConocidas = ['anglo', 'aramark', 'codelco', 'antofagasta', 'bechtel', 'fluor'];
+    empresasConocidas.forEach(emp => {
+        if (q.includes(emp)) empresaFiltro = emp;
+    });
+
+    for (const int of intenciones) {
+        if (int.palabras.some(p => q.includes(p))) {
+            return { id: int.id, edificioFiltro, empresaFiltro, habNumero: null };
+        }
+    }
+
+    return { id: 'RESUMEN_GENERAL', edificioFiltro, empresaFiltro, habNumero: null };
+}
+
+// ── Helpers de cálculo ─────────────────────────────────────────────────
+function calcularEstadisticasHabitaciones(rooms, buildings) {
+    const total = rooms.length;
+    const ocupadas = rooms.filter(r => r.status === 'occupied').length;
+    const libres = rooms.filter(r => r.status === 'free').length;
+    const bloqueadas = rooms.filter(r => r.status === 'blocked').length;
+
+    let totalCamas = 0, camasOcupadas = 0;
+    rooms.forEach(r => {
+        const cap = r.bedCount || 2;
+        totalCamas += cap;
+        ['day', 'night', 'extra'].slice(0, cap).forEach(k => {
+            if (r.beds?.[k]?.occupant) camasOcupadas++;
+        });
+    });
+
+    const porEdificio = {};
+    const buildingMap = {};
+    buildings.forEach(b => buildingMap[b.id] = b.name || b.code);
+
+    rooms.forEach(r => {
+        const bName = buildingMap[r.buildingId] || `Edificio ${r.buildingId}`;
+        if (!porEdificio[bName]) porEdificio[bName] = { total: 0, ocupadas: 0, libres: 0, camas: 0, camasOcupadas: 0 };
+        porEdificio[bName].total++;
+        if (r.status === 'occupied') porEdificio[bName].ocupadas++;
+        if (r.status === 'free') porEdificio[bName].libres++;
+        const cap = r.bedCount || 2;
+        porEdificio[bName].camas += cap;
+        ['day', 'night', 'extra'].slice(0, cap).forEach(k => {
+            if (r.beds?.[k]?.occupant) porEdificio[bName].camasOcupadas++;
+        });
+    });
+
+    return { total, ocupadas, libres, bloqueadas, totalCamas, camasOcupadas, porEdificio };
+}
+
+function extraerTrabajadores(rooms, buildings) {
+    const trabajadores = [];
+    const buildingMap = {};
+    buildings.forEach(b => buildingMap[b.id] = b.name || b.code);
+
+    rooms.forEach(r => {
+        const edificio = buildingMap[r.buildingId] || `Ed. ${r.buildingId}`;
+        ['day', 'night', 'extra'].forEach(cama => {
+            const bed = r.beds?.[cama];
+            if (bed?.occupant) {
+                trabajadores.push({
+                    nombre: bed.occupant,
+                    empresa: bed.company || '—',
+                    turno: bed.shift || cama,
+                    genero: bed.gender || '—',
+                    rut: bed.rut || '—',
+                    habitacion: `${edificio} · Hab. ${r.number}`,
+                    cama: cama === 'day' ? 'Día' : cama === 'night' ? 'Noche' : 'Extra',
+                    llegada: bed.arrivalDate || '—',
+                    salida: bed.departureDate || '—',
+                });
+            }
+        });
+    });
+    return trabajadores;
+}
+
+function agruparPorEmpresa(trabajadores) {
+    const grupos = {}; // key normalizada → { label original, count }
+    trabajadores.forEach(t => {
+        const raw = t.empresa || 'Sin empresa';
+        const key = normalizar(raw); // clave case-insensitive y sin tildes
+        if (!grupos[key]) {
+            // Guardar la primera forma encontrada como etiqueta display
+            const label = raw.trim().replace(/\b\w/g, c => c.toUpperCase());
+            grupos[key] = { label, count: 0 };
+        }
+        grupos[key].count++;
+    });
+    return Object.values(grupos)
+        .sort((a, b) => b.count - a.count)
+        .map(g => [g.label, g.count]);
+}
+
+function porcentaje(parte, total) {
+    if (total === 0) return '0%';
+    return `${Math.round((parte / total) * 100)}%`;
+}
+
+function barraProgreso(parte, total, color) {
+    const pct = total === 0 ? 0 : Math.round((parte / total) * 100);
+    return `
+        <div style="display:flex;align-items:center;gap:10px;margin:4px 0;">
+            <div style="flex:1;background:#f1f5f9;border-radius:99px;height:8px;overflow:hidden;">
+                <div style="width:${pct}%;height:100%;background:${color};border-radius:99px;transition:width 0.8s ease;"></div>
+            </div>
+            <span style="font-size:12px;font-weight:700;color:${color};min-width:36px;text-align:right;">${pct}%</span>
+        </div>`;
+}
+
+// ── Generadores de informe por intención ──────────────────────────────
+
+function generarResumenGeneral(datos) {
+    const { rooms, buildings, requests } = datos;
+    const stats = calcularEstadisticasHabitaciones(rooms, buildings);
+    const trabajadores = extraerTrabajadores(rooms, buildings);
+    const empresas = agruparPorEmpresa(trabajadores);
+    const solicPend = requests.filter(r => r.status === 'pending' || r.status === 'accepted').length;
+    const solicTotal = requests.length;
+
+    let edificiosHTML = '';
+    const edSorted = Object.entries(stats.porEdificio).sort((a, b) => a[0].localeCompare(b[0]));
+    edSorted.forEach(([nombre, ed]) => {
+        const pctOc = ed.total === 0 ? 0 : Math.round((ed.ocupadas / ed.total) * 100);
+        edificiosHTML += `
+        <tr>
+            <td style="font-weight:600;padding:8px 12px;">${nombre}</td>
+            <td style="text-align:center;padding:8px 12px;">${ed.total}</td>
+            <td style="text-align:center;padding:8px 12px;color:#16a34a;font-weight:700;">${ed.libres}</td>
+            <td style="text-align:center;padding:8px 12px;color:#c0392b;font-weight:700;">${ed.ocupadas}</td>
+            <td style="text-align:center;padding:8px 12px;">${ed.camas}</td>
+            <td style="text-align:center;padding:8px 12px;">
+                <span style="background:${pctOc > 80 ? '#fee2e2' : pctOc > 50 ? '#fef3c7' : '#dcfce7'};color:${pctOc > 80 ? '#c0392b' : pctOc > 50 ? '#b45309' : '#16a34a'};padding:2px 10px;border-radius:99px;font-size:12px;font-weight:700;">${pctOc}%</span>
+            </td>
+        </tr>`;
+    });
+
+    let empresasHTML = '';
+    empresas.slice(0, 10).forEach(([emp, count]) => {
+        empresasHTML += `
+        <div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid #f1f5f9;">
+            <div style="width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,#c0392b,#e74c3c);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:14px;">${emp.charAt(0).toUpperCase()}</div>
+            <div style="flex:1;">
+                <div style="font-weight:700;font-size:14px;">${emp}</div>
+                ${barraProgreso(count, trabajadores.length, '#c0392b')}
+            </div>
+            <div style="font-weight:800;font-size:18px;color:#c0392b;">${count}</div>
+        </div>`;
+    });
+
+    return `
+    <div class="informe-section">
+        <div class="kpi-grid">
+            <div class="kpi-card kpi-red">
+                <div class="kpi-icon">🏠</div>
+                <div class="kpi-value">${stats.total}</div>
+                <div class="kpi-label">Habitaciones Total</div>
+            </div>
+            <div class="kpi-card kpi-green">
+                <div class="kpi-icon">✅</div>
+                <div class="kpi-value">${stats.libres}</div>
+                <div class="kpi-label">Disponibles</div>
+            </div>
+            <div class="kpi-card kpi-orange">
+                <div class="kpi-icon">👥</div>
+                <div class="kpi-value">${stats.ocupadas}</div>
+                <div class="kpi-label">Ocupadas</div>
+            </div>
+            <div class="kpi-card kpi-blue">
+                <div class="kpi-icon">🛏️</div>
+                <div class="kpi-value">${stats.camasOcupadas}<span style="font-size:14px;opacity:0.6;">/${stats.totalCamas}</span></div>
+                <div class="kpi-label">Camas Ocupadas</div>
+            </div>
+            <div class="kpi-card kpi-purple">
+                <div class="kpi-icon">👷</div>
+                <div class="kpi-value">${trabajadores.length}</div>
+                <div class="kpi-label">Trabajadores en Camp.</div>
+            </div>
+            <div class="kpi-card kpi-yellow">
+                <div class="kpi-icon">📩</div>
+                <div class="kpi-value">${solicPend}<span style="font-size:14px;opacity:0.6;">/${solicTotal}</span></div>
+                <div class="kpi-label">Solicitudes Pendientes</div>
+            </div>
+        </div>
+
+        <h3 class="section-title">📊 Estado por Edificio</h3>
+        <div class="table-wrap">
+            <table class="informe-table">
+                <thead><tr><th>Edificio</th><th>Total Hab.</th><th>Libres</th><th>Ocupadas</th><th>Camas</th><th>Ocupación</th></tr></thead>
+                <tbody>${edificiosHTML}</tbody>
+            </table>
+        </div>
+
+        ${empresas.length > 0 ? `
+        <h3 class="section-title">🏢 Trabajadores por Empresa</h3>
+        <div class="empresas-list">${empresasHTML}</div>` : ''}
+    </div>`;
+}
+
+function generarHabitacionesLibres(datos, edificioFiltro) {
+    const { rooms, buildings } = datos;
+    const buildingMap = {};
+    buildings.forEach(b => buildingMap[b.id] = { name: b.name || b.code, code: b.code });
+
+    let habitaciones = rooms.filter(r => r.status === 'free');
+    if (edificioFiltro) {
+        habitaciones = habitaciones.filter(r => {
+            const b = buildingMap[r.buildingId];
+            return b && (normalizar(b.code).includes(normalizar(edificioFiltro)) || normalizar(b.name).includes(normalizar(edificioFiltro)));
+        });
+    }
+
+    const porEdificio = {};
+    habitaciones.forEach(r => {
+        const b = buildingMap[r.buildingId];
+        const bnom = b?.name || `Ed.${r.buildingId}`;
+        if (!porEdificio[bnom]) porEdificio[bnom] = [];
+        porEdificio[bnom].push(r);
+    });
+
+    let html = `
+    <div class="informe-section">
+        <div class="kpi-grid">
+            <div class="kpi-card kpi-green">
+                <div class="kpi-icon">🟢</div>
+                <div class="kpi-value">${habitaciones.length}</div>
+                <div class="kpi-label">Habitaciones Libres${edificioFiltro ? ` — ${edificioFiltro}` : ''}</div>
+            </div>
+            <div class="kpi-card kpi-blue">
+                <div class="kpi-icon">🛏️</div>
+                <div class="kpi-value">${habitaciones.reduce((s, r) => s + (r.bedCount || 2), 0)}</div>
+                <div class="kpi-label">Camas Disponibles</div>
+            </div>
+        </div>`;
+
+    Object.entries(porEdificio).sort((a, b) => a[0].localeCompare(b[0])).forEach(([nombre, habs]) => {
+        html += `<h3 class="section-title">🏢 ${nombre} <span style="background:#dcfce7;color:#16a34a;padding:2px 10px;border-radius:99px;font-size:13px;margin-left:8px;">${habs.length} libres</span></h3>
+        <div class="chips-grid">`;
+        habs.sort((a, b) => String(a.number).localeCompare(String(b.number), undefined, { numeric: true }))
+            .forEach(r => {
+                html += `<div class="room-chip free">Hab. ${r.number} <span>${r.bedCount || 2} camas</span></div>`;
+            });
+        html += `</div>`;
+    });
+
+    html += `</div>`;
+    return html;
+}
+
+function generarHabitacionesOcupadas(datos, edificioFiltro) {
+    const { rooms, buildings } = datos;
+    const buildingMap = {};
+    buildings.forEach(b => buildingMap[b.id] = { name: b.name || b.code, code: b.code });
+
+    let habitaciones = rooms.filter(r => r.status === 'occupied');
+    if (edificioFiltro) {
+        habitaciones = habitaciones.filter(r => {
+            const b = buildingMap[r.buildingId];
+            return b && (normalizar(b.code).includes(normalizar(edificioFiltro)) || normalizar(b.name).includes(normalizar(edificioFiltro)));
+        });
+    }
+
+    let rows = '';
+    habitaciones.sort((a, b) => {
+        const bna = buildingMap[a.buildingId]?.name || '';
+        const bnb = buildingMap[b.buildingId]?.name || '';
+        return bna.localeCompare(bnb) || String(a.number).localeCompare(String(b.number), undefined, { numeric: true });
+    }).forEach(r => {
+        const bnom = buildingMap[r.buildingId]?.name || `Ed.${r.buildingId}`;
+        const ocupantes = ['day', 'night', 'extra']
+            .filter(k => r.beds?.[k]?.occupant)
+            .map(k => `<div style="font-size:12px;"><b>${r.beds[k].occupant}</b> · ${r.beds[k].company || '—'} · <span style="color:#64748b;">${k === 'day' ? 'Día' : k === 'night' ? 'Noche' : 'Extra'}</span></div>`)
+            .join('');
+        rows += `
+        <tr>
+            <td style="padding:10px 12px;font-weight:700;">${bnom}</td>
+            <td style="padding:10px 12px;font-weight:600;">Hab. ${r.number}</td>
+            <td style="padding:10px 12px;">${ocupantes}</td>
+            <td style="padding:10px 12px;text-align:center;">${r.bedCount || 2}</td>
+            <td style="padding:10px 12px;text-align:center;">${['day','night','extra'].filter(k => r.beds?.[k]?.occupant).length}</td>
+        </tr>`;
+    });
+
+    return `
+    <div class="informe-section">
+        <div class="kpi-grid">
+            <div class="kpi-card kpi-orange">
+                <div class="kpi-icon">🔴</div>
+                <div class="kpi-value">${habitaciones.length}</div>
+                <div class="kpi-label">Habitaciones Ocupadas${edificioFiltro ? ` — ${edificioFiltro}` : ''}</div>
+            </div>
+        </div>
+        <h3 class="section-title">🏠 Detalle de Habitaciones Ocupadas</h3>
+        <div class="table-wrap">
+            <table class="informe-table">
+                <thead><tr><th>Edificio</th><th>Habitación</th><th>Ocupantes</th><th>Cap.</th><th>Ocup.</th></tr></thead>
+                <tbody>${rows || '<tr><td colspan="5" style="text-align:center;padding:20px;color:#94a3b8;">Sin habitaciones ocupadas</td></tr>'}</tbody>
+            </table>
+        </div>
+    </div>`;
+}
+
+function generarTrabajadoresPorEmpresa(datos, empresaFiltro) {
+    const { rooms, buildings } = datos;
+    let trabajadores = extraerTrabajadores(rooms, buildings);
+
+    let titulo = 'Todos los Trabajadores en Campamento';
+    if (empresaFiltro) {
+        trabajadores = trabajadores.filter(t => normalizar(t.empresa).includes(normalizar(empresaFiltro)));
+        titulo = `Trabajadores de "${empresaFiltro.charAt(0).toUpperCase() + empresaFiltro.slice(1)}"`;
+    }
+
+    const mujeres = trabajadores.filter(t => t.genero === 'F').length;
+    const hombres = trabajadores.filter(t => t.genero === 'M').length;
+    const empresas = agruparPorEmpresa(trabajadores);
+
+    let rows = '';
+    trabajadores.slice(0, 200).forEach((t, i) => {
+        rows += `
+        <tr style="${i % 2 === 0 ? 'background:#fafafa;' : ''}">
+            <td style="padding:8px 12px;font-weight:600;">${t.nombre}</td>
+            <td style="padding:8px 12px;">${t.empresa}</td>
+            <td style="padding:8px 12px;">${t.habitacion}</td>
+            <td style="padding:8px 12px;text-align:center;">
+                <span style="background:${t.genero === 'F' ? '#fce7f3' : '#dbeafe'};color:${t.genero === 'F' ? '#be185d' : '#1d4ed8'};padding:2px 8px;border-radius:99px;font-size:11px;font-weight:700;">${t.genero === 'F' ? '♀ Mujer' : '♂ Hombre'}</span>
+            </td>
+            <td style="padding:8px 12px;">${t.turno}</td>
+            <td style="padding:8px 12px;color:#64748b;font-size:12px;">${t.salida !== '—' ? '📅 ' + t.salida : '—'}</td>
+        </tr>`;
+    });
+
+    let empresasHTML = '';
+    empresas.forEach(([emp, count]) => {
+        empresasHTML += `
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #f1f5f9;">
+            <span style="font-weight:600;">${emp}</span>
+            <span style="background:#fee2e2;color:#c0392b;padding:2px 10px;border-radius:99px;font-size:12px;font-weight:700;">${count} personas</span>
+        </div>`;
+    });
+
+    return `
+    <div class="informe-section">
+        <div class="kpi-grid">
+            <div class="kpi-card kpi-red">
+                <div class="kpi-icon">👷</div>
+                <div class="kpi-value">${trabajadores.length}</div>
+                <div class="kpi-label">${titulo}</div>
+            </div>
+            <div class="kpi-card kpi-blue">
+                <div class="kpi-icon">♂</div>
+                <div class="kpi-value">${hombres}</div>
+                <div class="kpi-label">Hombres ${porcentaje(hombres, trabajadores.length)}</div>
+            </div>
+            <div class="kpi-card kpi-purple">
+                <div class="kpi-icon">♀</div>
+                <div class="kpi-value">${mujeres}</div>
+                <div class="kpi-label">Mujeres ${porcentaje(mujeres, trabajadores.length)}</div>
+            </div>
+        </div>
+        ${!empresaFiltro && empresas.length > 0 ? `
+        <h3 class="section-title">🏢 Por Empresa</h3>
+        <div style="background:#fff;border-radius:16px;padding:16px;border:1px solid #f1f5f9;margin-bottom:20px;">${empresasHTML}</div>` : ''}
+        <h3 class="section-title">📋 Lista de Trabajadores ${trabajadores.length > 200 ? '(primeros 200)' : ''}</h3>
+        <div class="table-wrap">
+            <table class="informe-table">
+                <thead><tr><th>Nombre</th><th>Empresa</th><th>Habitación</th><th>Género</th><th>Turno</th><th>Salida</th></tr></thead>
+                <tbody>${rows || '<tr><td colspan="6" style="text-align:center;padding:20px;color:#94a3b8;">Sin trabajadores encontrados</td></tr>'}</tbody>
+            </table>
+        </div>
+    </div>`;
+}
+
+function generarSolicitudes(datos) {
+    const { requests } = datos;
+
+    const ESTADO_LABEL = {
+        pending: { label: 'Pendiente', color: '#b45309', bg: '#fef3c7' },
+        accepted: { label: 'Aceptada', color: '#1d4ed8', bg: '#dbeafe' },
+        assigned: { label: 'Asignada', color: '#16a34a', bg: '#dcfce7' },
+        rejected: { label: 'Rechazada', color: '#be123c', bg: '#ffe4e6' },
+        completed: { label: 'Completada', color: '#7c3aed', bg: '#ede9fe' },
+    };
+
+    const countByStatus = {};
+    requests.forEach(r => {
+        countByStatus[r.status] = (countByStatus[r.status] || 0) + 1;
+    });
+
+    let rows = '';
+    [...requests].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')).forEach(r => {
+        const est = ESTADO_LABEL[r.status] || { label: r.status, color: '#64748b', bg: '#f1f5f9' };
+        const totalW = r.workers?.length || 0;
+        const asignados = r.workers?.filter(w => w.assignedRoomStr)?.length || 0;
+        rows += `
+        <tr>
+            <td style="padding:10px 12px;font-weight:700;">${r.company || '—'}</td>
+            <td style="padding:10px 12px;">${r.createdAt ? r.createdAt.slice(0, 10) : '—'}</td>
+            <td style="padding:10px 12px;text-align:center;">${totalW}</td>
+            <td style="padding:10px 12px;text-align:center;">${asignados}/${totalW}</td>
+            <td style="padding:10px 12px;">
+                <span style="background:${est.bg};color:${est.color};padding:3px 10px;border-radius:99px;font-size:12px;font-weight:700;">${est.label}</span>
+            </td>
+        </tr>`;
+    });
+
+    return `
+    <div class="informe-section">
+        <div class="kpi-grid">
+            <div class="kpi-card kpi-blue"><div class="kpi-icon">📩</div><div class="kpi-value">${requests.length}</div><div class="kpi-label">Total Solicitudes</div></div>
+            <div class="kpi-card kpi-yellow"><div class="kpi-icon">⏳</div><div class="kpi-value">${countByStatus['pending'] || 0}</div><div class="kpi-label">Pendientes</div></div>
+            <div class="kpi-card kpi-green"><div class="kpi-icon">✅</div><div class="kpi-value">${(countByStatus['assigned'] || 0) + (countByStatus['completed'] || 0)}</div><div class="kpi-label">Asignadas/Completadas</div></div>
+            <div class="kpi-card kpi-red"><div class="kpi-icon">❌</div><div class="kpi-value">${countByStatus['rejected'] || 0}</div><div class="kpi-label">Rechazadas</div></div>
+        </div>
+        <h3 class="section-title">📋 Listado de Solicitudes</h3>
+        <div class="table-wrap">
+            <table class="informe-table">
+                <thead><tr><th>Empresa</th><th>Fecha</th><th>Trabajadores</th><th>Asignados</th><th>Estado</th></tr></thead>
+                <tbody>${rows || '<tr><td colspan="5" style="text-align:center;padding:20px;color:#94a3b8;">Sin solicitudes registradas</td></tr>'}</tbody>
+            </table>
+        </div>
+    </div>`;
+}
+
+function generarEdificioDetalle(datos, edificioFiltro) {
+    const { rooms, buildings } = datos;
+    const building = buildings.find(b => {
+        const bCode = normalizar(b.code);
+        const bName = normalizar(b.name);
+        const filtro = normalizar(edificioFiltro);
+        return bCode.includes(filtro) || bName.includes(filtro);
+    });
+
+    if (!building) {
+        return `<div class="informe-section"><p style="color:#64748b;text-align:center;padding:40px;">❌ No se encontró el edificio "<b>${edificioFiltro}</b>". Intenta con "Pabellón 3", "P-3" o "Edificio 220".</p></div>`;
+    }
+
+    const habsEdif = rooms.filter(r => r.buildingId === building.id);
+    const stats = calcularEstadisticasHabitaciones(habsEdif, buildings);
+    const trabajadores = extraerTrabajadores(habsEdif, buildings);
+
+    let pisos = {};
+    habsEdif.forEach(r => {
+        const f = r.floor || 1;
+        if (!pisos[f]) pisos[f] = [];
+        pisos[f].push(r);
+    });
+
+    let pisosHTML = '';
+    Object.keys(pisos).sort((a, b) => a - b).forEach(piso => {
+        pisosHTML += `<h4 style="margin:16px 0 8px;font-weight:700;color:#64748b;font-size:13px;">PISO ${piso}</h4><div class="chips-grid">`;
+        pisos[piso].sort((a, b) => String(a.number).localeCompare(String(b.number), undefined, { numeric: true })).forEach(r => {
+            const cls = r.status === 'free' ? 'free' : r.status === 'blocked' ? 'blocked' : 'occupied';
+            const occ = ['day','night','extra'].filter(k => r.beds?.[k]?.occupant).length;
+            pisosHTML += `<div class="room-chip ${cls}" title="${r.status}">Hab. ${r.number}<span>${occ}/${r.bedCount||2}</span></div>`;
+        });
+        pisosHTML += `</div>`;
+    });
+
+    return `
+    <div class="informe-section">
+        <h3 style="font-size:20px;font-weight:800;margin-bottom:16px;">🏢 ${building.name}</h3>
+        <div class="kpi-grid">
+            <div class="kpi-card kpi-red"><div class="kpi-icon">🏠</div><div class="kpi-value">${habsEdif.length}</div><div class="kpi-label">Habitaciones</div></div>
+            <div class="kpi-card kpi-green"><div class="kpi-icon">✅</div><div class="kpi-value">${stats.libres}</div><div class="kpi-label">Libres</div></div>
+            <div class="kpi-card kpi-orange"><div class="kpi-icon">🔴</div><div class="kpi-value">${stats.ocupadas}</div><div class="kpi-label">Ocupadas</div></div>
+            <div class="kpi-card kpi-blue"><div class="kpi-icon">👷</div><div class="kpi-value">${trabajadores.length}</div><div class="kpi-label">Trabajadores</div></div>
+        </div>
+        <h3 class="section-title">🗺️ Mapa de Habitaciones</h3>
+        ${pisosHTML}
+        ${trabajadores.length > 0 ? `
+        <h3 class="section-title" style="margin-top:20px;">👥 Trabajadores en este edificio</h3>
+        <div class="table-wrap">
+            <table class="informe-table">
+                <thead><tr><th>Nombre</th><th>Empresa</th><th>Habitación</th><th>Género</th><th>Turno</th></tr></thead>
+                <tbody>${trabajadores.map(t => `
+                <tr>
+                    <td style="padding:8px 12px;font-weight:600;">${t.nombre}</td>
+                    <td style="padding:8px 12px;">${t.empresa}</td>
+                    <td style="padding:8px 12px;">${t.habitacion}</td>
+                    <td style="padding:8px 12px;text-align:center;"><span style="background:${t.genero==='F'?'#fce7f3':'#dbeafe'};color:${t.genero==='F'?'#be185d':'#1d4ed8'};padding:2px 8px;border-radius:99px;font-size:11px;font-weight:700;">${t.genero==='F'?'♀':'♂'}</span></td>
+                    <td style="padding:8px 12px;">${t.turno}</td>
+                </tr>`).join('')}</tbody>
+            </table>
+        </div>` : ''}
+    </div>`;
+}
+
+function generarGeneroBreakdown(datos) {
+    const { rooms, buildings } = datos;
+    const trabajadores = extraerTrabajadores(rooms, buildings);
+    const mujeres = trabajadores.filter(t => t.genero === 'F');
+    const hombres = trabajadores.filter(t => t.genero === 'M');
+    const buildingMap = {};
+    buildings.forEach(b => buildingMap[b.id] = b.name || b.code);
+    const stats = calcularEstadisticasHabitaciones(rooms, buildings);
+
+    let edGenderHTML = '';
+    const edSorted = Object.entries(stats.porEdificio).sort((a, b) => a[0].localeCompare(b[0]));
+    edSorted.forEach(([nom]) => {
+        const edRooms = rooms.filter(r => (buildingMap[r.buildingId] || '') === nom);
+        const edTrab = extraerTrabajadores(edRooms, buildings);
+        const edF = edTrab.filter(t => t.genero === 'F').length;
+        const edM = edTrab.filter(t => t.genero === 'M').length;
+        if (edTrab.length > 0) {
+            edGenderHTML += `
+            <tr>
+                <td style="padding:8px 12px;font-weight:700;">${nom}</td>
+                <td style="padding:8px 12px;text-align:center;color:#1d4ed8;font-weight:700;">${edM}</td>
+                <td style="padding:8px 12px;text-align:center;color:#be185d;font-weight:700;">${edF}</td>
+                <td style="padding:8px 12px;text-align:center;font-weight:600;">${edTrab.length}</td>
+            </tr>`;
+        }
+    });
+
+    return `
+    <div class="informe-section">
+        <div class="kpi-grid">
+            <div class="kpi-card kpi-red"><div class="kpi-icon">👷</div><div class="kpi-value">${trabajadores.length}</div><div class="kpi-label">Total Trabajadores</div></div>
+            <div class="kpi-card kpi-blue"><div class="kpi-icon">♂</div><div class="kpi-value">${hombres.length}</div><div class="kpi-label">Hombres (${porcentaje(hombres.length, trabajadores.length)})</div></div>
+            <div class="kpi-card kpi-purple"><div class="kpi-icon">♀</div><div class="kpi-value">${mujeres.length}</div><div class="kpi-label">Mujeres (${porcentaje(mujeres.length, trabajadores.length)})</div></div>
+        </div>
+        <h3 class="section-title">📊 Desglose por Edificio y Género</h3>
+        <div class="table-wrap">
+            <table class="informe-table">
+                <thead><tr><th>Edificio</th><th>♂ Hombres</th><th>♀ Mujeres</th><th>Total</th></tr></thead>
+                <tbody>${edGenderHTML}</tbody>
+            </table>
+        </div>
+    </div>`;
+}
+
+function generarCapacidadCamas(datos) {
+    const { rooms, buildings } = datos;
+    const buildingMap = {};
+    buildings.forEach(b => buildingMap[b.id] = b.name || b.code);
+
+    const stats = calcularEstadisticasHabitaciones(rooms, buildings);
+
+    let edHTML = '';
+    Object.entries(stats.porEdificio).sort((a, b) => a[0].localeCompare(b[0])).forEach(([nom, ed]) => {
+        edHTML += `
+        <tr>
+            <td style="padding:8px 12px;font-weight:700;">${nom}</td>
+            <td style="padding:8px 12px;text-align:center;">${ed.camas}</td>
+            <td style="padding:8px 12px;text-align:center;color:#c0392b;font-weight:700;">${ed.camasOcupadas}</td>
+            <td style="padding:8px 12px;text-align:center;color:#16a34a;font-weight:700;">${ed.camas - ed.camasOcupadas}</td>
+            <td style="padding:8px 12px;">
+                ${barraProgreso(ed.camasOcupadas, ed.camas, '#c0392b')}
+            </td>
+        </tr>`;
+    });
+
+    return `
+    <div class="informe-section">
+        <div class="kpi-grid">
+            <div class="kpi-card kpi-red"><div class="kpi-icon">🛏️</div><div class="kpi-value">${stats.totalCamas}</div><div class="kpi-label">Total Camas</div></div>
+            <div class="kpi-card kpi-orange"><div class="kpi-icon">🔴</div><div class="kpi-value">${stats.camasOcupadas}</div><div class="kpi-label">Camas Ocupadas</div></div>
+            <div class="kpi-card kpi-green"><div class="kpi-icon">✅</div><div class="kpi-value">${stats.totalCamas - stats.camasOcupadas}</div><div class="kpi-label">Camas Disponibles</div></div>
+        </div>
+        <h3 class="section-title">🛏️ Capacidad por Edificio</h3>
+        <div class="table-wrap">
+            <table class="informe-table">
+                <thead><tr><th>Edificio</th><th>Total Camas</th><th>Ocupadas</th><th>Libres</th><th>Ocupación</th></tr></thead>
+                <tbody>${edHTML}</tbody>
+            </table>
+        </div>
+    </div>`;
+}
+
+// ── Camas Perdidas ─────────────────────────────────────────────────────
+// Definición: habitación con capacidad ≥ 2 camas que tiene exactamente
+// 1 ocupante. La cama vacante es un "espacio perdido" porque podría
+// alojar a otra persona pero no puede recibir un nuevo residente de
+// género/empresa diferente sin romper las reglas.
+function generarCamasPerdidas(datos, edificioFiltro) {
+    const { rooms, buildings } = datos;
+    const buildingMap = {};
+    buildings.forEach(b => buildingMap[b.id] = { name: b.name || b.code, code: b.code });
+
+    // Filtrar: habitaciones con 2+ camas y exactamente 1 ocupante
+    let candidatas = rooms.filter(r => {
+        if (r.status !== 'occupied') return false;
+        const cap = r.bedCount || 2;
+        if (cap < 2) return false; // solo cuenta si tiene capacidad para 2+
+        // Contar cuántas camas tienen ocupante
+        const ocupadas = ['day', 'night', 'extra'].filter(k => r.beds?.[k]?.occupant).length;
+        return ocupadas === 1; // exactamente 1 de 2+ camas ocupada
+    });
+
+    // Filtrar por edificio si se especificó
+    if (edificioFiltro) {
+        candidatas = candidatas.filter(r => {
+            const b = buildingMap[r.buildingId];
+            return b && (normalizar(b.code).includes(normalizar(edificioFiltro)) ||
+                         normalizar(b.name).includes(normalizar(edificioFiltro)));
+        });
+    }
+
+    // Calcular camas perdidas totales
+    const camasPerdidas = candidatas.reduce((sum, r) => {
+        const cap = r.bedCount || 2;
+        const ocupadas = ['day', 'night', 'extra'].filter(k => r.beds?.[k]?.occupant).length;
+        return sum + (cap - ocupadas); // camas vacías en habitaciones con 1 sola persona
+    }, 0);
+
+    // Agrupar por edificio para el resumen
+    const porEdificio = {};
+    candidatas.forEach(r => {
+        const b = buildingMap[r.buildingId];
+        const bnom = b?.name || `Ed.${r.buildingId}`;
+        if (!porEdificio[bnom]) porEdificio[bnom] = { count: 0, perdidas: 0 };
+        porEdificio[bnom].count++;
+        const cap = r.bedCount || 2;
+        const ocup = ['day', 'night', 'extra'].filter(k => r.beds?.[k]?.occupant).length;
+        porEdificio[bnom].perdidas += (cap - ocup);
+    });
+
+    // Construir tabla detallada
+    let rows = '';
+    candidatas
+        .sort((a, b) => {
+            const bna = buildingMap[a.buildingId]?.name || '';
+            const bnb = buildingMap[b.buildingId]?.name || '';
+            return bna.localeCompare(bnb) ||
+                   String(a.number).localeCompare(String(b.number), undefined, { numeric: true });
+        })
+        .forEach(r => {
+            const bnom = buildingMap[r.buildingId]?.name || `Ed.${r.buildingId}`;
+            // Encontrar al ocupante solitario
+            const camaOcupada = ['day', 'night', 'extra'].find(k => r.beds?.[k]?.occupant);
+            const bed = r.beds?.[camaOcupada];
+            const camasLibres = (r.bedCount || 2) - 1;
+            rows += `
+            <tr>
+                <td style="padding:10px 12px;font-weight:700;">${bnom}</td>
+                <td style="padding:10px 12px;font-weight:600;">Hab. ${r.number}</td>
+                <td style="padding:10px 12px;">
+                    <div style="font-weight:600;font-size:13px;">${bed?.occupant || '—'}</div>
+                    <div style="font-size:11px;color:#64748b;">${bed?.company || '—'} · ${bed?.shift || '—'}</div>
+                </td>
+                <td style="padding:10px 12px;text-align:center;">
+                    <span style="background:${bed?.gender === 'F' ? '#fce7f3' : '#dbeafe'};color:${bed?.gender === 'F' ? '#be185d' : '#1d4ed8'};padding:2px 8px;border-radius:99px;font-size:11px;font-weight:700;">${bed?.gender === 'F' ? '♀' : '♂'}</span>
+                </td>
+                <td style="padding:10px 12px;text-align:center;">
+                    <span style="background:#fef3c7;color:#b45309;padding:3px 10px;border-radius:99px;font-size:12px;font-weight:700;">⚠️ ${camasLibres} cama${camasLibres > 1 ? 's' : ''} libre${camasLibres > 1 ? 's' : ''}</span>
+                </td>
+                <td style="padding:10px 12px;font-size:12px;color:#64748b;">${bed?.departureDate ? '📅 ' + bed.departureDate : '—'}</td>
+            </tr>`;
+        });
+
+    // Resumen por edificio
+    let edHTML = '';
+    Object.entries(porEdificio).sort((a, b) => a[0].localeCompare(b[0])).forEach(([nom, ed]) => {
+        edHTML += `
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #f1f5f9;">
+            <span style="font-weight:700;">${nom}</span>
+            <div style="display:flex;gap:8px;">
+                <span style="background:#fee2e2;color:#c0392b;padding:2px 10px;border-radius:99px;font-size:12px;font-weight:700;">${ed.count} hab.</span>
+                <span style="background:#fef3c7;color:#b45309;padding:2px 10px;border-radius:99px;font-size:12px;font-weight:700;">⚠️ ${ed.perdidas} cama${ed.perdidas > 1 ? 's' : ''} perdida${ed.perdidas > 1 ? 's' : ''}</span>
+            </div>
+        </div>`;
+    });
+
+    const pctPerdida = rooms.length > 0
+        ? Math.round((camasPerdidas / rooms.reduce((s, r) => s + (r.bedCount || 2), 0)) * 100)
+        : 0;
+
+    return `
+    <div class="informe-section">
+        <div style="background:linear-gradient(135deg,#fffbeb,#fef3c7);border:1px solid #fde68a;border-radius:16px;padding:16px;margin-bottom:20px;">
+            <div style="font-size:13px;font-weight:700;color:#b45309;margin-bottom:6px;">💡 ¿Qué es una cama perdida?</div>
+            <div style="font-size:13px;color:#78350f;line-height:1.6;">Una <strong>cama perdida</strong> es una habitación con capacidad para <strong>2 o más personas</strong> que actualmente tiene <strong>solo 1 ocupante</strong>. La cama vacante no puede recibir a alguien de distinto género o empresa, por lo que ese espacio queda inutilizable.</div>
+        </div>
+
+        <div class="kpi-grid">
+            <div class="kpi-card kpi-yellow">
+                <div class="kpi-icon">⚠️</div>
+                <div class="kpi-value">${candidatas.length}</div>
+                <div class="kpi-label">Habitaciones con cama perdida${edificioFiltro ? ` — ${edificioFiltro}` : ''}</div>
+            </div>
+            <div class="kpi-card kpi-orange">
+                <div class="kpi-icon">🛏️</div>
+                <div class="kpi-value">${camasPerdidas}</div>
+                <div class="kpi-label">Camas perdidas totales</div>
+            </div>
+            <div class="kpi-card kpi-red">
+                <div class="kpi-icon">📉</div>
+                <div class="kpi-value">${pctPerdida}%</div>
+                <div class="kpi-label">Del total de camas sin uso relativo</div>
+            </div>
+            <div class="kpi-card kpi-green">
+                <div class="kpi-icon">💰</div>
+                <div class="kpi-value">${camasPerdidas}</div>
+                <div class="kpi-label">Cupos adicionales posibles</div>
+            </div>
+        </div>
+
+        ${Object.keys(porEdificio).length > 0 ? `
+        <h3 class="section-title">🏢 Resumen por Edificio</h3>
+        <div style="background:#fff;border-radius:16px;padding:16px;border:1px solid #f1f5f9;margin-bottom:20px;">${edHTML}</div>` : ''}
+
+        <h3 class="section-title">📋 Detalle de Habitaciones con Cama Perdida</h3>
+        <div class="table-wrap">
+            <table class="informe-table">
+                <thead>
+                    <tr>
+                        <th>Edificio</th>
+                        <th>Habitación</th>
+                        <th>Ocupante solitario</th>
+                        <th>Género</th>
+                        <th>Camas perdidas</th>
+                        <th>Salida</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${rows || '<tr><td colspan="6" style="text-align:center;padding:20px;color:#94a3b8;">✅ No hay camas perdidas — todas las habitaciones están correctamente aprovechadas</td></tr>'}
+                </tbody>
+            </table>
+        </div>
+    </div>`;
+}
+// ── Habitación específica ────────────────────────────────────────────────────
+function generarHabitacionDetalle(datos, habNumero) {
+    const { rooms, buildings } = datos;
+    const buildingMap = {};
+    buildings.forEach(b => buildingMap[b.id] = b.name || b.code);
+
+    const room = rooms.find(r => String(r.number) === String(habNumero));
+    if (!room) {
+        return `<div class="informe-section"><p style="text-align:center;padding:40px;color:#94a3b8;">❌ No se encontró la habitación <strong>${habNumero}</strong> en el sistema.</p></div>`;
+    }
+
+    const edificio = buildingMap[room.buildingId] || `Edificio ${room.buildingId}`;
+    const cap = room.bedCount || 2;
+    const keys = ['day', 'night', 'extra'].slice(0, cap);
+    const turnoLabel = { day: 'Día ☀️', night: 'Noche 🌙', extra: 'Extra ⭐' };
+    const estadoColor = { free: '#16a34a', occupied: '#c0392b', blocked: '#64748b' };
+    const estadoLabel = { free: 'Disponible', occupied: 'Ocupada', blocked: 'Bloqueada' };
+
+    let bedsHTML = '';
+    keys.forEach(k => {
+        const bed = room.beds?.[k];
+        const ocupado = !!bed?.occupant;
+        bedsHTML += `
+        <div style="display:flex;align-items:center;gap:12px;padding:14px;border-radius:12px;
+                    background:${ocupado ? '#fff5f5' : '#f0fff4'};
+                    border:1.5px solid ${ocupado ? '#fecaca' : '#bbf7d0'};margin-bottom:8px">
+            <div style="font-size:24px">${k === 'day' ? '☀️' : k === 'night' ? '🌙' : '⭐'}</div>
+            <div style="flex:1">
+                <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;
+                            color:${ocupado ? '#c0392b' : '#16a34a'}">
+                    Cama ${turnoLabel[k]} — ${ocupado ? 'Ocupada' : 'Libre'}
+                </div>
+                ${ocupado ? `
+                <div style="font-size:14px;font-weight:800;color:#1a202c;margin-top:2px">${bed.occupant}</div>
+                <div style="font-size:12px;color:#64748b;margin-top:2px">
+                    🏢 ${bed.company || '—'} &nbsp;·&nbsp;
+                    🎯 ${bed.management || bed.gerencia || '—'} &nbsp;·&nbsp;
+                    ${bed.gender === 'F' ? '♀️ Mujer' : '♂️ Hombre'}
+                </div>
+                <div style="font-size:11px;color:#94a3b8;margin-top:2px">
+                    RUT: ${bed.rut || '—'} &nbsp;·&nbsp; 📅 Salida: ${bed.departureDate || '—'}
+                </div>` : `<div style="font-size:13px;color:#16a34a;font-weight:600;margin-top:2px">✅ Cama libre — disponible para asignar</div>`}
+            </div>
+        </div>`;
+    });
+
+    const ocupantes = keys.filter(k => room.beds?.[k]?.occupant).length;
+
+    return `
+    <div class="informe-section">
+        <div style="display:flex;align-items:center;gap:14px;margin-bottom:20px;padding:16px;
+                    background:linear-gradient(135deg,#fff5f5,#ffe4e6);border-radius:16px;
+                    border:1.5px solid #fecaca">
+            <div style="font-size:36px">🏠</div>
+            <div>
+                <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#94a3b8">${edificio}</div>
+                <div style="font-size:24px;font-weight:900;color:#c0392b">Habitación ${room.number}</div>
+                <div style="font-size:13px;margin-top:2px">
+                    <span style="background:${estadoColor[room.status]};color:#fff;padding:2px 10px;border-radius:99px;font-size:12px;font-weight:700">${estadoLabel[room.status] || room.status}</span>
+                    &nbsp; Piso ${room.floor || 1} · ${cap} camas · ${ocupantes} ocupadas
+                </div>
+            </div>
+        </div>
+        <h3 class="section-title">🛏️ Estado de las Camas</h3>
+        ${bedsHTML}
+    </div>`;
+}
+
+// ── Cupos por Gerencia disponibles ───────────────────────────────────────────
+function generarCuposGerencia(datos) {
+    const { rooms, quotas } = datos;
+
+    // Contar uso real de camas por company||gerencia
+    const usage = {};
+    rooms.forEach(r => {
+        ['day', 'night', 'extra'].forEach(bk => {
+            const bed = r.beds?.[bk];
+            if (!bed?.occupant) return;
+            const company  = (bed.company  || '').trim().toLowerCase();
+            const gerencia = (bed.management || bed.gerencia || '').trim().toLowerCase();
+            if (!gerencia) return;
+            const key = `${company}||${gerencia}`;
+            usage[key] = (usage[key] || 0) + 1;
+        });
+    });
+
+    // Recolectar gerencias conocidas (de cupos + de camas)
+    const gerenciasSet = new Set();
+    rooms.forEach(r => {
+        ['day', 'night', 'extra'].forEach(bk => {
+            const bed = r.beds?.[bk];
+            if (!bed?.occupant) return;
+            const c = (bed.company || '').trim();
+            const g = (bed.management || bed.gerencia || '').trim();
+            if (c && g) gerenciasSet.add(`${c}||${g}`);
+        });
+    });
+    quotas.forEach(q => { if (q.company && q.gerencia) gerenciasSet.add(`${q.company}||${q.gerencia}`); });
+
+    const quotaMap = {};
+    quotas.forEach(q => {
+        const key = `${(q.company||'').trim().toLowerCase()}||${(q.gerencia||'').trim().toLowerCase()}`;
+        quotaMap[key] = q;
+    });
+
+    if (gerenciasSet.size === 0) {
+        return `<div class="informe-section"><p style="text-align:center;padding:40px;color:#94a3b8;">ℹ️ No hay gerencias con camas asignadas ni cupos configurados.</p></div>`;
+    }
+
+    let rows = '';
+    [...gerenciasSet].sort().forEach(fullKey => {
+        const [company, gerencia] = fullKey.split('||');
+        const lookupKey = `${company.toLowerCase()}||${gerencia.toLowerCase()}`;
+        const quota = quotaMap[lookupKey];
+        const usado = usage[lookupKey] || 0;
+        const limite = quota?.limit ?? null;
+        const disponible = limite !== null ? Math.max(0, limite - usado) : '∞';
+        const pct = limite !== null ? Math.min(100, Math.round((usado / limite) * 100)) : 0;
+        const barColor = pct >= 100 ? '#e53e3e' : pct >= 80 ? '#dd6b20' : '#38a169';
+        const badgeBg  = pct >= 100 ? '#fff5f5' : pct >= 80 ? '#fffbeb' : '#f0fff4';
+        const badgeCol = pct >= 100 ? '#c0392b' : pct >= 80 ? '#92400e' : '#16a34a';
+        const statusTxt = limite === null ? 'Sin límite' : pct >= 100 ? '🔴 Agotado' : pct >= 80 ? '🟠 Casi lleno' : '🟢 Disponible';
+
+        rows += `
+        <tr>
+            <td style="padding:10px 12px;font-weight:700">${company}</td>
+            <td style="padding:10px 12px;font-weight:600">${gerencia}</td>
+            <td style="padding:10px 12px;text-align:center;font-weight:800;color:#c0392b">${usado}</td>
+            <td style="padding:10px 12px;text-align:center;font-weight:700;color:#64748b">${limite !== null ? limite : '∞'}</td>
+            <td style="padding:10px 12px;text-align:center;font-weight:800;color:${badgeCol}">${disponible}</td>
+            <td style="padding:10px 12px">
+                <div style="display:flex;align-items:center;gap:8px">
+                    <div style="flex:1;background:#e2e8f0;border-radius:99px;height:8px;overflow:hidden">
+                        <div style="height:100%;width:${limite !== null ? pct : 0}%;background:${barColor};border-radius:99px;transition:width 0.8s ease"></div>
+                    </div>
+                    <span style="font-size:11px;font-weight:700;background:${badgeBg};color:${badgeCol};padding:2px 8px;border-radius:99px;white-space:nowrap">${statusTxt}</span>
+                </div>
+            </td>
+        </tr>`;
+    });
+
+    const totalUsado = Object.values(usage).reduce((a, b) => a + b, 0);
+    const totalDisp  = rooms.reduce((s, r) => s + (r.bedCount || 2), 0) - totalUsado;
+
+    return `
+    <div class="informe-section">
+        <div class="kpi-grid">
+            <div class="kpi-card kpi-red"><div class="kpi-icon">🎯</div><div class="kpi-value">${gerenciasSet.size}</div><div class="kpi-label">Gerencias configuradas</div></div>
+            <div class="kpi-card kpi-orange"><div class="kpi-icon">🛏️</div><div class="kpi-value">${totalUsado}</div><div class="kpi-label">Camas usadas total</div></div>
+            <div class="kpi-card kpi-green"><div class="kpi-icon">✅</div><div class="kpi-value">${totalDisp}</div><div class="kpi-label">Camas libres en camp.</div></div>
+        </div>
+        <h3 class="section-title">🎯 Cupos por Gerencia</h3>
+        <div class="table-wrap">
+            <table class="informe-table">
+                <thead><tr><th>Empresa</th><th>Gerencia</th><th>Usadas</th><th>Límite</th><th>Disponibles</th><th>Ocupación</th></tr></thead>
+                <tbody>${rows}</tbody>
+            </table>
+        </div>
+    </div>`;
+}
+
+// ── Camas por turno Día / Noche ───────────────────────────────────────────────
+function generarCamasPorTurno(datos, edificioFiltro) {
+    const { rooms, buildings } = datos;
+    const buildingMap = {};
+    buildings.forEach(b => buildingMap[b.id] = { name: b.name || b.code, code: b.code });
+
+    let roomsFiltrados = rooms;
+    if (edificioFiltro) {
+        roomsFiltrados = rooms.filter(r => {
+            const b = buildingMap[r.buildingId];
+            return b && (normalizar(b.code).includes(normalizar(edificioFiltro)) ||
+                         normalizar(b.name).includes(normalizar(edificioFiltro)));
+        });
+    }
+
+    // Contar camas por turno a nivel global y por edificio
+    let totalDia = 0, usadaDia = 0, totalNoche = 0, usadaNoche = 0, totalExtra = 0, usadaExtra = 0;
+
+    const porEdificio = {};
+    roomsFiltrados.forEach(r => {
+        const cap = r.bedCount || 2;
+        const bnom = buildingMap[r.buildingId]?.name || `Ed.${r.buildingId}`;
+        if (!porEdificio[bnom]) porEdificio[bnom] = { dia: 0, dia_u: 0, noche: 0, noche_u: 0, extra: 0, extra_u: 0 };
+
+        // day
+        if (cap >= 1)  { totalDia++;   if (r.beds?.day?.occupant)   { usadaDia++;   porEdificio[bnom].dia_u++; } porEdificio[bnom].dia++; }
+        // night
+        if (cap >= 2)  { totalNoche++; if (r.beds?.night?.occupant) { usadaNoche++; porEdificio[bnom].noche_u++; } porEdificio[bnom].noche++; }
+        // extra
+        if (cap >= 3)  { totalExtra++; if (r.beds?.extra?.occupant) { usadaExtra++; porEdificio[bnom].extra_u++; } porEdificio[bnom].extra++; }
+    });
+
+    const libreDia   = totalDia   - usadaDia;
+    const libreNoche = totalNoche - usadaNoche;
+    const libreExtra = totalExtra - usadaExtra;
+    const pctDia   = totalDia   > 0 ? Math.round((usadaDia   / totalDia)   * 100) : 0;
+    const pctNoche = totalNoche > 0 ? Math.round((usadaNoche / totalNoche) * 100) : 0;
+    const pctExtra = totalExtra > 0 ? Math.round((usadaExtra / totalExtra) * 100) : 0;
+
+    let edHTML = '';
+    Object.entries(porEdificio).sort((a, b) => a[0].localeCompare(b[0])).forEach(([nom, ed]) => {
+        edHTML += `
+        <tr>
+            <td style="padding:10px 12px;font-weight:700">${nom}</td>
+            <td style="padding:10px 12px;text-align:center">
+                <span style="color:#b45309;font-weight:700">${ed.dia_u}</span>
+                <span style="color:#94a3b8">/${ed.dia}</span>
+                <span style="font-size:11px;color:#16a34a;margin-left:4px">(${ed.dia - ed.dia_u} libres)</span>
+            </td>
+            <td style="padding:10px 12px;text-align:center">
+                <span style="color:#1d4ed8;font-weight:700">${ed.noche_u}</span>
+                <span style="color:#94a3b8">/${ed.noche}</span>
+                <span style="font-size:11px;color:#16a34a;margin-left:4px">(${ed.noche - ed.noche_u} libres)</span>
+            </td>
+            ${ed.extra > 0 ? `<td style="padding:10px 12px;text-align:center">
+                <span style="color:#7c3aed;font-weight:700">${ed.extra_u}</span>
+                <span style="color:#94a3b8">/${ed.extra}</span>
+                <span style="font-size:11px;color:#16a34a;margin-left:4px">(${ed.extra - ed.extra_u} libres)</span>
+            </td>` : '<td style="padding:10px 12px;text-align:center;color:#94a3b8">—</td>'}
+        </tr>`;
+    });
+
+    return `
+    <div class="informe-section">
+        <div class="kpi-grid">
+            <div class="kpi-card kpi-yellow">
+                <div class="kpi-icon">☀️</div>
+                <div class="kpi-value">${libreDia}<span style="font-size:14px;opacity:.6">/${totalDia}</span></div>
+                <div class="kpi-label">Camas Día libres · ${pctDia}% ocupado</div>
+            </div>
+            <div class="kpi-card kpi-blue">
+                <div class="kpi-icon">🌙</div>
+                <div class="kpi-value">${libreNoche}<span style="font-size:14px;opacity:.6">/${totalNoche}</span></div>
+                <div class="kpi-label">Camas Noche libres · ${pctNoche}% ocupado</div>
+            </div>
+            ${totalExtra > 0 ? `<div class="kpi-card kpi-purple">
+                <div class="kpi-icon">⭐</div>
+                <div class="kpi-value">${libreExtra}<span style="font-size:14px;opacity:.6">/${totalExtra}</span></div>
+                <div class="kpi-label">Camas Extra libres · ${pctExtra}% ocupado</div>
+            </div>` : ''}
+        </div>
+        <h3 class="section-title">📊 Desglose por Edificio${edificioFiltro ? ` — ${edificioFiltro}` : ''}</h3>
+        <div class="table-wrap">
+            <table class="informe-table">
+                <thead><tr><th>Edificio</th><th>☀️ Camas Día</th><th>🌙 Camas Noche</th><th>⭐ Camas Extra</th></tr></thead>
+                <tbody>${edHTML}</tbody>
+            </table>
+        </div>
+    </div>`;
+}
+
+export async function procesarConsulta(pregunta) {
+    if (!pregunta || !pregunta.trim()) {
+        return `<p style="text-align:center;color:#94a3b8;padding:40px;">✏️ Escribe una pregunta para comenzar...</p>`;
+    }
+
+    const { id: intencion, edificioFiltro, empresaFiltro, habNumero } = detectarIntencion(pregunta);
+    const datos = await cargarDatos();
+
+    const fecha = new Date().toLocaleString('es-CL', { dateStyle: 'full', timeStyle: 'short' });
+    const headerHTML = `
+    <div class="informe-header">
+        <div class="informe-meta">
+            <span>📅 ${fecha}</span>
+            <span>🔍 "${pregunta}"</span>
+        </div>
+    </div>`;
+
+    let cuerpo = '';
+    switch (intencion) {
+        case 'RESUMEN_GENERAL':
+            cuerpo = generarResumenGeneral(datos);
+            break;
+        case 'HABITACIONES_LIBRES':
+            cuerpo = generarHabitacionesLibres(datos, edificioFiltro);
+            break;
+        case 'HABITACIONES_OCUPADAS':
+            cuerpo = generarHabitacionesOcupadas(datos, edificioFiltro);
+            break;
+        case 'TRABAJADORES_EMPRESA':
+            cuerpo = generarTrabajadoresPorEmpresa(datos, empresaFiltro);
+            break;
+        case 'SOLICITUDES':
+            cuerpo = generarSolicitudes(datos);
+            break;
+        case 'EDIFICIO_DETALLE':
+            cuerpo = generarEdificioDetalle(datos, edificioFiltro || pregunta);
+            break;
+        case 'GENERO_BREAKDOWN':
+            cuerpo = generarGeneroBreakdown(datos);
+            break;
+        case 'CAMAS_PERDIDAS':
+            cuerpo = generarCamasPerdidas(datos, edificioFiltro);
+            break;
+        case 'CAMAS_CAPACIDAD':
+            cuerpo = generarCapacidadCamas(datos);
+            break;
+        case 'CUPOS_GERENCIA':
+            cuerpo = generarCuposGerencia(datos);
+            break;
+        case 'HABITACION_DETALLE':
+            cuerpo = generarHabitacionDetalle(datos, habNumero);
+            break;
+        case 'TURNO_DIA_NOCHE':
+            cuerpo = generarCamasPorTurno(datos, edificioFiltro);
+            break;
+        case 'ALERTAS':
+            cuerpo = generarResumenGeneral(datos);
+            break;
+        default:
+            cuerpo = generarResumenGeneral(datos);
+    }
+
+    return headerHTML + cuerpo;
+}
+
+export { cargarDatos, extraerTrabajadores, calcularEstadisticasHabitaciones };

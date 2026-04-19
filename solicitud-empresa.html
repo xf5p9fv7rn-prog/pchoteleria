@@ -1,0 +1,792 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Portal de Solicitudes B2B — PC Hotelería</title>
+    <meta name="description" content="Portal oficial de reservas de alojamiento para empresas colaboradoras e industriales de PC Hotelería.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <!-- SheetJS para LEER archivos subidos -->
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+    <style>
+        /* ═══════════════════════════════════════════════════
+           PORTAL B2B — DISEÑO PREMIUM
+        ═══════════════════════════════════════════════════ */
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        :root {
+            --red:        #e53e3e;
+            --red-dark:   #c53030;
+            --red-deep:   #9b2c2c;
+            --red-glow:   rgba(229, 62, 62, 0.18);
+            --white:      #ffffff;
+            --glass-bg:   #ffffff;
+            --glass-border: #e8ecf0;
+            --input-bg:   #f8fafc;
+            --input-border: #d1d9e0;
+            --text-primary: #1a202c;
+            --text-secondary: #4a5568;
+            --text-muted: #a0aec0;
+            --radius: 16px;
+            --radius-sm: 10px;
+            --shadow-card: 0 8px 40px rgba(0,0,0,0.10);
+            --shadow-btn: 0 4px 20px rgba(229,62,62,0.4);
+        }
+
+        html { font-size: 16px; scroll-behavior: smooth; }
+
+        body {
+            font-family: 'Inter', system-ui, sans-serif;
+            min-height: 100vh;
+            background: #f0f4f8;
+            color: var(--text-primary);
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* ── Floating background shapes ─────────── */
+        .bg-shapes {
+            position: fixed; inset: 0;
+            overflow: hidden; pointer-events: none; z-index: 0;
+        }
+        .shape {
+            position: absolute; border-radius: 50%;
+            animation: floatShape 14s ease-in-out infinite;
+        }
+        .shape-1 {
+            width: 600px; height: 600px;
+            background: radial-gradient(circle, rgba(229,62,62,0.15), transparent);
+            top: -200px; right: -150px; animation-delay: 0s;
+        }
+        .shape-2 {
+            width: 450px; height: 450px;
+            background: radial-gradient(circle, rgba(155,44,44,0.12), transparent);
+            bottom: -150px; left: -100px; animation-delay: 5s;
+        }
+        .shape-3 {
+            width: 300px; height: 300px;
+            background: radial-gradient(circle, rgba(200,50,50,0.08), transparent);
+            top: 45%; left: 25%; animation-delay: 9s;
+        }
+        @keyframes floatShape {
+            0%, 100% { transform: translateY(0) rotate(0deg); }
+            50%       { transform: translateY(-28px) rotate(10deg); }
+        }
+
+        /* ── Page Layout ─────────────────────────── */
+        .page-wrapper {
+            position: relative; z-index: 1;
+            min-height: 100vh;
+            display: flex; flex-direction: column;
+            align-items: center;
+            padding: 40px 20px 60px;
+        }
+
+        /* ── Top brand bar ───────────────────────── */
+        .brand-bar {
+            display: flex; align-items: center; gap: 16px;
+            margin-bottom: 40px; width: 100%; max-width: 760px;
+        }
+        .brand-logo-wrap {
+            background: rgba(255,255,255,0.95);
+            border-radius: 14px;
+            padding: 10px 16px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+            flex-shrink: 0;
+        }
+        .brand-logo-wrap img { height: 44px; display: block; }
+        .brand-info h1 {
+            font-size: 1.7rem; font-weight: 900;
+            color: var(--white); line-height: 1.15;
+            letter-spacing: -0.02em;
+        }
+        .brand-info p {
+            font-size: 0.88rem; font-weight: 500;
+            color: var(--text-secondary); margin-top: 3px;
+        }
+
+        /* ── Main card ───────────────────────────── */
+        .main-card {
+            width: 100%; max-width: 760px;
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 24px;
+            padding: 40px;
+            box-shadow: var(--shadow-card);
+            animation: cardIn 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+        }
+        @keyframes cardIn {
+            from { opacity: 0; transform: translateY(24px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        /* ── Section divider ─────────────────────── */
+        .section-divider {
+            display: flex; align-items: center; gap: 14px;
+            margin: 32px 0 24px;
+        }
+        .section-divider::before,
+        .section-divider::after {
+            content: ''; flex: 1;
+            height: 1px;
+            background: linear-gradient(to right, transparent, #d1d9e0, transparent);
+        }
+        .section-label {
+            font-size: 0.72rem; font-weight: 700;
+            letter-spacing: 0.12em; text-transform: uppercase;
+            color: var(--text-muted);
+            white-space: nowrap;
+        }
+
+        /* ── Template download box ───────────────── */
+        .template-box {
+            background: linear-gradient(135deg, #fff5f5, #fef2f2);
+            border: 1px solid #fecaca;
+            border-radius: var(--radius);
+            padding: 24px;
+            text-align: center;
+            margin-bottom: 32px;
+        }
+        .template-box .t-title {
+            font-size: 0.95rem; font-weight: 700;
+            color: #c53030; margin-bottom: 6px;
+        }
+        .template-box .t-desc {
+            font-size: 0.8rem; color: var(--text-secondary);
+            line-height: 1.5; margin-bottom: 18px;
+        }
+        .template-box .t-desc strong { color: #e53e3e; }
+
+        /* ── Form grid ───────────────────────────── */
+        .form-grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+        @media (max-width: 560px) { .form-grid-2 { grid-template-columns: 1fr; } }
+
+        .form-group { display: flex; flex-direction: column; gap: 7px; }
+
+        .form-label {
+            font-size: 0.75rem; font-weight: 700;
+            letter-spacing: 0.06em; text-transform: uppercase;
+            color: var(--text-secondary);
+        }
+        .req { color: var(--red); }
+
+        .form-input {
+            width: 100%; padding: 13px 16px;
+            background: var(--input-bg);
+            border: 1.5px solid var(--input-border);
+            border-radius: var(--radius-sm);
+            font-family: 'Inter', sans-serif;
+            font-size: 0.93rem; font-weight: 500;
+            color: var(--text-primary);
+            outline: none;
+            transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
+        }
+        .form-input::placeholder { color: var(--text-muted); }
+        .form-input:focus {
+            border-color: rgba(229,62,62,0.6);
+            background: rgba(255,255,255,0.10);
+            box-shadow: 0 0 0 4px rgba(229,62,62,0.12);
+        }
+
+        /* ── Upload area ─────────────────────────── */
+        .upload-area {
+            border: 2px dashed #d1d9e0;
+            border-radius: var(--radius);
+            padding: 28px 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: border-color 0.2s, background 0.2s;
+            background: #f8fafc;
+        }
+        .upload-area:hover {
+            border-color: rgba(229,62,62,0.5);
+            background: #fff5f5;
+        }
+        .upload-icon { font-size: 2.4rem; margin-bottom: 10px; }
+        .upload-title { font-size: 0.95rem; font-weight: 700; margin-bottom: 4px; }
+        .upload-sub { font-size: 0.78rem; color: var(--text-muted); }
+
+        /* ── Buttons ─────────────────────────────── */
+        .btn {
+            display: inline-flex; align-items: center; justify-content: center;
+            gap: 8px; padding: 13px 24px;
+            border: none; border-radius: var(--radius-sm);
+            font-family: 'Inter', sans-serif;
+            font-size: 0.92rem; font-weight: 700;
+            cursor: pointer; transition: all 0.18s; text-decoration: none;
+        }
+        .btn-outline {
+            background: transparent;
+            border: 1.5px solid rgba(229,62,62,0.5);
+            color: #fc8181;
+        }
+        .btn-outline:hover {
+            background: rgba(229,62,62,0.1);
+            border-color: rgba(229,62,62,0.8);
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, var(--red), var(--red-dark));
+            color: white;
+            box-shadow: var(--shadow-btn);
+        }
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 30px rgba(229,62,62,0.6);
+        }
+        .btn-primary:active { transform: translateY(0); }
+        .btn-primary:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
+        .btn-full { width: 100%; }
+        .btn-lg { padding: 16px 24px; font-size: 1rem; border-radius: 14px; }
+        .btn.loading { opacity: 0.6; pointer-events: none; }
+
+        /* ── Worker preview ──────────────────────── */
+        .preview-header {
+            display: flex; align-items: center; gap: 12px;
+            margin-bottom: 14px; flex-wrap: wrap;
+        }
+        .preview-title {
+            font-size: 0.85rem; font-weight: 700;
+            color: var(--text-secondary);
+            text-transform: uppercase; letter-spacing: 0.05em;
+        }
+        .badge-count {
+            background: var(--red-dark);
+            color: white; font-size: 0.72rem; font-weight: 800;
+            padding: 3px 10px; border-radius: 99px;
+        }
+        .badge-anglo {
+            background: linear-gradient(135deg, #1a365d, #2b6cb0);
+            color: white; font-size: 0.72rem; font-weight: 700;
+            padding: 3px 12px; border-radius: 99px;
+        }
+        .worker-list {
+            border-radius: var(--radius);
+            overflow: hidden;
+            border: 1px solid #e2e8f0;
+            max-height: 320px;
+            overflow-y: auto;
+        }
+        .worker-list::-webkit-scrollbar { width: 4px; }
+        .worker-list::-webkit-scrollbar-thumb { background: #cbd5e0; border-radius: 4px; }
+        .worker-item {
+            padding: 12px 16px;
+            border-bottom: 1px solid #f0f4f8;
+            display: flex; align-items: center;
+            justify-content: space-between;
+            background: #ffffff;
+            transition: background 0.15s;
+        }
+        .worker-item:hover { background: #f7fafc; }
+        .worker-item:last-child { border-bottom: none; }
+        .worker-name { font-weight: 700; font-size: 0.88rem; color: #1a202c; }
+        .worker-meta { font-size: 0.75rem; color: var(--text-muted); margin-top: 2px; }
+        .worker-dates { text-align: right; }
+        .worker-arrival { font-size: 0.8rem; font-weight: 600; color: #276749; }
+        .worker-departure { font-size: 0.75rem; color: #c53030; margin-top: 2px; }
+
+        /* ── Submit status ───────────────────────── */
+        #submit-status {
+            text-align: center; font-size: 0.85rem;
+            color: var(--text-secondary); margin-top: 12px;
+            font-weight: 600;
+        }
+
+        /* ── Anglo admin field ───────────────────── */
+        .anglo-field {
+            background: linear-gradient(135deg, #f3e8ff, #ede9fe);
+            border: 1.5px solid #c4b5fd;
+            border-radius: var(--radius-sm);
+            padding: 14px 16px;
+            margin-top: 14px;
+            display: flex; align-items: center; gap: 12px;
+        }
+        .anglo-field label {
+            font-size: 0.78rem; font-weight: 800;
+            color: #6b21a8; white-space: nowrap;
+            text-transform: uppercase; letter-spacing: 0.05em;
+        }
+        .anglo-field input {
+            flex: 1; background: white;
+            border: 1.5px solid #ddd6fe;
+            border-radius: 8px;
+            padding: 9px 14px;
+            font-family: 'Inter', sans-serif;
+            font-size: 0.9rem; font-weight: 600;
+            color: #3b0764;
+            outline: none;
+        }
+        .anglo-field input:focus { border-color: #7c3aed; box-shadow: 0 0 0 3px rgba(124,58,237,0.12); }
+        .anglo-field input::placeholder { color: #c4b5fd; font-weight: 400; }
+
+        /* ── Download buttons ────────────────────── */
+        .download-grid {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+            margin-top: 4px;
+        }
+        @media (max-width: 480px) { .download-grid { grid-template-columns: 1fr; } }
+        .btn-download {
+            display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+            padding: 10px 14px; border-radius: 10px;
+            font-family: 'Inter', sans-serif; font-size: 0.85rem; font-weight: 700;
+            cursor: pointer; transition: all 0.18s; border: none; text-decoration: none;
+            flex-direction: column; line-height: 1.3;
+        }
+        .btn-download-a {
+            background: linear-gradient(135deg, #e53e3e, #c53030);
+            color: white; box-shadow: 0 3px 12px rgba(229,62,62,0.35);
+        }
+        .btn-download-a:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(229,62,62,0.45); }
+        .btn-download-b {
+            background: linear-gradient(135deg, #3182ce, #2b6cb0);
+            color: white; box-shadow: 0 3px 12px rgba(49,130,206,0.35);
+        }
+        .btn-download-b:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(49,130,206,0.45); }
+        .btn-download small { font-size: 0.72rem; opacity: 0.85; font-weight: 500; }
+
+        /* ── Footer ──────────────────────────────── */
+        .page-footer {
+            margin-top: 28px;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            text-align: center;
+        }
+
+        /* Divider line */
+        .hr { height: 1px; background: #e2e8f0; margin: 28px 0; }
+
+        /* Spacing */
+        .mt-4 { margin-top: 16px; }
+        .mt-6 { margin-top: 24px; }
+    </style>
+</head>
+<body>
+    <div class="bg-shapes">
+        <div class="shape shape-1"></div>
+        <div class="shape shape-2"></div>
+        <div class="shape shape-3"></div>
+    </div>
+
+    <div class="page-wrapper">
+
+        <!-- Brand header -->
+        <div class="brand-bar">
+            <div class="brand-logo-wrap">
+                <img src="aramark.png" alt="Aramark">
+            </div>
+            <div class="brand-info">
+                <h1>Reservas de Alojamiento</h1>
+                <p>Empresas colaboradoras e industriales · PC Hotelería</p>
+            </div>
+        </div>
+
+        <!-- Main card -->
+        <div class="main-card">
+
+            <!-- Template download -->
+            <div class="template-box">
+                <div class="t-title">📋 ¿Primera vez? Descarga el formato oficial</div>
+                <div class="t-desc">
+                    📌 Misma plantilla en dos versiones según turno. Incluye logo Aramark y fila de
+                    <strong>Administrador de Contrato Anglo</strong>.
+                </div>
+                <div class="download-grid">
+                    <button class="btn-download btn-download-a" onclick="exportTemplate('7x7, 8x6, 14x14')" id="btn-dl-a">
+                        📥 Descargar Plantilla
+                        <small>Turno 7×7 · 8×6 · 14×14</small>
+                    </button>
+                    <button class="btn-download btn-download-b" onclick="exportTemplate('4x3')" id="btn-dl-b">
+                        📥 Descargar Plantilla
+                        <small>Turno 4×3</small>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Company info -->
+            <div class="section-divider">
+                <span class="section-label">Información de la empresa</span>
+            </div>
+
+            <div class="form-group mt-4">
+                <label class="form-label">Nombre de la Empresa <span class="req">*</span></label>
+                <input type="text" class="form-input" id="pub-company"
+                    placeholder="Ej: Aramark, Minería Norte, AngloAmerican…">
+            </div>
+
+            <div class="form-group mt-4">
+                <label class="form-label">Número de Contrato</label>
+                <input type="text" class="form-input" id="pub-contract-number"
+                    placeholder="Ej: C-2026-1234">
+            </div>
+
+            <div class="form-group mt-4">
+                <label class="form-label">Gerencia</label>
+                <input type="text" class="form-input" id="pub-gerencia"
+                    placeholder="Ej: Gerencia Mina, OPEX, Geología…">
+            </div>
+
+            <div class="form-grid-2 mt-4">
+                <div class="form-group">
+                    <label class="form-label">Persona de Contacto</label>
+                    <input type="text" class="form-input" id="pub-contact" placeholder="Nombre completo">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Correo Electrónico</label>
+                    <input type="email" class="form-input" id="pub-email" placeholder="email@empresa.com">
+                </div>
+            </div>
+
+            <!-- Campo Administrador de Contrato AngloAmerican -->
+            <div class="anglo-field">
+                <label for="pub-anglo-admin">👔 Administrador de Contrato<br>AngloAmerican</label>
+                <input type="text" id="pub-anglo-admin"
+                    placeholder="Nombre completo del Administrador AngloAmerican…"
+                    oninput="window.angloAdmin = this.value.trim()">
+            </div>
+
+            <!-- File upload -->
+            <div class="section-divider">
+                <span class="section-label">Cargar nómina de trabajadores</span>
+            </div>
+
+            <input type="file" id="csv-upload" accept=".xlsx,.xls,.csv"
+                style="display:none" onchange="handleFileUpload(event)">
+            <div class="upload-area" onclick="document.getElementById('csv-upload').click()">
+                <div class="upload-icon">⚡</div>
+                <div class="upload-title">Cargar Archivo Excel o CSV</div>
+                <div class="upload-sub">Use la plantilla descargada · El Administrador Anglo se detecta automáticamente</div>
+            </div>
+
+            <!-- Worker preview -->
+            <div id="worker-preview" style="display:none" class="mt-6">
+                <div class="preview-header">
+                    <span class="preview-title">Vista previa</span>
+                    <span class="badge-count" id="count">0</span> trabajadores
+                    <span class="badge-anglo" id="anglo-admin-badge" style="display:none"></span>
+                </div>
+                <div class="worker-list" id="worker-list"></div>
+            </div>
+
+            <!-- Submit -->
+            <div class="hr"></div>
+            <button class="btn btn-primary btn-full btn-lg" id="submit-btn" onclick="submitRequest()">
+                🚀 Enviar Solicitud de Alojamiento
+            </button>
+            <div id="submit-status" style="display:none"></div>
+
+        </div>
+
+        <footer class="page-footer">
+            Aramark Chile · PC Hotelería · Campamento Los Bronces
+        </footer>
+    </div>
+
+    <!-- exportTemplate: carga ExcelJS lazy (solo al hacer clic) -->
+    <script>
+        window.workers    = [];
+        window.angloAdmin = '';
+
+        // ── Colores y estilos Aramark ──────────────────────────────────────────
+        var ARAMARK_RED  = 'FFEE3124';
+        var ARAMARK_DARK = 'FFB71C1C';
+        var ARAMARK_LITE = 'FFFFF5F5';
+        var WHITE        = 'FFFFFFFF';
+        var GRAY_TEXT    = 'FF424242';
+        var BORDER = { style:'thin', color:{ argb:'FFDDDDDD' } };
+        var ALL_BORDERS  = { top:BORDER, left:BORDER, bottom:BORDER, right:BORDER };
+
+        function styleHeader(cell) {
+            cell.font      = { name:'Calibri', bold:true, size:11, color:{ argb:WHITE } };
+            cell.fill      = { type:'pattern', pattern:'solid', fgColor:{ argb:ARAMARK_RED } };
+            cell.alignment = { horizontal:'center', vertical:'middle' };
+            cell.border    = ALL_BORDERS;
+        }
+        function styleData(cell) {
+            cell.font      = { name:'Calibri', size:10, color:{ argb:GRAY_TEXT } };
+            cell.fill      = { type:'pattern', pattern:'solid', fgColor:{ argb:ARAMARK_LITE } };
+            cell.alignment = { horizontal:'center', vertical:'middle' };
+            cell.border    = ALL_BORDERS;
+        }
+
+        window.exportTemplate = async function(turnoTitle) {
+            turnoTitle = turnoTitle || '7x7, 8x6, 14x14';
+            var isA    = turnoTitle !== '4x3';
+            var btnId  = isA ? 'btn-dl-a' : 'btn-dl-b';
+            var btn    = document.getElementById(btnId);
+            var origHTML = btn.innerHTML;
+            btn.innerHTML = '⏳ Generando...';
+            btn.style.opacity = '0.7';
+            btn.style.pointerEvents = 'none';
+
+            try {
+                if (typeof ExcelJS === 'undefined') {
+                    await new Promise(function(resolve, reject) {
+                        var s = document.createElement('script');
+                        s.src = 'https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js';
+                        s.onload  = resolve;
+                        s.onerror = reject;
+                        document.head.appendChild(s);
+                    });
+                }
+
+                var wb = new ExcelJS.Workbook();
+                wb.creator  = 'PC Hotelería';
+                wb.created  = new Date();
+
+                var ws = wb.addWorksheet('Solicitud Alojamiento', {
+                    views: [{ showGridLines: true }]
+                });
+
+                var colNames  = ['FECHA','Empresa','Ncontrato','Gerencia','RazonSocial','NombreHuesped','RUTHuesped','CONTACTO','HABITACION','NombreTurno','SistemaTurno','TipoTurno','Estado','FechaInicio','FechaTermino','Sexo','OBSERVACION'];
+                var colWidths = [14, 20, 13, 20, 34, 28, 14, 14, 12, 12, 14, 12, 12, 14, 14, 8, 28];
+                ws.columns = colNames.map(function(n, i){ return { header:'', width: colWidths[i] }; });
+
+                ws.getRow(1).height = 28;
+                ws.getRow(2).height = 28;
+                ws.getRow(3).height = 28;
+
+                for (var r = 1; r <= 3; r++) {
+                    for (var c = 1; c <= colNames.length; c++) {
+                        ws.getRow(r).getCell(c).fill = { type:'pattern', pattern:'solid', fgColor:{ argb: ARAMARK_RED } };
+                    }
+                }
+
+                ws.mergeCells('E1:Q3');
+                var titleCell = ws.getCell('E1');
+                titleCell.value     = 'SOLICITUD DE ALOJAMIENTO\nPC HOTELERÍA — Turno ' + turnoTitle;
+                titleCell.font      = { name:'Calibri', bold:true, size:17, color:{ argb: WHITE } };
+                titleCell.fill      = { type:'pattern', pattern:'solid', fgColor:{ argb: ARAMARK_RED } };
+                titleCell.alignment = { horizontal:'center', vertical:'middle', wrapText:true };
+
+                try {
+                    var resp    = await fetch('./aramark.png');
+                    var buffer  = await resp.arrayBuffer();
+                    var imageId = wb.addImage({ buffer: buffer, extension: 'png' });
+                    ws.addImage(imageId, { tl:{ col:0.2, row:0.2 }, ext:{ width:170, height:75 } });
+                } catch(e) {
+                    ws.mergeCells('A1:D3');
+                    var logoCell = ws.getCell('A1');
+                    logoCell.value     = 'ARAMARK';
+                    logoCell.font      = { name:'Calibri', bold:true, size:20, color:{ argb: WHITE } };
+                    logoCell.fill      = { type:'pattern', pattern:'solid', fgColor:{ argb: ARAMARK_RED } };
+                    logoCell.alignment = { horizontal:'center', vertical:'middle' };
+                }
+
+                ws.getRow(4).height = 30;
+                ws.mergeCells('A4:C4');
+                var angloLabel = ws.getCell('A4');
+                angloLabel.value     = 'Administrador de Contrato Anglo:';
+                angloLabel.font      = { name:'Calibri', bold:true, size:12, color:{ argb: WHITE } };
+                angloLabel.fill      = { type:'pattern', pattern:'solid', fgColor:{ argb: ARAMARK_DARK } };
+                angloLabel.alignment = { horizontal:'left', vertical:'middle' };
+                angloLabel.border    = ALL_BORDERS;
+
+                ws.mergeCells('D4:Q4');
+                var angloValue = ws.getCell('D4');
+                angloValue.value     = '';
+                angloValue.font      = { name:'Calibri', size:12, italic:true, color:{ argb:'FF999999' } };
+                angloValue.fill      = { type:'pattern', pattern:'solid', fgColor:{ argb:'FFFFFAF0' } };
+                angloValue.alignment = { horizontal:'left', vertical:'middle' };
+                angloValue.border    = { top:{ style:'medium', color:{argb:ARAMARK_DARK} }, left:{ style:'medium', color:{argb:ARAMARK_DARK} }, bottom:{ style:'medium', color:{argb:ARAMARK_DARK} }, right:{ style:'medium', color:{argb:ARAMARK_DARK} } };
+                angloValue.note = { texts:[{ font:{ size:10 }, text:'Ingrese aquí el nombre del Administrador de Contrato Anglo' }] };
+
+                ws.getRow(5).height = 22;
+                colNames.forEach(function(col, i) {
+                    styleHeader(ws.getRow(5).getCell(i + 1));
+                    ws.getRow(5).getCell(i + 1).value = col;
+                });
+
+                ws.getRow(6).height = 20;
+                var sample = ['2026-04-04','Aramark','12345','Minería','Aramark Servicios Mineros S.A.','Juan Perez','12345678-9','987654321','','7x7','Sistema A','Dia','Pendiente','2026-04-10','2026-04-17','M','Ninguna'];
+                sample.forEach(function(val, i) {
+                    var cell = ws.getRow(6).getCell(i + 1);
+                    styleData(cell);
+                    cell.value = val;
+                });
+
+                var xlsBuffer = await wb.xlsx.writeBuffer();
+                var blob      = new Blob([xlsBuffer], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+                var suffix    = turnoTitle.replace(/[^a-zA-Z0-9x]/gi,'_');
+                var fname     = 'formato_solicitud_turno_' + suffix + '_' + new Date().toISOString().split('T')[0] + '.xlsx';
+
+                if (window.showSaveFilePicker) {
+                    try {
+                        var handle = await window.showSaveFilePicker({
+                            suggestedName: fname,
+                            types: [{ description:'Excel Workbook', accept:{ 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':['.xlsx'] } }]
+                        });
+                        var writable = await handle.createWritable();
+                        await writable.write(blob);
+                        await writable.close();
+                        return;
+                    } catch(e) {
+                        if (e.name === 'AbortError') return;
+                    }
+                }
+
+                var url = URL.createObjectURL(blob);
+                var a   = document.createElement('a');
+                a.href = url; a.download = fname; a.rel = 'noopener';
+                a.style.display = 'none';
+                document.body.appendChild(a);
+                a.dispatchEvent(new MouseEvent('click', { bubbles:true, cancelable:false, view:window }));
+                setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); }, 2000);
+
+            } catch(err) {
+                console.error('exportTemplate error:', err);
+                alert('Error al generar la plantilla: ' + err.message);
+            } finally {
+                btn.innerHTML = origHTML;
+                btn.style.opacity = '';
+                btn.style.pointerEvents = '';
+            }
+        };
+    </script>
+
+    <!-- handleFileUpload y submitRequest (necesitan db.js) -->
+    <script type="module">
+        import { put, openDB } from './js/db.js';
+
+        window.handleFileUpload = (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            if (!file.name.match(/\.(xlsx|xls|csv)$/i)) {
+                alert('Formato no soportado. Use .xlsx, .xls o .csv');
+                return;
+            }
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+                try {
+                    const wb       = XLSX.read(new Uint8Array(ev.target.result), { type:'array', cellDates:true });
+                    const ws       = wb.Sheets[wb.SheetNames[0]];
+                    const jsonData = XLSX.utils.sheet_to_json(ws, { header:1 });
+
+                    if (!jsonData || jsonData.length < 2) {
+                        alert('El archivo parece vacío o sin formato correcto.');
+                        return;
+                    }
+
+                    let angloAdmin = '';
+                    let dataStart  = 1;
+                    for (let i = 0; i < Math.min(5, jsonData.length); i++) {
+                        const cell = String(jsonData[i]?.[0] || '').toLowerCase();
+                        if (cell.includes('administrador') || cell.includes('anglo')) {
+                            angloAdmin = String(jsonData[i][1] || '').trim();
+                            dataStart  = i + 2;
+                            break;
+                        }
+                    }
+                    window.angloAdmin = angloAdmin;
+
+                    const workers = jsonData.slice(dataStart + 1).map(row => {
+                        if (!row || row.length < 10) return null;
+                        const nombre = String(row[5] || '').trim();
+                        if (!nombre || nombre === 'NombreHuesped') return null;
+                        return {
+                            date: row[0], company: row[1], contract: row[2], management: row[3],
+                            legalName: row[4], name: nombre, rut: row[6], contact: row[7],
+                            assignedRoom: row[8], shiftName: row[9], shiftSystem: row[10],
+                            shiftType: row[11], status: row[12],
+                            arrivalDate: fmt(row[13]), departureDate: fmt(row[14]),
+                            sex: row[15], observation: row[16] || ''
+                        };
+                    }).filter(x => x !== null);
+
+                    if (workers.length === 0) {
+                        alert('No se encontraron trabajadores válidos en el archivo.');
+                        return;
+                    }
+                    window.workers = workers;
+                    renderPreview();
+                } catch(err) {
+                    console.error(err);
+                    alert('Error al leer el archivo: ' + err.message);
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        };
+
+        function fmt(val) {
+            if (!val) return '';
+            if (val instanceof Date) return val.toISOString().split('T')[0];
+            return String(val).trim();
+        }
+
+        function renderPreview() {
+            const badge = document.getElementById('anglo-admin-badge');
+            if (window.angloAdmin) {
+                badge.textContent   = '🏭 Admin Anglo: ' + window.angloAdmin;
+                badge.style.display = 'inline';
+            } else {
+                badge.style.display = 'none';
+            }
+            document.getElementById('worker-list').innerHTML = window.workers.map(w => `
+                <div class="worker-item">
+                    <div>
+                        <div class="worker-name">${w.name}</div>
+                        <div class="worker-meta">${w.rut||'-'} · ${w.legalName||''}</div>
+                    </div>
+                    <div class="worker-dates">
+                        <div class="worker-arrival">📅 ${w.arrivalDate||'-'}</div>
+                        <div class="worker-departure">↩ ${w.departureDate||'-'}</div>
+                    </div>
+                </div>
+            `).join('');
+            document.getElementById('count').textContent              = window.workers.length;
+            document.getElementById('worker-preview').style.display   = 'block';
+            document.getElementById('submit-btn').disabled            = false;
+        }
+
+        window.submitRequest = async () => {
+            // Si el usuario escribió el Admin Anglo manualmente, usarlo (prioridad sobre Excel)
+            const manualAnglo = document.getElementById('pub-anglo-admin')?.value.trim();
+            if (manualAnglo) window.angloAdmin = manualAnglo;
+            const company = document.getElementById('pub-company').value.trim();
+            if (!company) {
+                alert('⚠️ Por favor ingrese el nombre de la empresa.');
+                document.getElementById('pub-company').focus();
+                return;
+            }
+            if (!window.workers || window.workers.length === 0) {
+                alert('⚠️ No hay trabajadores cargados.\n\nDescargue la plantilla, complétela y cárguela aquí.');
+                return;
+            }
+            const btn       = document.getElementById('submit-btn');
+            const statusDiv = document.getElementById('submit-status');
+            btn.disabled    = true;
+            btn.textContent = '⏳ Enviando solicitud...';
+            statusDiv.style.display = 'block';
+            statusDiv.textContent   = 'Guardando solicitud...';
+            try {
+                await put('b2b_requests', {
+                    id:             Date.now(),
+                    company,
+                    contractNumber: document.getElementById('pub-contract-number').value.trim(),
+                    gerencia:       document.getElementById('pub-gerencia').value.trim(),
+                    angloAdmin:     window.angloAdmin,
+                    contactName:    document.getElementById('pub-contact').value.trim(),
+                    contactEmail:   document.getElementById('pub-email').value.trim(),
+                    receivedDate:   new Date().toISOString().split('T')[0],
+                    status:         'accepted',
+                    workers:        window.workers
+                });
+                statusDiv.style.color = '#68d391';
+                statusDiv.textContent = '✅ ¡Solicitud enviada con éxito!';
+                setTimeout(() => {
+                    alert('✅ Solicitud de ' + company + ' enviada.\n\n👤 ' + window.workers.length + ' trabajadores registrados.');
+                    window.location.reload();
+                }, 600);
+            } catch(err) {
+                console.error(err);
+                btn.disabled    = false;
+                btn.textContent = '🚀 Enviar Solicitud de Alojamiento';
+                statusDiv.style.color = '#fc8181';
+                statusDiv.textContent = '🚨 Error al enviar. Intente nuevamente.';
+            }
+        };
+    </script>
+</body>
+</html>

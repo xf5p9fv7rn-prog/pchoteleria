@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Censo de Camas | Aramark Portal</title>
+    <link rel="stylesheet" href="css/main.css">
+    <link rel="stylesheet" href="css/censo-pub.css">
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#e53e3e">
+    <style>
+        body {
+            background: #f7fafc;
+            padding: 0;
+            margin: 0;
+            font-family: 'Inter', sans-serif;
+        }
+
+        .portal-header {
+            background: var(--grad-red);
+            padding: 20px;
+            color: white;
+            text-align: center;
+            box-shadow: 0 4px 12px rgba(229, 62, 62, 0.2);
+        }
+
+        .portal-container {
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 16px;
+        }
+
+        /* Override some main.css styles for portal mode */
+        .section-header {
+            display: none;
+        }
+
+        .censo-main {
+            margin-top: 0;
+        }
+
+        .censo-login-card {
+            margin-top: 20px;
+        }
+    </style>
+</head>
+
+<body>
+    <header class="portal-header">
+        <div style="display:flex; align-items:center; justify-content:space-between; max-width:600px; margin:0 auto;">
+            <img src="aramark.png" alt="Aramark"
+                style="height:40px; object-fit:contain; filter:brightness(0) invert(1);">
+            <div style="text-align:center; flex:1;">
+                <h1 style="font-size: 20px; font-weight: 800; margin: 0;">Portal Censo Terreno</h1>
+                <p style="font-size: 12px; opacity: 0.9; margin: 4px 0 0;">Control de Ocupación Real Aramark</p>
+            </div>
+            <img src="anglo.png" alt="Anglo" style="height:61px; object-fit:contain; filter:brightness(0) invert(1);">
+        </div>
+    </header>
+
+    <main class="portal-container" id="portal-content">
+        <div style="text-align:center; padding:50px; color:#a0aec0">
+            <div class="pulsar"
+                style="width:20px; height:20px; background:var(--red-600); border-radius:50%; margin:0 auto 15px"></div>
+            Cargando módulo de censo...
+        </div>
+    </main>
+
+    <div class="toast-container" id="toast-container"></div>
+
+    <script src="https://unpkg.com/xlsx/dist/xlsx.full.min.js"></script>
+    <script type="module">
+        import { openDB } from './js/db.js';
+        import { renderCenso } from './js/modules/censo.js';
+        import { watchOnlineStatus, showToast } from './js/utils.js';
+
+        async function initPortal() {
+            await openDB();
+            const content = document.getElementById('portal-content');
+            await renderCenso(content);
+
+            watchOnlineStatus(
+                () => showToast('Conexión restaurada', 'success'),
+                () => showToast('Modo offline activo', 'warn')
+            );
+        }
+
+        initPortal().catch(err => {
+            console.error(err);
+            document.getElementById('portal-content').innerHTML = `
+                <div class="alert alert-error">Error al cargar el portal. Verifique su conexión.</div>
+            `;
+        });
+    </script>
+</body>
+
+</html>

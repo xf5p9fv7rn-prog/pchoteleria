@@ -1,0 +1,963 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Asistente de Consultas — PC Hotelería</title>
+    <link rel="icon" href="aramark.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        :root {
+            --red: #c0392b;
+            --red-light: #e74c3c;
+            --red-dark: #a93226;
+            --bg: #f8fafc;
+            --surface: #ffffff;
+            --border: #e2e8f0;
+            --text: #1e293b;
+            --muted: #64748b;
+            --grad-red: linear-gradient(135deg, #c0392b 0%, #e74c3c 100%);
+        }
+
+        body {
+            font-family: 'Inter', system-ui, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            height: 100dvh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* ── Header ─────────────────────────────────────── */
+        .app-header {
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            padding: 0 24px;
+            height: 64px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            flex-shrink: 0;
+            box-shadow: 0 1px 12px rgba(0,0,0,0.05);
+            z-index: 10;
+        }
+
+        .header-logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .header-logo img {
+            height: 36px;
+        }
+
+        .header-title {
+            font-size: 18px;
+            font-weight: 800;
+            color: var(--text);
+        }
+
+        .header-title span {
+            color: var(--red);
+        }
+
+        .header-badge {
+            background: linear-gradient(135deg, #c0392b, #e74c3c);
+            color: white;
+            font-size: 11px;
+            font-weight: 700;
+            padding: 3px 10px;
+            border-radius: 99px;
+            letter-spacing: 0.5px;
+        }
+
+        .header-right {
+            margin-left: auto;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .status-dot {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: #16a34a;
+            font-weight: 600;
+        }
+
+        .status-dot::before {
+            content: '';
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #16a34a;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        /* ── Layout ──────────────────────────────────────── */
+        .main-layout {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        /* ── Sidebar de sugerencias ──────────────────────── */
+        .suggestions-panel {
+            width: 260px;
+            background: var(--surface);
+            border-right: 1px solid var(--border);
+            padding: 20px 16px;
+            overflow-y: auto;
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        @media (max-width: 700px) {
+            .suggestions-panel { display: none; }
+        }
+
+        .panel-label {
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--muted);
+            letter-spacing: 0.8px;
+            text-transform: uppercase;
+            padding: 8px 4px 4px;
+        }
+
+        .suggestion-btn {
+            width: 100%;
+            text-align: left;
+            border: 1px solid var(--border);
+            background: var(--bg);
+            border-radius: 10px;
+            padding: 10px 12px;
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text);
+            cursor: pointer;
+            transition: all 0.2s;
+            font-family: inherit;
+            line-height: 1.4;
+        }
+
+        .suggestion-btn:hover {
+            border-color: var(--red);
+            background: #fff5f5;
+            color: var(--red);
+            transform: translateX(3px);
+        }
+
+        .suggestion-btn .sug-icon {
+            font-size: 15px;
+            margin-bottom: 2px;
+            display: block;
+        }
+
+        /* ── Chat Area ───────────────────────────────────── */
+        .chat-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            min-width: 0;
+        }
+
+        /* ── Bienvenida ───────────────────────────────────── */
+        .welcome-screen {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            flex: 1;
+            padding: 40px 20px;
+            text-align: center;
+        }
+
+        .welcome-orb {
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #c0392b, #e74c3c, #ff6b6b);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 44px;
+            margin-bottom: 24px;
+            box-shadow: 0 20px 60px rgba(192, 57, 43, 0.35);
+            animation: floatOrb 3s ease-in-out infinite;
+        }
+
+        @keyframes floatOrb {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-10px); }
+        }
+
+        .welcome-title {
+            font-size: 28px;
+            font-weight: 800;
+            color: var(--text);
+            margin-bottom: 10px;
+        }
+
+        .welcome-sub {
+            font-size: 15px;
+            color: var(--muted);
+            max-width: 480px;
+            line-height: 1.6;
+        }
+
+        .quick-chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            justify-content: center;
+            margin-top: 30px;
+            max-width: 600px;
+        }
+
+        .quick-chip {
+            background: var(--surface);
+            border: 1.5px solid var(--border);
+            border-radius: 10px;
+            padding: 8px 14px;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text);
+            cursor: pointer;
+            transition: all 0.2s;
+            font-family: inherit;
+        }
+
+        .quick-chip:hover {
+            border-color: var(--red);
+            background: #fff5f5;
+            color: var(--red);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(192,57,43,0.15);
+        }
+
+        /* ── Messages ────────────────────────────────────── */
+        .messages-area {
+            flex: 1;
+            overflow-y: auto;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .msg-user {
+            display: flex;
+            justify-content: flex-end;
+            animation: slideInRight 0.3s ease;
+        }
+
+        @keyframes slideInRight {
+            from { opacity: 0; transform: translateX(20px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+
+        .msg-user-bubble {
+            background: var(--grad-red);
+            color: white;
+            padding: 12px 18px;
+            border-radius: 18px 18px 4px 18px;
+            font-size: 15px;
+            font-weight: 600;
+            max-width: 480px;
+            box-shadow: 0 4px 15px rgba(192,57,43,0.3);
+        }
+
+        .msg-bot {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            animation: slideInLeft 0.4s ease;
+        }
+
+        @keyframes slideInLeft {
+            from { opacity: 0; transform: translateX(-20px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+
+        .msg-bot-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: var(--muted);
+            font-weight: 600;
+        }
+
+        .bot-avatar {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: var(--grad-red);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+        }
+
+        .msg-bot-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 4px 18px 18px 18px;
+            padding: 20px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.04);
+            overflow-x: auto;
+        }
+
+        .msg-loading {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 14px 18px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 4px 18px 18px 18px;
+            width: fit-content;
+        }
+
+        .loading-dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: var(--red);
+            animation: bounce 1.2s infinite;
+        }
+        .loading-dot:nth-child(2) { animation-delay: 0.2s; }
+        .loading-dot:nth-child(3) { animation-delay: 0.4s; }
+
+        @keyframes bounce {
+            0%, 80%, 100% { transform: scale(0.5); opacity: 0.5; }
+            40% { transform: scale(1); opacity: 1; }
+        }
+
+        /* ── Informe Styles ──────────────────────────────── */
+        .informe-header {
+            margin-bottom: 16px;
+        }
+
+        .informe-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            font-size: 12px;
+            color: var(--muted);
+            font-weight: 500;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 16px;
+        }
+
+        .kpi-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .kpi-card {
+            border-radius: 16px;
+            padding: 16px;
+            text-align: center;
+            border: 1px solid transparent;
+        }
+
+        .kpi-icon { font-size: 22px; margin-bottom: 6px; }
+        .kpi-value { font-size: 28px; font-weight: 900; line-height: 1; margin-bottom: 4px; }
+        .kpi-label { font-size: 11px; font-weight: 600; opacity: 0.8; line-height: 1.3; }
+
+        .kpi-red { background: #fff5f5; border-color: #fecaca; color: #c0392b; }
+        .kpi-green { background: #f0fdf4; border-color: #bbf7d0; color: #16a34a; }
+        .kpi-orange { background: #fffbeb; border-color: #fde68a; color: #b45309; }
+        .kpi-blue { background: #eff6ff; border-color: #bfdbfe; color: #1d4ed8; }
+        .kpi-purple { background: #faf5ff; border-color: #ddd6fe; color: #7c3aed; }
+        .kpi-yellow { background: #fefce8; border-color: #fef08a; color: #854d0e; }
+
+        .section-title {
+            font-size: 15px;
+            font-weight: 800;
+            color: var(--text);
+            margin: 16px 0 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .table-wrap {
+            overflow-x: auto;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+        }
+
+        .informe-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        .informe-table thead tr {
+            background: #f8fafc;
+        }
+
+        .informe-table th {
+            padding: 10px 12px;
+            text-align: left;
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            white-space: nowrap;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .informe-table tbody tr:hover {
+            background: #f8fafc;
+        }
+
+        .informe-table tbody tr:not(:last-child) td {
+            border-bottom: 1px solid #f1f5f9;
+        }
+
+        .chips-grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-bottom: 12px;
+        }
+
+        .room-chip {
+            padding: 6px 12px;
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .room-chip span {
+            font-weight: 500;
+            opacity: 0.7;
+            font-size: 11px;
+        }
+
+        .room-chip.free { background: #dcfce7; color: #16a34a; border: 1px solid #bbf7d0; }
+        .room-chip.occupied { background: #fee2e2; color: #c0392b; border: 1px solid #fecaca; }
+        .room-chip.blocked { background: #f1f5f9; color: #64748b; border: 1px solid #e2e8f0; }
+
+        .empresas-list {
+            background: var(--surface);
+            border-radius: 16px;
+            padding: 16px;
+            border: 1px solid var(--border);
+            margin-bottom: 16px;
+        }
+
+        /* ── Input Area ──────────────────────────────────── */
+        .input-area {
+            padding: 16px 20px;
+            background: var(--surface);
+            border-top: 1px solid var(--border);
+            flex-shrink: 0;
+        }
+
+        .input-wrap {
+            display: flex;
+            align-items: flex-end;
+            gap: 10px;
+            background: var(--bg);
+            border: 2px solid var(--border);
+            border-radius: 16px;
+            padding: 10px 10px 10px 18px;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+
+        .input-wrap:focus-within {
+            border-color: var(--red);
+            box-shadow: 0 0 0 4px rgba(192,57,43,0.1);
+            background: white;
+        }
+
+        .chat-input {
+            flex: 1;
+            border: none;
+            background: transparent;
+            font-family: inherit;
+            font-size: 15px;
+            color: var(--text);
+            resize: none;
+            outline: none;
+            min-height: 24px;
+            max-height: 120px;
+            line-height: 1.5;
+        }
+
+        .chat-input::placeholder {
+            color: #94a3b8;
+        }
+
+        .send-btn {
+            width: 42px;
+            height: 42px;
+            border-radius: 12px;
+            background: var(--grad-red);
+            border: none;
+            color: white;
+            font-size: 18px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+            flex-shrink: 0;
+        }
+
+        .send-btn:hover {
+            transform: scale(1.1);
+            box-shadow: 0 4px 15px rgba(192,57,43,0.4);
+        }
+
+        .send-btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .input-hint {
+            font-size: 11px;
+            color: var(--muted);
+            text-align: center;
+            margin-top: 8px;
+            font-weight: 500;
+        }
+
+        /* ── Actions row ────────────────────────────────── */
+        .actions-row {
+            display: flex;
+            gap: 8px;
+            padding: 0 20px 12px;
+            overflow-x: auto;
+        }
+
+        .action-chip {
+            white-space: nowrap;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 6px 12px;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text);
+            cursor: pointer;
+            transition: all 0.2s;
+            font-family: inherit;
+        }
+
+        .action-chip:hover {
+            border-color: var(--red);
+            color: var(--red);
+            background: #fff5f5;
+        }
+
+        /* ── Scrollbar ───────────────────────────────────── */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 99px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+        /* ── Print / Export btn ─────────────────────────── */
+        .export-btn {
+            background: none;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 6px 12px;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--muted);
+            cursor: pointer;
+            font-family: inherit;
+            transition: all 0.2s;
+        }
+
+        .export-btn:hover {
+            border-color: var(--red);
+            color: var(--red);
+        }
+
+        @media print {
+            .app-header, .input-area, .actions-row, .suggestions-panel, .msg-user { display: none !important; }
+            .msg-bot-card { box-shadow: none; border: 1px solid #ddd; page-break-inside: avoid; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- Header -->
+<header class="app-header">
+    <div class="header-logo">
+        <img src="aramark.png" alt="Aramark">
+        <div>
+            <div class="header-title">PC <span>Hotelería</span></div>
+        </div>
+    </div>
+    <div class="header-badge" style="display:flex;align-items:center;gap:6px;"><img src="Mirian.png" style="width:20px;height:20px;border-radius:50%;object-fit:cover;"> CONSTANZA · ASISTENTE IA</div>
+    <div class="header-right">
+        <div class="status-dot" id="status-label">Sistema listo</div>
+        <button class="export-btn" onclick="window.print()" title="Imprimir informe">🖨️ Imprimir</button>
+    </div>
+</header>
+
+<!-- Layout -->
+<div class="main-layout">
+
+    <!-- Sugerencias -->
+    <aside class="suggestions-panel">
+        <div class="panel-label">Consultas rápidas</div>
+
+        <button class="suggestion-btn" onclick="enviarPregunta('Resumen general del campamento')">
+            <span class="sug-icon">📊</span>
+            Resumen general del campamento
+        </button>
+        <button class="suggestion-btn" onclick="enviarPregunta('¿Cuántas habitaciones están ocupadas?')">
+            <span class="sug-icon">🏠</span>
+            ¿Cuántas habitaciones ocupadas?
+        </button>
+        <button class="suggestion-btn" onclick="enviarPregunta('¿Cuáles son las habitaciones libres?')">
+            <span class="sug-icon">✅</span>
+            ¿Cuáles son las habitaciones libres?
+        </button>
+        <button class="suggestion-btn" onclick="enviarPregunta('¿Cuántas camas disponibles hay?')">
+            <span class="sug-icon">🛏️</span>
+            ¿Cuántas camas disponibles hay?
+        </button>
+
+        <div class="panel-label" style="margin-top:8px;">Por Edificio</div>
+
+        <button class="suggestion-btn" onclick="enviarPregunta('¿Cómo está el Pabellón 1?')">
+            <span class="sug-icon">🏢</span>
+            Estado del Pabellón 1
+        </button>
+        <button class="suggestion-btn" onclick="enviarPregunta('¿Cómo está el Edificio 220?')">
+            <span class="sug-icon">🏢</span>
+            Estado del Edificio 220
+        </button>
+        <button class="suggestion-btn" onclick="enviarPregunta('Habitaciones libres en el Pabellón 3')">
+            <span class="sug-icon">🟢</span>
+            Habitaciones libres Pabellón 3
+        </button>
+
+        <div class="panel-label" style="margin-top:8px;">Personal</div>
+
+        <button class="suggestion-btn" onclick="enviarPregunta('¿Cuántos trabajadores hay en el campamento?')">
+            <span class="sug-icon">👷</span>
+            Total de trabajadores
+        </button>
+        <button class="suggestion-btn" onclick="enviarPregunta('Trabajadores de Anglo American')">
+            <span class="sug-icon">⛏️</span>
+            Trabajadores de Anglo American
+        </button>
+        <button class="suggestion-btn" onclick="enviarPregunta('Desglose por género de trabajadores')">
+            <span class="sug-icon">👥</span>
+            Desglose por género
+        </button>
+
+        <div class="panel-label" style="margin-top:8px;">Solicitudes</div>
+
+        <button class="suggestion-btn" onclick="enviarPregunta('¿Cuáles son las solicitudes pendientes?')">
+            <span class="sug-icon">⏳</span>
+            Solicitudes pendientes
+        </button>
+        <button class="suggestion-btn" onclick="enviarPregunta('Mostrar todas las solicitudes B2B')">
+            <span class="sug-icon">📩</span>
+            Todas las solicitudes B2B
+        </button>
+
+        <div class="panel-label" style="margin-top:8px;">Eficiencia</div>
+
+        <button class="suggestion-btn" onclick="enviarPregunta('¿Cuántas camas perdidas hay?')" style="border-color:#fde68a;background:#fffbeb;">
+            <span class="sug-icon">⚠️</span>
+            <span style="color:#b45309;font-weight:700;">Camas perdidas</span>
+            <span style="font-size:11px;color:#92400e;display:block;margin-top:2px;">Hab. con 2 cap. y solo 1 persona</span>
+        </button>
+
+        <div class="panel-label" style="margin-top:8px;">Gerencias & Turnos</div>
+
+        <button class="suggestion-btn" onclick="enviarPregunta('¿Cuántos cupos disponibles hay por gerencia?')" style="border-color:#bfdbfe;background:#eff6ff;">
+            <span class="sug-icon">🎯</span>
+            <span style="color:#1d4ed8;font-weight:700;">Cupos por Gerencia</span>
+            <span style="font-size:11px;color:#1e40af;display:block;margin-top:2px;">Usadas vs límite por gerencia</span>
+        </button>
+        <button class="suggestion-btn" onclick="enviarPregunta('¿Cuántas camas día y camas noche disponibles hay?')" style="border-color:#ddd6fe;background:#faf5ff;">
+            <span class="sug-icon">☀️🌙</span>
+            <span style="color:#7c3aed;font-weight:700;">Camas Día / Noche</span>
+            <span style="font-size:11px;color:#6d28d9;display:block;margin-top:2px;">Disponibles por turno</span>
+        </button>
+
+        <div class="panel-label" style="margin-top:8px;">Habitación específica</div>
+        <button class="suggestion-btn" onclick="
+            const n = prompt('¿Número de habitación?');
+            if(n && n.trim()) enviarPregunta('¿Quién está en la habitación ' + n.trim() + '?');
+        " style="border-color:#c6f6d5;background:#f0fff4;">
+            <span class="sug-icon">🏠</span>
+            <span style="color:#16a34a;font-weight:700;">Buscar habitación</span>
+            <span style="font-size:11px;color:#166534;display:block;margin-top:2px;">Ver quién está en una hab.</span>
+        </button>
+    </aside>
+
+    <!-- Chat -->
+    <div class="chat-area">
+
+        <!-- Pantalla de bienvenida -->
+        <div class="welcome-screen" id="welcome-screen">
+            <div class="welcome-orb" style="background:none;box-shadow:none;animation:floatOrb 3s ease-in-out infinite;padding:0;overflow:hidden;">
+                <img src="Mirian.png" alt="Constanza" style="width:100%;height:100%;object-fit:cover;border-radius:50%;border:4px solid rgba(192,57,43,0.25);box-shadow:0 20px 60px rgba(192,57,43,0.35);">
+            </div>
+            <h1 class="welcome-title">¡Hola! Soy <span style="color:var(--red);">Constanza</span> 👋</h1>
+            <p class="welcome-sub">
+                Tu asistente inteligente del campamento. Estoy aquí para ayudarte en todo lo que necesites — habitaciones, trabajadores, solicitudes y mucho más. ¡Pregúntame cualquier cosa!
+            </p>
+            <div class="quick-chips">
+                <button class="quick-chip" onclick="enviarPregunta('Resumen general del campamento')">📊 Resumen general</button>
+                <button class="quick-chip" onclick="enviarPregunta('¿Cuántas habitaciones están libres?')">🟢 Habitaciones libres</button>
+                <button class="quick-chip" onclick="enviarPregunta('¿Cuántos trabajadores hay?')">👷 Total trabajadores</button>
+                <button class="quick-chip" onclick="enviarPregunta('¿Cuáles son las solicitudes pendientes?')">⏳ Solicitudes pendientes</button>
+                <button class="quick-chip" onclick="enviarPregunta('Desglose por género')">👥 Desglose por género</button>
+                <button class="quick-chip" onclick="enviarPregunta('¿Cómo está el Pabellón 3?')">🏢 Pabellón 3</button>
+            </div>
+        </div>
+
+        <!-- Mensajes -->
+        <div class="messages-area" id="messages-area" style="display:none;"></div>
+
+        <!-- Action chips -->
+        <div class="actions-row" id="actions-row" style="display:none;">
+            <button class="action-chip" onclick="enviarPregunta('Resumen general')">📊 Resumen</button>
+            <button class="action-chip" onclick="enviarPregunta('Habitaciones libres')">🟢 Libres</button>
+            <button class="action-chip" onclick="enviarPregunta('Habitaciones ocupadas')">🔴 Ocupadas</button>
+            <button class="action-chip" onclick="enviarPregunta('Trabajadores por empresa')">🏢 Empresas</button>
+            <button class="action-chip" onclick="enviarPregunta('Solicitudes pendientes')">⏳ Solicitudes</button>
+            <button class="action-chip" onclick="enviarPregunta('Capacidad de camas')">🛏️ Camas</button>
+            <button class="action-chip" onclick="limpiarChat()">🗑️ Limpiar</button>
+        </div>
+
+        <!-- Input -->
+        <div class="input-area">
+            <div class="input-wrap">
+                <textarea
+                    id="chat-input"
+                    class="chat-input"
+                    placeholder="Escribe tu pregunta aquí... ej: ¿Cuántas habitaciones libres hay en el Pabellón 3?"
+                    rows="1"
+                    autofocus
+                ></textarea>
+                <button class="send-btn" id="send-btn" onclick="enviarDesdeInput()" title="Enviar (Enter)">
+                    ➤
+                </button>
+            </div>
+            <p class="input-hint">Presiona <kbd style="background:#f1f5f9;padding:1px 6px;border-radius:4px;font-size:10px;">Enter</kbd> para enviar · <kbd style="background:#f1f5f9;padding:1px 6px;border-radius:4px;font-size:10px;">Shift+Enter</kbd> para nueva línea</p>
+        </div>
+    </div>
+</div>
+
+<script type="module">
+    import { procesarConsulta, cargarDatos } from './js/consultas.js';
+
+    const inputEl = document.getElementById('chat-input');
+    const sendBtn = document.getElementById('send-btn');
+    const messagesArea = document.getElementById('messages-area');
+    const welcomeScreen = document.getElementById('welcome-screen');
+    const actionsRow = document.getElementById('actions-row');
+    const statusLabel = document.getElementById('status-label');
+
+    let isProcessing = false;
+    let dbReady = false;
+
+    // ── Verificar que la DB tiene datos al cargar ────────────────────────
+    async function checkDB() {
+        try {
+            const datos = await cargarDatos();
+            const totalItems = datos.rooms.length + datos.buildings.length;
+            if (totalItems === 0) {
+                statusLabel.textContent = '⚠️ Sin datos (inicia sesión primero)';
+                statusLabel.style.color = '#b45309';
+                // Agregar aviso visible en la pantalla de bienvenida
+                const aviso = document.createElement('div');
+                aviso.style.cssText = `
+                    background:#fffbeb;border:1px solid #fde68a;border-radius:12px;
+                    padding:12px 16px;margin-top:20px;font-size:13px;color:#b45309;
+                    font-weight:600;max-width:460px;line-height:1.5;
+                `;
+                aviso.innerHTML = `⚠️ <strong>Base de datos vacía.</strong> Abre primero la aplicación principal e inicia sesión para que los datos del campamento estén disponibles. Luego recarga esta página.`;
+                document.querySelector('.welcome-screen')?.appendChild(aviso);
+            } else {
+                dbReady = true;
+                statusLabel.textContent = `✅ ${datos.rooms.length} hab. · ${datos.buildings.length} edif.`;
+                statusLabel.style.color = '#16a34a';
+                setTimeout(() => {
+                    statusLabel.textContent = 'Sistema listo';
+                    statusLabel.style.color = '';
+                }, 3000);
+            }
+        } catch (e) {
+            statusLabel.textContent = '❌ Error conectando DB';
+            statusLabel.style.color = '#c0392b';
+            console.error('[Consultas] DB check failed:', e);
+        }
+    }
+
+    checkDB();
+
+    // ── Auto-resize textarea ─────────────────────────────
+    inputEl.addEventListener('input', () => {
+        inputEl.style.height = 'auto';
+        inputEl.style.height = Math.min(inputEl.scrollHeight, 120) + 'px';
+    });
+
+    // ── Enter to send ────────────────────────────────────
+    inputEl.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            enviarDesdeInput();
+        }
+    });
+
+    // ── Enviar desde input ───────────────────────────────
+    window.enviarDesdeInput = function() {
+        const pregunta = inputEl.value.trim();
+        if (!pregunta || isProcessing) return;
+        inputEl.value = '';
+        inputEl.style.height = 'auto';
+        enviarPregunta(pregunta);
+    };
+
+    // ── Enviar pregunta ──────────────────────────────────
+    window.enviarPregunta = async function(pregunta) {
+        if (isProcessing) return;
+        isProcessing = true;
+        sendBtn.disabled = true;
+        statusLabel.textContent = 'Analizando...';
+        statusLabel.style.color = '';
+
+        // Mostrar chat, ocultar bienvenida
+        welcomeScreen.style.display = 'none';
+        messagesArea.style.display = 'flex';
+        actionsRow.style.display = 'flex';
+
+        // Burbuja del usuario
+        const userMsg = document.createElement('div');
+        userMsg.className = 'msg-user';
+        userMsg.innerHTML = `<div class="msg-user-bubble">${escapeHTML(pregunta)}</div>`;
+        messagesArea.appendChild(userMsg);
+
+        // Loader
+        const loaderId = 'loader-' + Date.now();
+        const loaderMsg = document.createElement('div');
+        loaderMsg.className = 'msg-bot';
+        loaderMsg.id = loaderId;
+        loaderMsg.innerHTML = `
+            <div class="msg-bot-header">
+                <div class="bot-avatar"><img src="Mirian.png" alt="Constanza" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"></div>
+                <span>Constanza · analizando datos...</span>
+            </div>
+            <div class="msg-loading">
+                <div class="loading-dot"></div>
+                <div class="loading-dot"></div>
+                <div class="loading-dot"></div>
+            </div>`;
+        messagesArea.appendChild(loaderMsg);
+        scrollToBottom();
+
+        try {
+            // Pequeña pausa para que se vea el loader
+            await new Promise(r => setTimeout(r, 500));
+            const informe = await procesarConsulta(pregunta);
+
+            // Reemplazar loader con respuesta
+            document.getElementById(loaderId)?.remove();
+
+            const botMsg = document.createElement('div');
+            botMsg.className = 'msg-bot';
+            botMsg.innerHTML = `
+                <div class="msg-bot-header">
+                    <div class="bot-avatar"><img src="Mirian.png" alt="Constanza" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"></div>
+                    <span>Constanza · ${new Date().toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' })}</span>
+                </div>
+                <div class="msg-bot-card">${informe}</div>`;
+            messagesArea.appendChild(botMsg);
+            statusLabel.textContent = 'Sistema listo';
+            statusLabel.style.color = '';
+            dbReady = true;
+
+        } catch (err) {
+            document.getElementById(loaderId)?.remove();
+            const esErrorDB = err.message?.includes('IDB') || err.message?.includes('IndexedDB') || err.message?.includes('transaction');
+            const errMsg = document.createElement('div');
+            errMsg.className = 'msg-bot';
+            errMsg.innerHTML = `
+                <div class="msg-bot-header">
+                    <div class="bot-avatar"><img src="Mirian.png" alt="Constanza" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"></div>
+                    <span>Constanza</span>
+                </div>
+                <div class="msg-bot-card" style="color:#c0392b;line-height:1.6;">
+                    ⚠️ <strong>${esErrorDB ? 'Error de base de datos' : 'Error al procesar la consulta'}</strong><br>
+                    <span style="font-size:13px;color:#64748b;">${escapeHTML(err.message)}</span>
+                    ${esErrorDB ? '<br><br>💡 <em>Intenta abrir la aplicación principal primero y luego regresa aquí.</em>' : ''}
+                </div>`;
+            messagesArea.appendChild(errMsg);
+            statusLabel.textContent = '⚠️ Error';
+            statusLabel.style.color = '#c0392b';
+            console.error('[Consultas]', err);
+        }
+
+        isProcessing = false;
+        sendBtn.disabled = false;
+        scrollToBottom();
+    };
+
+    // ── Limpiar chat ─────────────────────────────────────
+    window.limpiarChat = function() {
+        messagesArea.innerHTML = '';
+        messagesArea.style.display = 'none';
+        actionsRow.style.display = 'none';
+        welcomeScreen.style.display = 'flex';
+    };
+
+    // ── Scroll al fondo ──────────────────────────────────
+    function scrollToBottom() {
+        requestAnimationFrame(() => {
+            messagesArea.scrollTop = messagesArea.scrollHeight;
+        });
+    }
+
+    // ── Escape HTML ──────────────────────────────────────
+    function escapeHTML(str) {
+        const div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+    }
+</script>
+
+</body>
+</html>
+

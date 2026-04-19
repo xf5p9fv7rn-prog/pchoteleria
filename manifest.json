@@ -1,0 +1,26 @@
+{
+  "name": "PC Hotelería",
+  "short_name": "PC Hotel",
+  "description": "Sistema de Gestión de Hotelería Industrial y Campamentos",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#f8f9fa",
+  "theme_color": "#c0392b",
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["business", "productivity"],
+  "lang": "es"
+}

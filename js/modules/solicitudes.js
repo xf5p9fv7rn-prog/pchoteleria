@@ -395,17 +395,16 @@ export async function renderSolicitudes(container) {
 
                 if (shouldRemove) {
                     affectedWorkers.add(bed.occupant);
-                    r.beds[bedKey] = { occupant: '', arrivalDate: '', departureDate: '', company: '', shift: '' };
+                    r.beds[bedKey] = { occupant: null, arrivalDate: null, departureDate: null, company: null, shift: null, rut: null, gender: null };
                     affectedCount++;
                     changed = true;
                 }
             });
 
             if (changed) {
-                // 🔥 INYECTADO: Verifica que no quede nadie
                 if (!r.beds?.day?.occupant && !r.beds?.night?.occupant && !r.beds?.extra?.occupant) {
                     if (r.status !== 'blocked') r.status = 'free';
-                    r.gender = '';
+                    r.gender = null;
                 }
                 roomsToUpdate.push(r);
             }
@@ -1108,14 +1107,10 @@ function setupRequestHandlers() {
     };
 
     window.applyRangeAssignment = async () => {
-        const bId = document.getElementById('bulk-range-building').value;
+        const bId   = document.getElementById('bulk-range-building').value;
         const start = parseInt(document.getElementById('bulk-range-start').value);
         const end   = parseInt(document.getElementById('bulk-range-end').value);
-
-        if (!bId || isNaN(start) || isNaN(end) || start > end) {
-            showToast('Por favor seleccione un Pabellón y un rango válido (Desde <= Hasta).', 'warn');
-            return;
-        }
+        const rangeOk = bId && !isNaN(start) && !isNaN(end) && start <= end;
 
         const checkboxes = document.querySelectorAll('#directed-workers-tbody .worker-checkbox:checked:not([disabled])');
         if (checkboxes.length === 0) {
@@ -1128,11 +1123,26 @@ function setupRequestHandlers() {
         const req      = requests.find(x => x.id == reqId);
         if (!req) return;
 
-        const roomsData  = await getAll('rooms');
+        // Verificar si los marcados tienen habitación del Excel
+        const workerIdxs = Array.from(checkboxes).map(cb => parseInt(cb.value));
+        const selectedWorkers = workerIdxs.map(i => req.workers[i]).filter(Boolean);
+        const conHabExcel = selectedWorkers.filter(w => w.assignedRoom).length;
+
+        // Si ningún trabajador tiene hab. del Excel Y no hay rango → pedir rango
+        if (!rangeOk && conHabExcel === 0) {
+            showToast('Por favor seleccione un Pabellón y un rango válido (Desde ≤ Hasta).', 'warn');
+            return;
+        }
+        // Si algunos tienen hab. pero no todos y no hay rango → advertir pero continuar
+        if (!rangeOk && conHabExcel < selectedWorkers.length) {
+            showToast(`⚡ ${conHabExcel} trabajadores tienen hab. de Excel → asignando directo. ${selectedWorkers.length - conHabExcel} sin habitación quedarán pendientes.`, 'info');
+        }
+
+        const roomsData   = await getAll('rooms');
         const targetFloor = document.getElementById('bulk-range-floor')?.value || '';
 
-        // ── 1. Candidatos según rango / piso ─────────────────────────────
-        const candidates = roomsData.filter(r =>
+        // ── 1. Candidatos según rango / campamento completo ─────────────────
+        const candidates = !rangeOk ? [] : roomsData.filter(r =>
             String(r.buildingId) === String(bId) &&
             parseInt(r.number) >= start &&
             parseInt(r.number) <= end &&
@@ -1263,14 +1273,40 @@ function setupRequestHandlers() {
                 const wSex    = worker.sex || 'M';
                 const wShiftK = (worker.shiftSystem || worker.shiftName || '').trim().toLowerCase();
 
-                // 1️⃣ Intentar en el rango primero
-                let bed = findBed(wSex, wShiftK, roomState);
+                let bed = null;
 
-                // 2️⃣ Fallback: buscar en todo el campamento (respetando empresa/turno)
+                // ── 🎯 PRIORIDAD 0: habitación específica definida en el Excel ──────
+                // Si el Excel tenía HABITACION = 4101, ir DIRECTO a esa habitación.
+                // Solo cae al auto-assign si la habitación está llena/bloqueada/género.
+                if (worker.assignedRoom) {
+                    const targetNum = String(worker.assignedRoom).trim();
+                    const specificRoom = roomsData.find(r =>
+                        String(r.number) === targetNum ||
+                        parseInt(r.number, 10) === parseInt(targetNum, 10)
+                    );
+                    if (specificRoom) {
+                        const rId  = String(specificRoom.id);
+                        const rs   = roomState[rId] || roomStateAll[rId];
+                        if (rs && rs.beds.length > 0 && (!rs.gender || rs.gender === wSex)) {
+                            const bedObj = rs.beds.shift();
+                            rs.gender  = wSex;
+                            rs.company = workerCompany;
+                            bed = { val: bedObj.val, slot: bedObj.slot, roomNum: rs.roomNum, outOfRange: false };
+                        } else if (!rs) {
+                            console.warn(`[Solicitudes] Hab. ${targetNum} no disponible para ${worker.name} (llena o sin camas libres)`);
+                        }
+                    } else {
+                        console.warn(`[Solicitudes] Hab. ${targetNum} no encontrada en DB para ${worker.name}`);
+                    }
+                }
+
+                // ── 1️⃣ Auto-assign en el rango ────────────────────────────────────
+                if (!bed) bed = findBed(wSex, wShiftK, roomState);
+
+                // ── 2️⃣ Fallback campamento completo ──────────────────────────────
                 if (!bed) bed = findBed(wSex, wShiftK, roomStateAll);
 
-                // 3️⃣ Último recurso: cualquier hab vacía del campamento (solo género)
-                //    Garantiza que YASNA (o cualquier trabajador solitario) siempre encuentre hab.
+                // ── 3️⃣ Último recurso (solo género) ──────────────────────────────
                 if (!bed) bed = findBed(wSex, wShiftK, roomStateAll, true);
                 if (!bed) bed = findBed(wSex, wShiftK, roomState,    true);
 
@@ -1297,12 +1333,16 @@ function setupRequestHandlers() {
             }
         }
 
-        if (failCount === 0 && outOfRangeCount === 0) {
-            showToast(`✅ ¡${successCount} trabajadores asignados dentro del rango!`, 'success');
+        if (failCount === 0 && outOfRangeCount === 0 && !rangeOk) {
+            // MODO EXCEL: Inyectar + Guardar automático en un solo paso
+            showToast(`⏳ Guardando ${successCount} habitaciones del Excel...`, 'info');
+            setTimeout(() => window.saveDirectedAssignment(), 200);
+        } else if (failCount === 0 && outOfRangeCount === 0) {
+            showToast(`✅ ¡${successCount} trabajadores pre-seleccionados! Presiona 💾 Guardar para confirmar.`, 'success');
         } else if (failCount === 0 && outOfRangeCount > 0) {
-            showToast(`✅ ${successCount} asignados — ${outOfRangeCount} se asignaron fuera del rango (sí tienen habitación, pero no había camas de su género en el rango).`, 'warn');
+            showToast(`✅ ${successCount} pre-seleccionados — ${outOfRangeCount} fuera del rango. Presiona 💾 Guardar para confirmar.`, 'warn');
         } else if (successCount > 0) {
-            showToast(`⚠️ ${successCount} asignados. ${failCount} sin cama disponible en todo el campamento (verifica habitaciones bloqueadas).`, 'warn');
+            showToast(`⚠️ ${successCount} pre-seleccionados. ${failCount} sin cama disponible. Presiona 💾 Guardar.`, 'warn');
         } else {
             showToast('🚨 Sin camas disponibles. Revisa si hay habitaciones bloqueadas o el campamento está lleno.', 'error');
         }
@@ -1713,13 +1753,12 @@ window.limpiarTodasAsignaciones = async () => {
 
     rooms.forEach(r => {
         if (r.beds) {
-            if (r.beds.day) r.beds.day = { occupant: '', arrivalDate: '', departureDate: '', company: '', shift: '' };
-            if (r.beds.night) r.beds.night = { occupant: '', arrivalDate: '', departureDate: '', company: '', shift: '' };
-            // 🔥 INYECTADO: Limpia la 3ra cama si existe
-            if (r.beds.extra) r.beds.extra = { occupant: '', arrivalDate: '', departureDate: '', company: '', shift: '' };
+            if (r.beds.day)   r.beds.day   = { occupant: null, arrivalDate: null, departureDate: null, company: null, shift: null, rut: null, gender: null };
+            if (r.beds.night) r.beds.night = { occupant: null, arrivalDate: null, departureDate: null, company: null, shift: null, rut: null, gender: null };
+            if (r.beds.extra) r.beds.extra = { occupant: null, arrivalDate: null, departureDate: null, company: null, shift: null, rut: null, gender: null };
         }
         r.status = r.status === 'blocked' ? 'blocked' : 'free';
-        r.gender = '';
+        r.gender = null;
     });
 
     reqs.forEach(rq => {

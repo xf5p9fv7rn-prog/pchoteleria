@@ -624,6 +624,9 @@ export async function renderDashboard(container) {
     if (window._dashboardDbHandler) window.removeEventListener('db:changed', window._dashboardDbHandler);
     let _dashRefreshTimer = null;
     window._dashboardDbHandler = (e) => {
+        // 🔒 CRÍTICO: Solo re-renderizar si el dashboard SIGUE siendo la vista activa
+        // Sin esto, el dashboard pisaba Infraestructura/Censo/Reservas cada vez que se guardaba
+        if (window._currentRoute !== 'dashboard') return;
         if (!['rooms', 'b2b_requests', 'buildings'].includes(e.detail?.storeName)) return;
         if (e.detail?.source === 'cloud') return;
         clearTimeout(_dashRefreshTimer);

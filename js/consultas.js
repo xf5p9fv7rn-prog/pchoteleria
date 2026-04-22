@@ -1,33 +1,25 @@
 /**
  * PC Hotelería — Motor de Consultas en Lenguaje Natural
- * Interpreta preguntas en español y genera informes con datos reales de IndexedDB
- * Funciona 100% offline, sin API externas.
+ * Interpreta preguntas en español y genera informes con datos reales.
+ * Lee desde Supabase (cualquier dispositivo) con respaldo en IndexedDB (offline).
  */
 
 const DB_NAME = 'campmanager_db';
-// Intentamos con la versión actual; si falla usamos la que ya existe
 const DB_VERSION = 3;
 
 let _db = null;
 
-// ── Abrir IndexedDB ────────────────────────────────────────────────────
-// NOTA: consultas.js abre la misma DB que app.js en modo solo-lectura.
-// Es fundamental NO hacer upgrade de versión aquí para no interferir.
+// ── Abrir IndexedDB (respaldo offline) ────────────────────────────────
 function openDB() {
     if (_db) return Promise.resolve(_db);
     return new Promise((resolve, reject) => {
-        // Primero intentamos abrir sin especificar versión
-        // para evitar disparar onupgradeneeded accidentalmente
         const reqProbe = indexedDB.open(DB_NAME);
         reqProbe.onsuccess = (e) => {
             const db = e.target.result;
             const existingVersion = db.version;
             db.close();
-
-            // Ahora abrimos con la versión que ya existe en disco
             const req = indexedDB.open(DB_NAME, existingVersion);
             req.onupgradeneeded = (ev) => {
-                // Crear stores faltantes si es necesario (no debe ocurrir normalmente)
                 const d = ev.target.result;
                 const stores = ['buildings', 'rooms', 'assignments', 'census',
                                 'b2b_requests', 'sync_queue', 'users', 'logs', 'census_records'];
@@ -47,36 +39,96 @@ function openDB() {
     });
 }
 
-// getAll con manejo robusto de errores: siempre devuelve [] en caso de fallo
 function getAll(storeName) {
     return new Promise(async (resolve) => {
         try {
             const db = await openDB();
-            // Verificar que el objectStore existe antes de acceder
-            if (!db.objectStoreNames.contains(storeName)) {
-                resolve([]);
-                return;
-            }
+            if (!db.objectStoreNames.contains(storeName)) { resolve([]); return; }
             const tx = db.transaction(storeName, 'readonly');
             const req = tx.objectStore(storeName).getAll();
             req.onsuccess = () => resolve(req.result || []);
-            req.onerror = (e) => {
-                console.warn(`[Consultas] Error leyendo '${storeName}':`, e.target.error);
-                resolve([]);
-            };
-            tx.onerror = (e) => {
-                console.warn(`[Consultas] Error de transacción '${storeName}':`, e.target.error);
-                resolve([]);
-            };
-        } catch (e) {
-            console.warn(`[Consultas] Error abriendo DB para '${storeName}':`, e);
-            resolve([]);
-        }
+            req.onerror = () => resolve([]);
+            tx.onerror = () => resolve([]);
+        } catch (e) { resolve([]); }
     });
 }
 
-// ── Cargar todos los datos del sistema ────────────────────────────────
+// ── Supabase lazy loader ───────────────────────────────────────────────
+let _supabase = null;
+async function getSupabase() {
+    if (_supabase) return _supabase;
+    try {
+        const mod = await import('./supabaseClient.js');
+        _supabase = mod.supabase;
+    } catch(e) {
+        console.warn('[Constanza] No se pudo cargar supabaseClient:', e);
+    }
+    return _supabase;
+}
+
+// ── Cargar datos: _memCache (Dashboard) → Supabase → IndexedDB ────────
 async function cargarDatos() {
+    // 🥇 PRIORIDAD 1: Usar el mismo caché en memoria que el Dashboard.
+    //    window._memCache lo gestiona db.js con datos locales protegidos.
+    //    Esto garantiza que Constanza y el Dashboard siempre muestren lo mismo.
+    if (window._memCache) {
+        const rooms     = window._memCache['rooms']          || [];
+        const buildings = window._memCache['buildings']      || [];
+        const requests  = window._memCache['b2b_requests']   || [];
+        const quotas    = window._memCache['gerencia_quotas'] || [];
+        if (rooms.length > 0) {
+            console.log(`[Constanza] ⚡ Cache local: ${rooms.length} hab, ${buildings.length} edif`);
+            return { rooms, buildings, requests, census: [], quotas };
+        }
+    }
+
+    // 🥈 PRIORIDAD 2: Supabase con paginación completa (otros dispositivos)
+    // Supabase devuelve máximo 1000 filas por request — necesitamos paginar
+    try {
+        const sb = await getSupabase();
+        if (sb) {
+            // ── Helper: descargar todas las páginas de una tabla ────────────
+            async function fetchAll(table) {
+                let all = [];
+                let offset = 0;
+                const PAGE = 500;
+                while (true) {
+                    const { data, error } = await sb
+                        .from(table)
+                        .select('*')
+                        .range(offset, offset + PAGE - 1);
+                    if (error || !data || data.length === 0) break;
+                    all = all.concat(data);
+                    if (data.length < PAGE) break; // última página
+                    offset += PAGE;
+                }
+                return all;
+            }
+
+            const [rooms, buildings, requests, quotas] = await Promise.all([
+                fetchAll('rooms'),
+                fetchAll('buildings'),
+                fetchAll('b2b_requests'),
+                fetchAll('gerencia_quotas'),
+            ]);
+
+            if (rooms.length > 0) {
+                console.log(`[Constanza] ☁️ Supabase (paginado): ${rooms.length} hab, ${buildings.length} edif`);
+                return {
+                    rooms,
+                    buildings: buildings || [],
+                    requests:  requests  || [],
+                    census:    [],
+                    quotas:    quotas    || []
+                };
+            }
+        }
+    } catch(e) {
+        console.warn('[Constanza] Supabase no disponible, usando IndexedDB:', e);
+    }
+
+    // 🥉 PRIORIDAD 3: IndexedDB local (offline)
+    console.log('[Constanza] 📦 IndexedDB local');
     const [rooms, buildings, requests, census, quotas] = await Promise.all([
         getAll('rooms'),
         getAll('buildings'),
@@ -85,6 +137,44 @@ async function cargarDatos() {
         getAll('gerencia_quotas').catch(() => []),
     ]);
     return { rooms, buildings, requests, census, quotas };
+}
+
+
+// ── Helper: Panel Desplegable (accordion nativo) ─────────────────────────────
+// Usa <details>/<summary> HTML nativo — sin JS extra, sin dependencias.
+let _colId = 0;
+function collapsiblePanel(titulo, contenido, badge = '', color = '#2b6cb0', open = false) {
+    const id = `col_${++_colId}`;
+    const badgeHtml = badge
+        ? `<span style="background:${color}22;color:${color};padding:2px 10px;border-radius:99px;font-size:12px;font-weight:700;margin-left:8px;">${badge}</span>`
+        : '';
+    return `
+    <details ${open ? 'open' : ''} style="margin-bottom:10px;border-radius:14px;border:1.5px solid #e2e8f0;overflow:hidden;">
+        <summary style="padding:13px 18px;list-style:none;cursor:pointer;
+                        background:#f8fafc;display:flex;align-items:center;
+                        gap:8px;font-weight:800;font-size:14px;color:#1a202c;
+                        user-select:none;transition:background 0.15s;"
+                 onmouseover="this.style.background='#edf2f7'"
+                 onmouseout="this.style.background='#f8fafc'">
+            <span style="font-size:17px;transition:transform 0.25s" class="col-arrow-${id}">▶</span>
+            ${titulo}
+            ${badgeHtml}
+        </summary>
+        <div style="padding:14px 16px;background:#fff;">
+            ${contenido}
+        </div>
+    </details>
+    <script>
+    (()=>{
+        const det = document.currentScript.previousElementSibling;
+        if(!det) return;
+        det.addEventListener('toggle', ()=>{
+            const arr = det.querySelector('.col-arrow-${id}');
+            if(arr) arr.style.transform = det.open ? 'rotate(90deg)' : '';
+        });
+        if(det.open){ const arr=det.querySelector('.col-arrow-${id}'); if(arr) arr.style.transform='rotate(90deg)'; }
+    })();
+    </script>`;
 }
 
 // ── Normalización de texto ─────────────────────────────────────────────
@@ -165,12 +255,27 @@ function calcularEstadisticasHabitaciones(rooms, buildings) {
         });
     });
 
-    const porEdificio = {};
+    // 🌙 Hab / Camas de NOCHE: habitaciones en pabellones de turno noche
     const buildingMap = {};
-    buildings.forEach(b => buildingMap[b.id] = b.name || b.code);
-
+    buildings.forEach(b => buildingMap[b.id] = b);
+    let habNoche = 0, camasNoche = 0, camasNocheOcupadas = 0;
     rooms.forEach(r => {
-        const bName = buildingMap[r.buildingId] || `Edificio ${r.buildingId}`;
+        const b = buildingMap[r.buildingId];
+        const shift = (r.reservedShift || b?.shifts?.[0] || '').toLowerCase();
+        const isNoche = shift.includes('noche') || shift.includes('night');
+        if (isNoche) {
+            habNoche++;
+            const cap = r.bedCount || 2;
+            camasNoche += cap;
+            ['day', 'night', 'extra'].slice(0, cap).forEach(k => {
+                if (r.beds?.[k]?.occupant) camasNocheOcupadas++;
+            });
+        }
+    });
+
+    const porEdificio = {};
+    rooms.forEach(r => {
+        const bName = buildingMap[r.buildingId]?.name || `Edificio ${r.buildingId}`;
         if (!porEdificio[bName]) porEdificio[bName] = { total: 0, ocupadas: 0, libres: 0, camas: 0, camasOcupadas: 0 };
         porEdificio[bName].total++;
         if (r.status === 'occupied') porEdificio[bName].ocupadas++;
@@ -182,7 +287,8 @@ function calcularEstadisticasHabitaciones(rooms, buildings) {
         });
     });
 
-    return { total, ocupadas, libres, bloqueadas, totalCamas, camasOcupadas, porEdificio };
+    return { total, ocupadas, libres, bloqueadas, totalCamas, camasOcupadas,
+             habNoche, camasNoche, camasNocheOcupadas, porEdificio };
 }
 
 function extraerTrabajadores(rooms, buildings) {
@@ -318,6 +424,17 @@ function generarResumenGeneral(datos) {
                 <div class="kpi-value">${solicPend}<span style="font-size:14px;opacity:0.6;">/${solicTotal}</span></div>
                 <div class="kpi-label">Solicitudes Pendientes</div>
             </div>
+            ${stats.habNoche > 0 ? `
+            <div class="kpi-card" style="background:linear-gradient(135deg,#0f172a,#1e293b);border:none;">
+                <div class="kpi-icon">🌙</div>
+                <div class="kpi-value" style="color:#818cf8;">${stats.habNoche}</div>
+                <div class="kpi-label" style="color:#94a3b8;">Hab. Noche</div>
+            </div>
+            <div class="kpi-card" style="background:linear-gradient(135deg,#0f172a,#1e293b);border:none;">
+                <div class="kpi-icon">🌙🛏️</div>
+                <div class="kpi-value" style="color:#818cf8;">${stats.camasNocheOcupadas}<span style="font-size:14px;opacity:0.5;">/${stats.camasNoche}</span></div>
+                <div class="kpi-label" style="color:#94a3b8;">Camas Noche Usadas</div>
+            </div>` : ''}
         </div>
 
         <h3 class="section-title">📊 Estado por Edificio</h3>
@@ -370,14 +487,21 @@ function generarHabitacionesLibres(datos, edificioFiltro) {
             </div>
         </div>`;
 
+    let firstBuilding = true;
     Object.entries(porEdificio).sort((a, b) => a[0].localeCompare(b[0])).forEach(([nombre, habs]) => {
-        html += `<h3 class="section-title">🏢 ${nombre} <span style="background:#dcfce7;color:#16a34a;padding:2px 10px;border-radius:99px;font-size:13px;margin-left:8px;">${habs.length} libres</span></h3>
-        <div class="chips-grid">`;
-        habs.sort((a, b) => String(a.number).localeCompare(String(b.number), undefined, { numeric: true }))
-            .forEach(r => {
-                html += `<div class="room-chip free">Hab. ${r.number} <span>${r.bedCount || 2} camas</span></div>`;
-            });
-        html += `</div>`;
+        const chips = habs
+            .sort((a, b) => String(a.number).localeCompare(String(b.number), undefined, { numeric: true }))
+            .map(r => `<div class="room-chip free">Hab. ${r.number} <span>${r.bedCount || 2} camas</span></div>`)
+            .join('');
+
+        html += collapsiblePanel(
+            `🏢 ${nombre}`,
+            `<div class="chips-grid">${chips}</div>`,
+            `${habs.length} libres`,
+            '#16a34a',
+            firstBuilding // primer edificio abierto, el resto cerrado
+        );
+        firstBuilding = false;
     });
 
     html += `</div>`;
@@ -397,25 +521,52 @@ function generarHabitacionesOcupadas(datos, edificioFiltro) {
         });
     }
 
-    let rows = '';
-    habitaciones.sort((a, b) => {
-        const bna = buildingMap[a.buildingId]?.name || '';
-        const bnb = buildingMap[b.buildingId]?.name || '';
-        return bna.localeCompare(bnb) || String(a.number).localeCompare(String(b.number), undefined, { numeric: true });
-    }).forEach(r => {
-        const bnom = buildingMap[r.buildingId]?.name || `Ed.${r.buildingId}`;
-        const ocupantes = ['day', 'night', 'extra']
-            .filter(k => r.beds?.[k]?.occupant)
-            .map(k => `<div style="font-size:12px;"><b>${r.beds[k].occupant}</b> · ${r.beds[k].company || '—'} · <span style="color:#64748b;">${k === 'day' ? 'Día' : k === 'night' ? 'Noche' : 'Extra'}</span></div>`)
-            .join('');
-        rows += `
-        <tr>
-            <td style="padding:10px 12px;font-weight:700;">${bnom}</td>
-            <td style="padding:10px 12px;font-weight:600;">Hab. ${r.number}</td>
-            <td style="padding:10px 12px;">${ocupantes}</td>
-            <td style="padding:10px 12px;text-align:center;">${r.bedCount || 2}</td>
-            <td style="padding:10px 12px;text-align:center;">${['day','night','extra'].filter(k => r.beds?.[k]?.occupant).length}</td>
-        </tr>`;
+    // Agrupar por edificio
+    const porEdificio = {};
+    habitaciones
+        .sort((a, b) => {
+            const bna = buildingMap[a.buildingId]?.name || '';
+            const bnb = buildingMap[b.buildingId]?.name || '';
+            return bna.localeCompare(bnb) || String(a.number).localeCompare(String(b.number), undefined, { numeric: true });
+        })
+        .forEach(r => {
+            const bnom = buildingMap[r.buildingId]?.name || `Ed.${r.buildingId}`;
+            if (!porEdificio[bnom]) porEdificio[bnom] = [];
+            porEdificio[bnom].push(r);
+        });
+
+    let paneles = '';
+    let firstBuilding = true;
+    Object.entries(porEdificio).forEach(([bnom, habs]) => {
+        let rows = '';
+        habs.forEach(r => {
+            const ocupantes = ['day', 'night', 'extra']
+                .filter(k => r.beds?.[k]?.occupant)
+                .map(k => `<div style="font-size:12px;"><b>${r.beds[k].occupant}</b> · ${r.beds[k].company || '—'} · <span style="color:#64748b;">${k === 'day' ? 'Día' : k === 'night' ? 'Noche' : 'Extra'}</span></div>`)
+                .join('');
+            rows += `
+            <tr>
+                <td style="padding:8px 12px;font-weight:600;">Hab. ${r.number}</td>
+                <td style="padding:8px 12px;">${ocupantes}</td>
+                <td style="padding:8px 12px;text-align:center;">${r.bedCount || 2}</td>
+                <td style="padding:8px 12px;text-align:center;">${['day','night','extra'].filter(k => r.beds?.[k]?.occupant).length}</td>
+            </tr>`;
+        });
+
+        const tablaHTML = `
+            <table class="informe-table">
+                <thead><tr><th>Habitación</th><th>Ocupantes</th><th>Cap.</th><th>Ocup.</th></tr></thead>
+                <tbody>${rows}</tbody>
+            </table>`;
+
+        paneles += collapsiblePanel(
+            `🏢 ${bnom}`,
+            tablaHTML,
+            `${habs.length} hab.`,
+            '#c0392b',
+            firstBuilding
+        );
+        firstBuilding = false;
     });
 
     return `
@@ -427,15 +578,11 @@ function generarHabitacionesOcupadas(datos, edificioFiltro) {
                 <div class="kpi-label">Habitaciones Ocupadas${edificioFiltro ? ` — ${edificioFiltro}` : ''}</div>
             </div>
         </div>
-        <h3 class="section-title">🏠 Detalle de Habitaciones Ocupadas</h3>
-        <div class="table-wrap">
-            <table class="informe-table">
-                <thead><tr><th>Edificio</th><th>Habitación</th><th>Ocupantes</th><th>Cap.</th><th>Ocup.</th></tr></thead>
-                <tbody>${rows || '<tr><td colspan="5" style="text-align:center;padding:20px;color:#94a3b8;">Sin habitaciones ocupadas</td></tr>'}</tbody>
-            </table>
-        </div>
+        <h3 class="section-title">🏠 Detalle por Pabellón</h3>
+        ${paneles || '<p style="color:#94a3b8;text-align:center;padding:20px">Sin habitaciones ocupadas</p>'}
     </div>`;
 }
+
 
 function generarTrabajadoresPorEmpresa(datos, empresaFiltro) {
     const { rooms, buildings } = datos;
@@ -447,33 +594,75 @@ function generarTrabajadoresPorEmpresa(datos, empresaFiltro) {
         titulo = `Trabajadores de "${empresaFiltro.charAt(0).toUpperCase() + empresaFiltro.slice(1)}"`;
     }
 
-    const mujeres = trabajadores.filter(t => t.genero === 'F').length;
-    const hombres = trabajadores.filter(t => t.genero === 'M').length;
+    const mujeres  = trabajadores.filter(t => t.genero === 'F').length;
+    const hombres  = trabajadores.filter(t => t.genero === 'M').length;
     const empresas = agruparPorEmpresa(trabajadores);
 
-    let rows = '';
-    trabajadores.slice(0, 200).forEach((t, i) => {
-        rows += `
-        <tr style="${i % 2 === 0 ? 'background:#fafafa;' : ''}">
-            <td style="padding:8px 12px;font-weight:600;">${t.nombre}</td>
-            <td style="padding:8px 12px;">${t.empresa}</td>
-            <td style="padding:8px 12px;">${t.habitacion}</td>
-            <td style="padding:8px 12px;text-align:center;">
-                <span style="background:${t.genero === 'F' ? '#fce7f3' : '#dbeafe'};color:${t.genero === 'F' ? '#be185d' : '#1d4ed8'};padding:2px 8px;border-radius:99px;font-size:11px;font-weight:700;">${t.genero === 'F' ? '♀ Mujer' : '♂ Hombre'}</span>
-            </td>
-            <td style="padding:8px 12px;">${t.turno}</td>
-            <td style="padding:8px 12px;color:#64748b;font-size:12px;">${t.salida !== '—' ? '📅 ' + t.salida : '—'}</td>
-        </tr>`;
+    // Agrupar trabajadores por empresa para hacer cada empresa un desplegable
+    const porEmpresa = {};
+    trabajadores.forEach(t => {
+        const emp = t.empresa || 'Sin empresa';
+        if (!porEmpresa[emp]) porEmpresa[emp] = [];
+        porEmpresa[emp].push(t);
     });
 
-    let empresasHTML = '';
-    empresas.forEach(([emp, count]) => {
-        empresasHTML += `
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #f1f5f9;">
-            <span style="font-weight:600;">${emp}</span>
-            <span style="background:#fee2e2;color:#c0392b;padding:2px 10px;border-radius:99px;font-size:12px;font-weight:700;">${count} personas</span>
-        </div>`;
-    });
+    // Si hay filtro de empresa, mostrar tabla directamente (sin agrupar)
+    let cuerpo = '';
+    if (empresaFiltro || Object.keys(porEmpresa).length <= 1) {
+        // Una sola empresa o filtro activo → tabla directa
+        let rows = '';
+        trabajadores.slice(0, 200).forEach((t, i) => {
+            rows += `
+            <tr style="${i % 2 === 0 ? 'background:#fafafa;' : ''}">
+                <td style="padding:8px 12px;font-weight:600;">${t.nombre}</td>
+                <td style="padding:8px 12px;">${t.habitacion}</td>
+                <td style="padding:8px 12px;text-align:center;">
+                    <span style="background:${t.genero === 'F' ? '#fce7f3' : '#dbeafe'};color:${t.genero === 'F' ? '#be185d' : '#1d4ed8'};padding:2px 8px;border-radius:99px;font-size:11px;font-weight:700;">${t.genero === 'F' ? '♀' : '♂'}</span>
+                </td>
+                <td style="padding:8px 12px;">${t.turno}</td>
+                <td style="padding:8px 12px;color:#64748b;font-size:12px;">${t.salida !== '—' ? '📅 ' + t.salida : '—'}</td>
+            </tr>`;
+        });
+        cuerpo = `<div class="table-wrap">
+            <table class="informe-table">
+                <thead><tr><th>Nombre</th><th>Habitación</th><th>Género</th><th>Turno</th><th>Salida</th></tr></thead>
+                <tbody>${rows || '<tr><td colspan="5" style="text-align:center;padding:20px;color:#94a3b8;">Sin trabajadores</td></tr>'}</tbody>
+            </table></div>`;
+    } else {
+        // Múltiples empresas → un desplegable por empresa
+        let firstEmp = true;
+        Object.entries(porEmpresa)
+            .sort((a, b) => b[1].length - a[1].length) // mayor a menor
+            .forEach(([emp, lista]) => {
+                let rows = '';
+                lista.slice(0, 100).forEach((t, i) => {
+                    rows += `
+                    <tr style="${i % 2 === 0 ? 'background:#fafafa;' : ''}">
+                        <td style="padding:7px 12px;font-weight:600;">${t.nombre}</td>
+                        <td style="padding:7px 12px;">${t.habitacion}</td>
+                        <td style="padding:7px 12px;text-align:center;">
+                            <span style="background:${t.genero === 'F' ? '#fce7f3' : '#dbeafe'};color:${t.genero === 'F' ? '#be185d' : '#1d4ed8'};padding:2px 6px;border-radius:99px;font-size:11px;font-weight:700;">${t.genero === 'F' ? '♀' : '♂'}</span>
+                        </td>
+                        <td style="padding:7px 12px;">${t.turno}</td>
+                        <td style="padding:7px 12px;color:#64748b;font-size:12px;">${t.salida !== '—' ? '📅 ' + t.salida : '—'}</td>
+                    </tr>`;
+                });
+                if (lista.length > 100) rows += `<tr><td colspan="5" style="text-align:center;padding:10px;color:#94a3b8;font-size:12px;">... y ${lista.length - 100} más</td></tr>`;
+
+                const tablaHTML = `<div class="table-wrap"><table class="informe-table">
+                    <thead><tr><th>Nombre</th><th>Habitación</th><th>Género</th><th>Turno</th><th>Salida</th></tr></thead>
+                    <tbody>${rows}</tbody></table></div>`;
+
+                cuerpo += collapsiblePanel(
+                    `🏢 ${emp}`,
+                    tablaHTML,
+                    `${lista.length} personas`,
+                    '#c0392b',
+                    firstEmp
+                );
+                firstEmp = false;
+            });
+    }
 
     return `
     <div class="informe-section">
@@ -494,18 +683,11 @@ function generarTrabajadoresPorEmpresa(datos, empresaFiltro) {
                 <div class="kpi-label">Mujeres ${porcentaje(mujeres, trabajadores.length)}</div>
             </div>
         </div>
-        ${!empresaFiltro && empresas.length > 0 ? `
-        <h3 class="section-title">🏢 Por Empresa</h3>
-        <div style="background:#fff;border-radius:16px;padding:16px;border:1px solid #f1f5f9;margin-bottom:20px;">${empresasHTML}</div>` : ''}
-        <h3 class="section-title">📋 Lista de Trabajadores ${trabajadores.length > 200 ? '(primeros 200)' : ''}</h3>
-        <div class="table-wrap">
-            <table class="informe-table">
-                <thead><tr><th>Nombre</th><th>Empresa</th><th>Habitación</th><th>Género</th><th>Turno</th><th>Salida</th></tr></thead>
-                <tbody>${rows || '<tr><td colspan="6" style="text-align:center;padding:20px;color:#94a3b8;">Sin trabajadores encontrados</td></tr>'}</tbody>
-            </table>
-        </div>
+        <h3 class="section-title">📋 ${empresaFiltro ? 'Lista de Trabajadores' : 'Trabajadores por Empresa'}</h3>
+        ${cuerpo}
     </div>`;
 }
+
 
 function generarSolicitudes(datos) {
     const { requests } = datos;
@@ -568,7 +750,7 @@ function generarEdificioDetalle(datos, edificioFiltro) {
     });
 
     if (!building) {
-        return `<div class="informe-section"><p style="color:#64748b;text-align:center;padding:40px;">❌ No se encontró el edificio "<b>${edificioFiltro}</b>". Intenta con "Pabellón 3", "P-3" o "Edificio 220".</p></div>`;
+        return `<div class="informe-section"><p style="color:#64748b;text-align:center;padding:40px;">❌ No se encontró el edificio "<b>${edificioFiltro}</b>". Intenta con "Pabellón 3", "P-3" o "R-220".</p></div>`;
     }
 
     const habsEdif = rooms.filter(r => r.buildingId === building.id);
@@ -767,6 +949,10 @@ function generarCamasPerdidas(datos, edificioFiltro) {
             const camaOcupada = ['day', 'night', 'extra'].find(k => r.beds?.[k]?.occupant);
             const bed = r.beds?.[camaOcupada];
             const camasLibres = (r.bedCount || 2) - 1;
+            const motivo = r.lostBedReason || '';
+            const motivoBadge = motivo
+                ? `<span style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:700;">${motivo}</span>`
+                : `<span style="background:#f1f5f9;color:#94a3b8;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600;">Sin motivo</span>`;
             rows += `
             <tr>
                 <td style="padding:10px 12px;font-weight:700;">${bnom}</td>
@@ -781,6 +967,7 @@ function generarCamasPerdidas(datos, edificioFiltro) {
                 <td style="padding:10px 12px;text-align:center;">
                     <span style="background:#fef3c7;color:#b45309;padding:3px 10px;border-radius:99px;font-size:12px;font-weight:700;">⚠️ ${camasLibres} cama${camasLibres > 1 ? 's' : ''} libre${camasLibres > 1 ? 's' : ''}</span>
                 </td>
+                <td style="padding:10px 12px;">${motivoBadge}</td>
                 <td style="padding:10px 12px;font-size:12px;color:#64748b;">${bed?.departureDate ? '📅 ' + bed.departureDate : '—'}</td>
             </tr>`;
         });
@@ -846,11 +1033,12 @@ function generarCamasPerdidas(datos, edificioFiltro) {
                         <th>Ocupante solitario</th>
                         <th>Género</th>
                         <th>Camas perdidas</th>
+                        <th>Motivo</th>
                         <th>Salida</th>
                     </tr>
                 </thead>
                 <tbody>
-                    ${rows || '<tr><td colspan="6" style="text-align:center;padding:20px;color:#94a3b8;">✅ No hay camas perdidas — todas las habitaciones están correctamente aprovechadas</td></tr>'}
+                    ${rows || '<tr><td colspan="7" style="text-align:center;padding:20px;color:#94a3b8;">✅ No hay camas perdidas — todas las habitaciones están correctamente aprovechadas</td></tr>'}
                 </tbody>
             </table>
         </div>
@@ -1018,10 +1206,16 @@ function generarCuposGerencia(datos) {
 }
 
 // ── Camas por turno Día / Noche ───────────────────────────────────────────────
+// Lógica: si un edificio tiene mainShift='night', TODAS sus camas son de noche.
+// Si mainShift='day', TODAS son de día. Si 'mixed', se respeta el slot (day/night/extra).
 function generarCamasPorTurno(datos, edificioFiltro) {
     const { rooms, buildings } = datos;
     const buildingMap = {};
-    buildings.forEach(b => buildingMap[b.id] = { name: b.name || b.code, code: b.code });
+    buildings.forEach(b => buildingMap[b.id] = {
+        name: b.name || b.code,
+        code: b.code,
+        mainShift: b.mainShift || 'mixed'
+    });
 
     let roomsFiltrados = rooms;
     if (edificioFiltro) {
@@ -1032,21 +1226,43 @@ function generarCamasPorTurno(datos, edificioFiltro) {
         });
     }
 
-    // Contar camas por turno a nivel global y por edificio
     let totalDia = 0, usadaDia = 0, totalNoche = 0, usadaNoche = 0, totalExtra = 0, usadaExtra = 0;
 
     const porEdificio = {};
     roomsFiltrados.forEach(r => {
         const cap = r.bedCount || 2;
-        const bnom = buildingMap[r.buildingId]?.name || `Ed.${r.buildingId}`;
-        if (!porEdificio[bnom]) porEdificio[bnom] = { dia: 0, dia_u: 0, noche: 0, noche_u: 0, extra: 0, extra_u: 0 };
+        const bInfo = buildingMap[r.buildingId] || { name: `Ed.${r.buildingId}`, mainShift: 'mixed' };
+        const bnom = bInfo.name;
+        const ms = bInfo.mainShift; // 'day' | 'night' | 'mixed'
 
-        // day
-        if (cap >= 1)  { totalDia++;   if (r.beds?.day?.occupant)   { usadaDia++;   porEdificio[bnom].dia_u++; } porEdificio[bnom].dia++; }
-        // night
-        if (cap >= 2)  { totalNoche++; if (r.beds?.night?.occupant) { usadaNoche++; porEdificio[bnom].noche_u++; } porEdificio[bnom].noche++; }
-        // extra
-        if (cap >= 3)  { totalExtra++; if (r.beds?.extra?.occupant) { usadaExtra++; porEdificio[bnom].extra_u++; } porEdificio[bnom].extra++; }
+        if (!porEdificio[bnom]) porEdificio[bnom] = {
+            dia: 0, dia_u: 0, noche: 0, noche_u: 0, extra: 0, extra_u: 0, mainShift: ms
+        };
+
+        // Contar ocupantes de todas las camas de esta habitación
+        const ocupDia   = r.beds?.day?.occupant   ? 1 : 0;
+        const ocupNoche = r.beds?.night?.occupant ? 1 : 0;
+        const ocupExtra = r.beds?.extra?.occupant ? 1 : 0;
+        const totalOcup = ocupDia + ocupNoche + (cap >= 3 ? ocupExtra : 0);
+
+        if (ms === 'night') {
+            // Pabellón de noche → todas las camas son noche
+            totalNoche += cap;
+            usadaNoche += totalOcup;
+            porEdificio[bnom].noche += cap;
+            porEdificio[bnom].noche_u += totalOcup;
+        } else if (ms === 'day') {
+            // Pabellón de día → todas las camas son día
+            totalDia += cap;
+            usadaDia += totalOcup;
+            porEdificio[bnom].dia += cap;
+            porEdificio[bnom].dia_u += totalOcup;
+        } else {
+            // Mixto → cama día, cama noche, cama extra según slot
+            if (cap >= 1) { totalDia++;   usadaDia   += ocupDia;   porEdificio[bnom].dia++;   porEdificio[bnom].dia_u   += ocupDia; }
+            if (cap >= 2) { totalNoche++; usadaNoche += ocupNoche; porEdificio[bnom].noche++; porEdificio[bnom].noche_u += ocupNoche; }
+            if (cap >= 3) { totalExtra++; usadaExtra += ocupExtra; porEdificio[bnom].extra++; porEdificio[bnom].extra_u += ocupExtra; }
+        }
     });
 
     const libreDia   = totalDia   - usadaDia;
@@ -1056,20 +1272,31 @@ function generarCamasPorTurno(datos, edificioFiltro) {
     const pctNoche = totalNoche > 0 ? Math.round((usadaNoche / totalNoche) * 100) : 0;
     const pctExtra = totalExtra > 0 ? Math.round((usadaExtra / totalExtra) * 100) : 0;
 
+    const SHIFT_BADGE = {
+        day:   '<span style="background:#fef3c7;color:#b45309;padding:1px 6px;border-radius:99px;font-size:10px;font-weight:700;margin-left:4px">☀️ DÍA</span>',
+        night: '<span style="background:#dbeafe;color:#1d4ed8;padding:1px 6px;border-radius:99px;font-size:10px;font-weight:700;margin-left:4px">🌙 NOCHE</span>',
+        mixed: ''
+    };
+
     let edHTML = '';
     Object.entries(porEdificio).sort((a, b) => a[0].localeCompare(b[0])).forEach(([nom, ed]) => {
+        const badge = SHIFT_BADGE[ed.mainShift] || '';
         edHTML += `
         <tr>
-            <td style="padding:10px 12px;font-weight:700">${nom}</td>
+            <td style="padding:10px 12px;font-weight:700">${nom}${badge}</td>
             <td style="padding:10px 12px;text-align:center">
-                <span style="color:#b45309;font-weight:700">${ed.dia_u}</span>
-                <span style="color:#94a3b8">/${ed.dia}</span>
-                <span style="font-size:11px;color:#16a34a;margin-left:4px">(${ed.dia - ed.dia_u} libres)</span>
+                ${ed.dia > 0
+                    ? `<span style="color:#b45309;font-weight:700">${ed.dia_u}</span>
+                       <span style="color:#94a3b8">/${ed.dia}</span>
+                       <span style="font-size:11px;color:#16a34a;margin-left:4px">(${ed.dia - ed.dia_u} libres)</span>`
+                    : '<span style="color:#94a3b8;font-size:12px">—</span>'}
             </td>
             <td style="padding:10px 12px;text-align:center">
-                <span style="color:#1d4ed8;font-weight:700">${ed.noche_u}</span>
-                <span style="color:#94a3b8">/${ed.noche}</span>
-                <span style="font-size:11px;color:#16a34a;margin-left:4px">(${ed.noche - ed.noche_u} libres)</span>
+                ${ed.noche > 0
+                    ? `<span style="color:#1d4ed8;font-weight:700">${ed.noche_u}</span>
+                       <span style="color:#94a3b8">/${ed.noche}</span>
+                       <span style="font-size:11px;color:#16a34a;margin-left:4px">(${ed.noche - ed.noche_u} libres)</span>`
+                    : '<span style="color:#94a3b8;font-size:12px">—</span>'}
             </td>
             ${ed.extra > 0 ? `<td style="padding:10px 12px;text-align:center">
                 <span style="color:#7c3aed;font-weight:700">${ed.extra_u}</span>
@@ -1107,6 +1334,7 @@ function generarCamasPorTurno(datos, edificioFiltro) {
         </div>
     </div>`;
 }
+
 
 export async function procesarConsulta(pregunta) {
     if (!pregunta || !pregunta.trim()) {

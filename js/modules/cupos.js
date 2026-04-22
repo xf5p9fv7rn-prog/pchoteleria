@@ -6,6 +6,7 @@
 
 import { getAll, put, remove } from '../db.js';
 import { showToast } from '../utils.js';
+import { supabase } from '../supabaseClient.js';
 
 // ─── Timer de auto-refresh ────────────────────────────────────────────────────
 let _refreshTimer = null;
@@ -45,6 +46,18 @@ async function getUsageByGerencia(rooms) {
 }
 
 async function getAllQuotas() {
+    try {
+        // ☁️ Supabase como fuente principal — mismos datos en todos los PCs
+        const { data, error } = await supabase.from('gerencia_quotas').select('*');
+        if (!error && data && data.length >= 0) {
+            // Actualizar caché local también
+            for (const q of data) put('gerencia_quotas', q).catch(() => {});
+            return data;
+        }
+    } catch (e) {
+        console.warn('[Cupos] Supabase no disponible, usando IndexedDB local:', e.message);
+    }
+    // Fallback: IndexedDB local (modo offline)
     return getAll('gerencia_quotas').catch(() => []);
 }
 
@@ -388,8 +401,21 @@ export async function renderCupos(container) {
         btn.disabled = true; btn.textContent = '⏳ Guardando...';
 
         try {
+            // 1. Guardar en Supabase (fuente principal)
+            const { error: sbErr } = await supabase
+                .from('gerencia_quotas')
+                .upsert(record, { onConflict: 'id' });
+
+            if (sbErr) {
+                console.warn('[Cupos] Error Supabase, guardando solo local:', sbErr.message);
+                showToast('⚠️ Sin conexión — guardado local (sincronización pendiente)', 'warn');
+            } else {
+                showToast(`☁️ Cupo de "${gerencia}" sincronizado en todos los PCs`, 'success');
+            }
+
+            // 2. También en IndexedDB local (caché offline)
             await put('gerencia_quotas', record);
-            showToast(`Cupo de "${gerencia}" guardado`, 'success');
+
             window._closeQuotaModal();
             await renderCupos(container);
         } catch (err) {
@@ -438,7 +464,17 @@ export async function renderCupos(container) {
                     (q.gerencia||'').trim().toLowerCase() === gerLower
                 );
                 if (!record) { showToast('No se encontró el registro para borrar', 'error'); return; }
+
+                // 1. Borrar de Supabase
+                const { error: sbErr } = await supabase
+                    .from('gerencia_quotas')
+                    .delete()
+                    .eq('id', record.id);
+                if (sbErr) console.warn('[Cupos] Error al borrar en Supabase:', sbErr.message);
+
+                // 2. Borrar de IndexedDB local
                 await remove('gerencia_quotas', record.id);
+
                 showToast(`✅ Cupo de "${gerencia}" eliminado`, 'success');
                 await renderCupos(container);
             } catch(err) {
@@ -495,7 +531,7 @@ export async function checkQuotaBeforeAssign(company, gerencia) {
 
     const [rooms, quotas] = await Promise.all([
         getAll('rooms').catch(() => []),
-        getAll('gerencia_quotas').catch(() => [])
+        getAllQuotas()   // ☁️ ahora lee de Supabase
     ]);
 
     const lookupKey = `${(company||'').trim().toLowerCase()}||${(gerencia||'').trim().toLowerCase()}`;

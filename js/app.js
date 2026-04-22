@@ -3,7 +3,7 @@
  * Integrado con Supabase Auth y Sincronización Offline-First
  */
 
-import { openDB, getAll, getById, put, remove, seedDemoData, cleanupExpiredAssignments, getExpiredBeds, confirmCheckout, ensureDefaultUsers, ensureAramarkReservations, ensureAllRooms, freeAllRoomRestrictions, procesarColaDeSincronizacion, preloadAllData, initRealtimeSync } from './db.js';
+import { openDB, getAll, getById, put, remove, seedDemoData, cleanupExpiredAssignments, getExpiredBeds, confirmCheckout, ensureDefaultUsers, ensureAramarkReservations, ensureAllRooms, freeAllRoomRestrictions, procesarColaDeSincronizacion, preloadAllData, initRealtimeSync, startPeriodicCloudRefresh, autoPromoteNextOccupants } from './db.js';
 import { showToast, watchOnlineStatus } from './utils.js';
 import { renderDashboard } from './modules/dashboard.js';
 import { renderInfraestructura } from './modules/infraestructura.js?v=5';
@@ -16,8 +16,9 @@ import { renderCupos } from './modules/cupos.js';
 import { loginApp, logoutApp, checkSession } from './auth.js';
 
 // Exponer globalmente para uso en Dashboard e Infraestructura (después de todos los imports)
-window.__getExpiredBeds = getExpiredBeds;
-window.__confirmCheckout = confirmCheckout;
+window.__getExpiredBeds        = getExpiredBeds;
+window.__confirmCheckout       = confirmCheckout;
+window.__autoPromoteRotativo   = autoPromoteNextOccupants;
 
 // ── Current route ────────────────────────────────────
 let currentRoute = 'dashboard';
@@ -66,6 +67,11 @@ async function boot() {
                 showToast(`⚠️ Hay ${count} cama${count !== 1 ? 's' : ''} con salida pendiente de confirmación`, 'warn', 6000);
             }
         });
+
+        // 🔄 MODO ROTATIVO: promover nextOccupant → occupant cuando la fecha ya llegó
+        autoPromoteNextOccupants().then(n => {
+            if (n > 0) showToast(`🔄 ${n} trabajador${n !== 1 ? 'es' : ''} del turno entrante promovidos automáticamente`, 'success', 5000);
+        }).catch(() => {});
 
     } catch (e) { console.warn('[Boot] Maintenance failed', e); }
 
@@ -145,11 +151,66 @@ async function initApp() {
         initRealtimeSync(); // Re-suscribir si se recupera la conexión
     });
 
-    // 🔔 Si el módulo de Solicitudes está activo, refrescarlo al recibir cambio remoto
+    // 🔄 Auto-refresh periódico — garantiza convergencia aunque Realtime falle
+    startPeriodicCloudRefresh();
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // 🔴 TIEMPO REAL — Re-renderizar el módulo activo cuando llegan cambios
+    //    de otro dispositivo (Realtime Supabase O auto-refresh cada 20s)
+    // ══════════════════════════════════════════════════════════════════════════
+
+    // 🏢 HABITACIONES / INFRAESTRUCTURA
+    let _infraRefreshPending = false;
+    window.addEventListener('rooms-updated', () => {
+        const route = window._currentRoute;
+        const content = document.getElementById('page-content');
+        if (!content) return;
+
+        // 🔒 Guard: no re-renderizar si hay un modal abierto (carga masiva, Anglo, etc.)
+        const modalOpen = document.getElementById('carga-masiva-modal') ||
+                          document.getElementById('anglo-modal') ||
+                          document.querySelector('.modal-overlay.visible, .side-drawer-overlay.visible');
+        if (modalOpen) return;
+
+        if (route === 'infraestructura') {
+            if (_infraRefreshPending) return;
+            _infraRefreshPending = true;
+            setTimeout(async () => {
+                _infraRefreshPending = false;
+                if (window._allRooms !== undefined) {
+                    const { getAll } = await import('./db.js');
+                    window._allRooms = await getAll('rooms').catch(() => window._allRooms);
+                    const searchEl = document.getElementById('infra-search');
+                    if (searchEl) searchEl.dispatchEvent(new Event('input'));
+                }
+            }, 800);
+        }
+
+        if (route === 'dashboard') {
+            import('./modules/dashboard.js').then(m => m.renderDashboard(content)).catch(() => {});
+        }
+
+        if (route === 'censo') {
+            window.dispatchEvent(new CustomEvent('censo:refresh'));
+        }
+    });
+
+    // 📩 SOLICITUDES
     window.addEventListener('solicitudes-updated', () => {
         const content = document.getElementById('page-content');
-        if (content && window._activeModule === 'solicitudes') {
-            import('./modules/solicitudes.js?v=4').then(m => m.renderSolicitudes(content));
+        if (content && window._currentRoute === 'solicitudes') {
+            import('./modules/solicitudes.js?v=4').then(m => m.renderSolicitudes(content)).catch(() => {});
+        }
+    });
+
+    // 🎯 CUPOS POR GERENCIA  
+    window.addEventListener('db:changed', (e) => {
+        const { storeName, source } = e.detail || {};
+        if (storeName === 'gerencia_quotas' && source !== 'local') {
+            if (window._currentRoute === 'cupos') {
+                const content = document.getElementById('page-content');
+                if (content) import('./modules/cupos.js').then(m => m.renderCupos(content)).catch(() => {});
+            }
         }
     });
 
@@ -323,6 +384,7 @@ function navItemHTML(key, r) {
 async function navigate(route) {
     if (!(route in ROUTES)) return;
     currentRoute = route;
+    window._currentRoute = route; // 🔒 Exponer globalmente para guards en módulos
 
     document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
     document.getElementById(`nav-${route}`)?.classList.add('active');

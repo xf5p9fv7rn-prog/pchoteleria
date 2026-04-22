@@ -18,6 +18,12 @@ let allRooms = [];
 let allBuildings = [];
 let _lockRefreshTimer = null; // timer para refrescar el lock cada 2 min
 
+// Utilidad: retrasar la ejecución hasta que el usuario deje de escribir
+function debounce(fn, delay) {
+    let t;
+    return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), delay); };
+}
+
 const STATES_2BEDS = [
     { val: 'sin_ocupar', label: 'Sin Ocupar' },
     { val: 'dia', label: 'Día' },
@@ -50,6 +56,21 @@ export async function renderCenso(container) {
         getAll('rooms').catch(() => []),
     ]);
 
+    // ☁️ Si IndexedDB está vacío (dispositivo sin datos locales), cargar desde Supabase
+    if (allBuildings.length === 0 || allRooms.length === 0) {
+        try {
+            const [bRes, rRes] = await Promise.all([
+                supabase.from('buildings').select('*'),
+                supabase.from('rooms').select('*')
+            ]);
+            if (bRes.data?.length > 0) allBuildings = bRes.data;
+            if (rRes.data?.length > 0) allRooms = rRes.data;
+        } catch(e) {
+            console.warn('[Censo Portal] Supabase fallback failed:', e);
+        }
+    }
+
+    // ☁️ También cargar el censo de hoy desde Supabase si IndexedDB está vacío
     await loadTodayCensus();
     restoreSession();
 
@@ -161,6 +182,18 @@ async function loadTodayCensus() {
     const entries = await getAll('census').catch(() => []);
     censusMap = {};
     entries.filter(e => e.date === today).forEach(e => { censusMap[e.roomId] = e.state; });
+
+    // ☁️ También leer de Supabase si hay poca data local (portal móvil sin sync)
+    if (Object.keys(censusMap).length === 0) {
+        try {
+            const { data } = await supabase.from('census').select('*').eq('date', today);
+            if (data?.length > 0) {
+                data.forEach(e => { censusMap[e.roomId] = e.state; });
+            }
+        } catch(e) {
+            console.warn('[Censo] Supabase census load failed:', e);
+        }
+    }
 }
 
 function restoreSession() {
@@ -616,16 +649,31 @@ async function guardarCenso(container) {
     const rooms = allRooms.filter(r => String(r.buildingId) === String(bId) && String(r.floor) === String(floor));
 
     let saved = 0;
+    const supabaseRecords = [];
+
     for (const r of rooms) {
         const state = censusMap[r.id] || 'sin_ocupar';
-        await put('census', { roomId: r.id, date: today, state, rut, timestamp: ts });
+        // Guardar en IndexedDB local
+        await put('census', { roomId: r.id, date: today, state, rut, timestamp: ts }).catch(() => {});
+        // Preparar para Supabase (id compuesto para upsert)
+        supabaseRecords.push({ id: `${r.id}_${today}`, roomId: r.id, date: today, state, rut, timestamp: ts });
         saved++;
+    }
+
+    // ☁️ Guardar en Supabase para que sea visible en todos los dispositivos
+    if (supabaseRecords.length > 0) {
+        try {
+            await supabase.from('census').upsert(supabaseRecords, { onConflict: 'id' });
+        } catch(e) {
+            console.warn('[Censo] Error al sincronizar con Supabase:', e);
+            showToast('⚠️ Guardado local (sin conexión a la nube)', 'warn');
+        }
     }
 
     // 🔓 Liberar el lock del piso al guardar
     if (floorKey && rut) await releaseFloorLock(floorKey, rut);
 
-    showToast(`✅ Censo guardado — ${saved} habitaciones registradas`, 'success');
+    showToast(`✅ Censo guardado en la nube — ${saved} habitaciones registradas`, 'success');
 }
 
 function buildFloorOptions() {
@@ -785,7 +833,7 @@ async function renderMegaCenso(container) {
     </style>`;
 
     window.changeCensusMonth = async (val) => { if (val) { currentMonthObj = val; await renderCenso(container); } };
-    window.filterCensusGrid = filterExcelGrid;
+    window.filterCensusGrid = debounce(filterExcelGrid, 250); // ⚡ Debounce para no re-renderizar en cada keystroke
     window.renderCensoWrapper = () => renderCenso(container);
 
     renderExcelGrid();
@@ -871,15 +919,82 @@ function filterExcelGrid() {
     const tbody = document.getElementById('censo-tbody'); if (!tbody) return;
 
     const search = (document.getElementById('censo-search')?.value || '').toLowerCase();
-    const bId = document.getElementById('censo-building-filter')?.value || 'all';
-    const comp = document.getElementById('censo-company-filter')?.value || 'all';
+    const bId   = document.getElementById('censo-building-filter')?.value || 'all';
+    const comp  = document.getElementById('censo-company-filter')?.value  || 'all';
 
+    // ⚡ MODO RESUMEN: si no se filtra por un edificio específico, mostrar
+    // solo un resumen rápido (sin inputs) para no congelar el browser.
+    if (bId === 'all' && !search) {
+        const buildingMap = {};
+        allBuildings.forEach(b => buildingMap[b.id] = b.name);
+
+        // Agrupar filas por edificio
+        const resumen = {};
+        (window._censusRows || []).forEach(row => {
+            const bName = row.building || 'Sin edificio';
+            if (!resumen[bName]) resumen[bName] = { total: 0, ocupadas: 0, vacias: 0 };
+            resumen[bName].total++;
+            if (row.isOccupied) resumen[bName].ocupadas++;
+            else resumen[bName].vacias++;
+        });
+
+        tbody.innerHTML = `
+        <tr>
+            <td colspan="99" style="padding:0;border:none;">
+                <div style="padding:16px;background:#f0f9ff;border-radius:8px;margin:8px;text-align:center;color:#1e40af;font-weight:700;font-size:13px">
+                    📊 Vista Resumen — Selecciona un <strong>Pabellón</strong> para editar la planilla
+                </div>
+                <table style="width:100%;border-collapse:collapse;font-size:12px">
+                    <thead>
+                        <tr style="background:#f7fafc">
+                            <th style="padding:10px 16px;text-align:left;border-bottom:2px solid #e2e8f0;font-weight:800">Edificio / Pabellón</th>
+                            <th style="padding:10px 16px;text-align:center;border-bottom:2px solid #e2e8f0;font-weight:800">Total Camas</th>
+                            <th style="padding:10px 16px;text-align:center;border-bottom:2px solid #e2e8f0;color:#16a34a;font-weight:800">Ocupadas</th>
+                            <th style="padding:10px 16px;text-align:center;border-bottom:2px solid #e2e8f0;color:#dc2626;font-weight:800">Disponibles</th>
+                            <th style="padding:10px 16px;text-align:center;border-bottom:2px solid #e2e8f0;font-weight:800">Ocupación</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${Object.entries(resumen).sort((a,b)=>a[0].localeCompare(b[0])).map(([name, d]) => {
+                            const pct = d.total ? Math.round((d.ocupadas / d.total) * 100) : 0;
+                            const barColor = pct >= 90 ? '#dc2626' : pct >= 70 ? '#f59e0b' : '#16a34a';
+                            return `<tr style="border-bottom:1px solid #f1f5f9">
+                                <td style="padding:10px 16px;font-weight:700">${name}</td>
+                                <td style="padding:10px 16px;text-align:center">${d.total}</td>
+                                <td style="padding:10px 16px;text-align:center;color:#16a34a;font-weight:700">${d.ocupadas}</td>
+                                <td style="padding:10px 16px;text-align:center;color:#dc2626;font-weight:700">${d.vacias}</td>
+                                <td style="padding:10px 16px;text-align:center">
+                                    <div style="display:flex;align-items:center;gap:8px">
+                                        <div style="flex:1;background:#e2e8f0;border-radius:99px;height:8px;overflow:hidden">
+                                            <div style="width:${pct}%;height:100%;background:${barColor};border-radius:99px;transition:width 0.6s ease"></div>
+                                        </div>
+                                        <span style="font-weight:800;color:${barColor};min-width:36px">${pct}%</span>
+                                    </div>
+                                </td>
+                            </tr>`;
+                        }).join('')}
+                    </tbody>
+                </table>
+            </td>
+        </tr>`;
+        return;
+    }
+
+    // ⚡ MODO GRILLA DETALLADA: solo para UN edificio o búsqueda específica
     let html = '';
+    let rowCount = 0;
+    const MAX_ROWS = 150; // seguridad para evitar freeze
 
-    window._censusRows.forEach(row => {
-        if (bId !== 'all' && String(row.buildingId) !== String(bId)) return;
-        if (comp !== 'all' && row.company.toLowerCase() !== comp.toLowerCase()) return;
-        if (search && !`${row.building} ${row.roomNum} ${row.name} ${row.rut} ${row.company}`.toLowerCase().includes(search)) return;
+    for (const row of (window._censusRows || [])) {
+        if (bId !== 'all' && String(row.buildingId) !== String(bId)) continue;
+        if (comp !== 'all' && row.company.toLowerCase() !== comp.toLowerCase()) continue;
+        if (search && !`${row.building} ${row.roomNum} ${row.name} ${row.rut} ${row.company}`.toLowerCase().includes(search)) continue;
+        if (rowCount >= MAX_ROWS) {
+            html += `<tr><td colspan="99" style="text-align:center;padding:14px;background:#fffbeb;color:#92400e;font-weight:700">
+                ⚠️ Mostrando solo ${MAX_ROWS} filas — filtra por empresa o afina la búsqueda para ver más
+            </td></tr>`;
+            break;
+        }
 
         const manualRecord = censusRecords.find(x => x.rowId === row.rowId && x.month === currentMonthObj) || { marks: {} };
 
@@ -895,19 +1010,17 @@ function filterExcelGrid() {
         let totalX = 0;
         gridDays.forEach(dateStr => {
             const isWeekend = new Date(dateStr + 'T12:00:00').getDay() === 0 || new Date(dateStr + 'T12:00:00').getDay() === 6;
-            
-            // MAGIA: Leer lo que marcaron las hoteleras en Terreno
+
             const hoteleraData = allCensusData.find(c => c.roomId === row.roomId && c.date === dateStr);
             let autoX = false;
             if (hoteleraData) {
                 const s = hoteleraData.state;
-                if (s === 'dia' && row.bedKey === 'day') autoX = true;
+                if (s === 'dia'   && row.bedKey === 'day')   autoX = true;
                 if (s === 'noche' && row.bedKey === 'night') autoX = true;
                 if ((s === '2dia' || s === '2noche') && (row.bedKey === 'day' || row.bedKey === 'night')) autoX = true;
-                if (s === 'dia' && row.totalBeds === 1) autoX = true;
+                if (s === 'dia'   && row.totalBeds === 1) autoX = true;
             }
 
-            // Prioridad: Si hay sobreescritura manual Admin, usar esa, sino usar la automática de la hotelera.
             let val = '';
             if (manualRecord.marks[dateStr] !== undefined) val = manualRecord.marks[dateStr];
             else if (autoX) val = 'X';
@@ -918,10 +1031,18 @@ function filterExcelGrid() {
         });
 
         html += `<td style="font-weight: 800; background: #f0f9ff; color: #2b6cb0;" id="total_${row.rowId}">${totalX}</td></tr>`;
-    });
+        rowCount++;
+    }
+
+    if (rowCount === 0 && !html) {
+        html = `<tr><td colspan="99" style="text-align:center;padding:30px;color:var(--text-muted)">
+            📭 Ninguna fila coincide con los filtros aplicados
+        </td></tr>`;
+    }
 
     tbody.innerHTML = html;
 }
+
 
 window.handleXInput = (input, rowId) => {
     let val = input.value.toUpperCase();

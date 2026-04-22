@@ -1,4 +1,4 @@
-const CACHE_NAME = 'campmanager-v113';
+const CACHE_NAME = 'campmanager-v152';
 
 const ASSETS = [
   '/',
@@ -42,14 +42,22 @@ self.addEventListener('activate', (event) => {
 
 // Fetch: cache-first strategy
 self.addEventListener('fetch', (event) => {
+  const url = event.request.url;
+
+  // ⛔ Ignorar: extensiones de Chrome, requests no-HTTP, URLs de terceros (Supabase, CDN)
+  if (!url.startsWith('http')) return;
+  if (url.includes('supabase.co')) return;
+  if (url.includes('cdn.sheetjs.com') || url.includes('cdnjs.cloudflare.com')) return;
   if (event.request.method !== 'GET') return;
+
   event.respondWith(
     caches.match(event.request).then((cached) => {
       if (cached) return cached;
       return fetch(event.request).then((response) => {
-        if (!response || response.status !== 200) return response;
+        // Solo cachear respuestas válidas del mismo origen
+        if (!response || response.status !== 200 || response.type !== 'basic') return response;
         const clone = response.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone)).catch(() => {});
         return response;
       });
     }).catch(() => caches.match('/index.html'))

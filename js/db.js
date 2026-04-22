@@ -16,36 +16,76 @@ let _isProcessingQueue = false;
 
 // 🚀 CACHÉ EN MEMORIA: Evita leer IndexedDB en cada operación — respuesta instantánea
 const _memCache = {};
+// Expo  ner globalmente para que Constanza y otros módulos lean los mismos datos que el Dashboard
+window._memCache = _memCache;
 
 // ⏱️ Escrituras locales recientes — para no aplicar nuestros propios cambios via realtime
 const _recentLocalWrites = new Map();
 const RT_IGNORE_WINDOW_MS = 6000; // 6s de gracia
 
-// 🔒 IDs modificados localmente — persisten en localStorage para sobrevivir refreshes
-const _locallyModified = {};
-const _LS_KEY = 'campmanager_local_modified';
+// 🔒 Protección de IDs modificados localmente — PERSISTIDA en localStorage con expiración 24h
+// • Se marca al hacer put() local
+// • Se LIMPIA al confirmar upsert exitoso en Supabase  
+// • Expira automáticamente después de 30s — suficiente para evitar eco Realtime propio
+// • Permite edición multi-dispositivo: otros dispositivos ven cambios en ∼1s (Realtime)
+const _PROTECT_MS  = 30 * 1000; // 30 segundos (antes: 24h) — multi-device friendly
+const _LM_LS_KEY   = 'campmanager_lm_v2';  // localStorage key
+const _locallyModified = {}; // { storeName: Map<id, timestamp> } (en memoria)
 
-function _loadLocallyModified() {
+function _loadLocallyModifiedFromLS() {
     try {
-        const raw = localStorage.getItem(_LS_KEY);
-        if (raw) {
-            const parsed = JSON.parse(raw);
-            Object.entries(parsed).forEach(([store, ids]) => {
-                _locallyModified[store] = new Set(ids);
+        const raw = localStorage.getItem(_LM_LS_KEY);
+        if (!raw) return;
+        const parsed = JSON.parse(raw); // { storeName: { id: timestamp } }
+        const now = Date.now();
+        Object.entries(parsed).forEach(([store, entries]) => {
+            const map = new Map();
+            Object.entries(entries).forEach(([id, ts]) => {
+                if (now - ts < _PROTECT_MS) map.set(id, ts); // solo cargar los no expirados
             });
-        }
+            if (map.size > 0) _locallyModified[store] = map;
+        });
     } catch(e) {}
 }
 
-function _saveLocallyModified() {
+function _saveLocallyModifiedToLS() {
     try {
         const toSave = {};
-        Object.entries(_locallyModified).forEach(([store, set]) => {
-            if (set.size > 0) toSave[store] = [...set];
+        Object.entries(_locallyModified).forEach(([store, map]) => {
+            if (map.size > 0) {
+                toSave[store] = Object.fromEntries(map);
+            }
         });
-        localStorage.setItem(_LS_KEY, JSON.stringify(toSave));
+        localStorage.setItem(_LM_LS_KEY, JSON.stringify(toSave));
     } catch(e) {}
 }
+
+function _markLocallyModified(storeName, id) {
+    if (!_locallyModified[storeName]) _locallyModified[storeName] = new Map();
+    _locallyModified[storeName].set(String(id), Date.now());
+    _saveLocallyModifiedToLS();
+}
+
+function _clearLocallyModified(storeName, id) {
+    _locallyModified[storeName]?.delete(String(id));
+    _saveLocallyModifiedToLS();
+}
+
+function _isLocallyModified(storeName, id) {
+    const ts = _locallyModified[storeName]?.get(String(id));
+    if (!ts) return false;
+    if (Date.now() - ts > _PROTECT_MS) {
+        // Expiró (24h) — limpiar y permitir sobreescritura desde Supabase
+        _locallyModified[storeName].delete(String(id));
+        _saveLocallyModifiedToLS();
+        return false;
+    }
+    return true;
+}
+
+// Cargar al inicializar el módulo
+_loadLocallyModifiedFromLS();
+
 
 // 🗑️ IDs eliminados localmente — impiden que el sync de nube los restaure
 const _locallyDeleted = {};
@@ -73,8 +113,8 @@ function _saveLocallyDeleted() {
     } catch(e) {}
 }
 
-_loadLocallyModified();
 _loadLocallyDeleted(); // cargar al arrancar el módulo
+
 
 export function openDB() {
     if (_db) return Promise.resolve(_db);
@@ -109,7 +149,7 @@ export async function getAll(storeName) {
     // La protección contra datos fantasma la da _locallyModified:
     // cuando asignamos/vaciamos una room con put(), su ID se marca localmente
     // y descargarDesdeNubeSilencioso NO la sobreescribe (ver lógica en la función).
-    if (navigator.onLine && ['rooms', 'census', 'buildings', 'b2b_requests', 'users'].includes(storeName)) {
+    if (navigator.onLine && ['rooms', 'census', 'buildings', 'b2b_requests', 'users', 'gerencia_quotas'].includes(storeName)) {
         descargarDesdeNubeSilencioso(storeName, db); 
     }
     return localData;
@@ -141,20 +181,18 @@ async function descargarDesdeNubeSilencioso(storeName, db) {
             } else isFetching = false;
         }
         // 🔒 MERGE SEGURO: NO hacemos clear(). Solo insertamos/actualizamos item a item.
-        // Los items modificados localmente (_locallyModified) NO se sobrescriben con
-        // datos más viejos de Supabase — así las asignaciones manuales sobreviven al refresh.
+        // Registros modificados localmente están protegidos 5 min post-cambio o hasta upsert exitoso.
         if (allData.length > 0) {
-            const localModSet = _locallyModified[storeName] || new Set();
             const localDelSet = _locallyDeleted[storeName] || new Set();
             await new Promise((resolve, reject) => {
                 const tx = db.transaction(storeName, 'readwrite');
                 const store = tx.objectStore(storeName);
                 allData.forEach(item => {
-                    // Si fue eliminado localmente, NO lo restauramos desde la nube
-                    if (localDelSet.has(String(item.id))) return;
-                    // Si fue modificado localmente, NO lo pisamos con datos viejos
-                    if (localModSet.has(String(item.id))) return;
-                    store.put(item);
+                // 🔒 Merge seguro: NO sobreescribir registros modificados localmente
+                // que aún no confirmaron su push a Supabase (protección temporal de 5 min)
+                if (_isLocallyModified(storeName, item.id)) return;
+                if (localDelSet.has(String(item.id))) return;
+                store.put(item);
                 });
                 tx.oncomplete = () => resolve();
                 tx.onerror = (e) => reject(e.target.error);
@@ -164,7 +202,7 @@ async function descargarDesdeNubeSilencioso(storeName, db) {
                 const keyPath = storeName === 'users' ? 'username' : 'id';
                 allData.forEach(item => {
                     if (localDelSet.has(String(item.id))) return;
-                    if (localModSet.has(String(item.id))) return;
+                    if (_isLocallyModified(storeName, item.id)) return;
                     const cIdx = _memCache[storeName].findIndex(x => String(x[keyPath]) === String(item[keyPath] ?? item.id));
                     if (cIdx !== -1) _memCache[storeName][cIdx] = item;
                     else _memCache[storeName].push(item);
@@ -196,27 +234,49 @@ export async function put(storeName, data) {
         else _memCache[storeName].push(data);
         window.dispatchEvent(new CustomEvent('db:changed', { detail: { storeName } }));
     }
-    if (['rooms', 'census', 'b2b_requests', 'buildings', 'users'].includes(storeName)) {
-        // 🔒 Marcar este ID como modificado localmente (persiste en localStorage al refrescar)
-        if (data.id !== undefined) {
-            if (!_locallyModified[storeName]) _locallyModified[storeName] = new Set();
-            _locallyModified[storeName].add(String(data.id));
-            _saveLocallyModified(); // guardar inmediatamente en localStorage
-        }
-        // Intentar push directo a Supabase (backup en la nube)
-        // ⚠️ IMPORTANTE: NO quitamos la protección de _locallyModified aunque el upsert tenga éxito
-        // Si la quitamos, en el próximo refresh la descarga de nube pisaría los datos locales
-        // Los datos locales SIEMPRE ganan sobre los de la nube (este dispositivo es la fuente de verdad)
+    if (['rooms', 'census', 'b2b_requests', 'buildings', 'users', 'gerencia_quotas'].includes(storeName)) {
+        // 🔒 Proteger temporalmente (5 min) — evita que auto-refresh sobreescriba
+        //    antes de que Supabase confirme el upsert
+        if (data.id !== undefined) _markLocallyModified(storeName, data.id);
+
+        // ☁️ Push a Supabase — al confirmar, quitar protección
         if (navigator.onLine) {
-            // ⏱️ Marcar esta escritura como local (para que el realtime listener la ignore)
             if (data.id !== undefined) {
                 const writeKey = `${storeName}:${data.id}`;
                 _recentLocalWrites.set(writeKey, Date.now());
                 setTimeout(() => _recentLocalWrites.delete(writeKey), RT_IGNORE_WINDOW_MS + 1000);
             }
-            supabase.from(storeName).upsert(data).then(({ error }) => {
-                if (error) console.warn('[Sync] Upsert error:', error);
-            }).catch(() => {});
+        // 🔒 Filtrar solo columnas que existen en Supabase (evita 400 por campos desconocidos)
+            const SUPABASE_COLS = {
+                rooms:          ['id','buildingId','number','floor','bedCount','status','gender',
+                                  'reservedCompany','reservedShift','beds','lostBedReason',
+                                  'blockReason','blockedAt','blockedBed'],
+                b2b_requests:   ['id','company','contactName','contactEmail','contactPhone',
+                                  'startDate','endDate','totalPeople','shift','gender','specialNeeds',
+                                  'status','createdAt','workers','contractNumber','gerencia','notes',
+                                  'angloAdmin','receivedDate'],
+                buildings:      ['id','name','code','type','floor','capacity','shifts','notes','floorConfigs'],
+                census:         ['id','roomId','date','state','updatedBy','updatedAt'],
+                gerencia_quotas:['id','company','gerencia','limit','overrideAllowed','createdAt'],
+                users:          ['username','role','name','password','empresa','createdAt']
+            };
+            const cols = SUPABASE_COLS[storeName];
+            const payload = cols
+                ? Object.fromEntries(Object.entries(data).filter(([k]) => cols.includes(k)))
+                : data;
+
+            // 🔒 No sincronizar users a Supabase (se gestionan solo localmente)
+            if (storeName !== 'users') {
+                supabase.from(storeName).upsert(payload).then(({ error }) => {
+                    if (error) {
+                        console.warn('[Sync] Upsert error:', error);
+                        console.warn('[Sync] Upsert error (se reintentará via sync queue):', error.message);
+                    } else {
+                        const keyVal = data.id ?? data.username ?? '?';
+                        console.log(`[Sync] ${storeName} id=${keyVal} confirmado en Supabase ✅`);
+                    }
+                }).catch(() => {});
+            }
         }
         await addToSyncQueue({ id: Date.now() + Math.random(), storeName, action: 'UPSERT', payload: data });
         procesarColaDeSincronizacion();
@@ -233,7 +293,7 @@ export function initRealtimeSync() {
     if (_realtimeInitialized) return;
     _realtimeInitialized = true;
 
-    const TABLES = ['rooms', 'b2b_requests', 'buildings', 'census'];
+    const TABLES = ['rooms', 'b2b_requests', 'buildings', 'census', 'gerencia_quotas'];
 
     TABLES.forEach(table => {
         supabase
@@ -305,6 +365,43 @@ export function initRealtimeSync() {
     });
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 🔄 AUTO-REFRESH PERIÓDICO — garantiza convergencia en todos los dispositivos
+// Cada 45 segundos descarga silenciosamente Supabase y actualiza lo que haya
+// cambiado en otros dispositivos (complementa a Realtime que puede fallar).
+// ─────────────────────────────────────────────────────────────────────────────
+let _periodicRefreshStarted = false;
+
+export function startPeriodicCloudRefresh() {
+    if (_periodicRefreshStarted) return;
+    _periodicRefreshStarted = true;
+
+    const SYNC_TABLES = ['rooms', 'buildings', 'b2b_requests', 'census', 'gerencia_quotas'];
+
+    const doRefresh = async () => {
+        if (!navigator.onLine) return;
+
+        for (const table of SYNC_TABLES) {
+            delete _memCache[table];
+            _isSyncing[table] = false;
+            const db = await openDB().catch(() => null);
+            if (db) await descargarDesdeNubeSilencioso(table, db);
+        }
+
+        // Notificar a los módulos de UI para que lean datos frescos de IndexedDB
+        window.dispatchEvent(new CustomEvent('rooms-updated'));
+        window.dispatchEvent(new CustomEvent('solicitudes-updated'));
+        console.log('[AutoRefresh] ✅ Pull de Supabase completado');
+    };
+
+    // Primera descarga rápida a los 10 segundos
+    setTimeout(doRefresh, 10_000);
+    // Luego cada 60 segundos (operación pesada con 1400+ hab. — no saturar memoria)
+    setInterval(doRefresh, 60_000);
+
+    console.log('[AutoRefresh] 🔄 Auto-refresh iniciado (cada 60s)');
+}
+
 
 export async function remove(storeName, id) {
     const db = await openDB();
@@ -327,7 +424,7 @@ export async function remove(storeName, id) {
         _saveLocallyDeleted();
         // También quitar de _locallyModified si estaba ahí
         _locallyModified[storeName]?.delete(String(id));
-        _saveLocallyModified();
+        _saveLocallyModifiedToLS();
         // Push directo a Supabase
         if (navigator.onLine) {
             supabase.from(storeName).delete().eq('id', id).then(({ error }) => {
@@ -423,19 +520,93 @@ export async function confirmCheckout(roomId, bedKey) {
     const r = rooms.find(x => String(x.id) === String(roomId));
     if (!r) return false;
 
-    r.beds[bedKey] = {
-        occupant: null, company: null, shift: null,
-        rut: null, contact: null, gender: null,
-        arrivalDate: null, departureDate: null
-    };
+    // 🔄 MODO TURNO ROTATIVO: si hay next occupant y su fecha de llegada ya es hoy o antes → promover
+    const next = r.beds?.[bedKey]?.nextOccupant;
+    const todayStr = new Date().toLocaleDateString('en-CA');
 
-    // ¿Quedan otros ocupantes en la habitación?
-    const stillOccupied = ['day', 'night', 'extra'].some(k => r.beds?.[k]?.occupant);
-    r.status = stillOccupied ? 'occupied' : 'free';
-    if (!stillOccupied) r.gender = null;
+    if (next && next.arrivalDate && next.arrivalDate <= todayStr) {
+        // Promover next → current
+        r.beds[bedKey] = {
+            occupant:       next.occupant,
+            company:        next.company    || '',
+            shift:          next.shift      || '',
+            rut:            next.rut        || '',
+            contact:        next.contact    || '',
+            gender:         next.gender     || r.gender || null,
+            arrivalDate:    next.arrivalDate,
+            departureDate:  next.departureDate || '',
+            management:     next.management || '',
+            contractNumber: next.contractNumber || ''
+        };
+        r.status = 'occupied';
+        r.gender = next.gender || r.gender || null;
+        console.log(`[Rotativo] 🔄 Promovido ${next.occupant} → Hab. ${r.number} Cama ${bedKey}`);
+    } else {
+        // Limpiar la cama normalmente
+        r.beds[bedKey] = {
+            occupant: null, company: null, shift: null,
+            rut: null, contact: null, gender: null,
+            arrivalDate: null, departureDate: null
+        };
+        const stillOccupied = ['day', 'night', 'extra'].some(k => r.beds?.[k]?.occupant);
+        r.status = stillOccupied ? 'occupied' : 'free';
+        if (!stillOccupied) r.gender = null;
+    }
 
     await put('rooms', r);
     return true;
+}
+
+/**
+ * Promueve automáticamente nextOccupant → occupant en todas las habitaciones
+ * donde el ocupante actual ya salió (departureDate <= hoy) y el pre-asignado ya llegó.
+ * Llamar al abrir la app y cada día.
+ */
+export async function autoPromoteNextOccupants() {
+    const rooms = await getAll('rooms');
+    const todayStr = new Date().toLocaleDateString('en-CA');
+    let promovidos = 0;
+
+    for (const r of rooms) {
+        let changed = false;
+        for (const slot of ['day', 'night', 'extra']) {
+            const bed  = r.beds?.[slot];
+            if (!bed) continue;
+            const next = bed.nextOccupant;
+            if (!next) continue;
+
+            // Condición 1: el ocupante actual ya debió salir
+            const currentLeft = !bed.occupant || (bed.departureDate && bed.departureDate <= todayStr);
+            // Condición 2: el próximo ya llegó
+            const nextArrived = next.arrivalDate && next.arrivalDate <= todayStr;
+
+            if (currentLeft && nextArrived) {
+                r.beds[slot] = {
+                    occupant:       next.occupant,
+                    company:        next.company    || '',
+                    shift:          next.shift      || '',
+                    rut:            next.rut        || '',
+                    contact:        next.contact    || '',
+                    gender:         next.gender     || r.gender || null,
+                    arrivalDate:    next.arrivalDate,
+                    departureDate:  next.departureDate || '',
+                    management:     next.management || '',
+                    contractNumber: next.contractNumber || ''
+                };
+                r.status = 'occupied';
+                r.gender  = next.gender || r.gender || null;
+                changed = true;
+                promovidos++;
+                console.log(`[Rotativo] ✅ Auto-promovido ${next.occupant} → Hab. ${r.number} Cama ${slot}`);
+            }
+        }
+        if (changed) await put('rooms', r);
+    }
+    if (promovidos > 0) {
+        console.log(`[Rotativo] 🔄 ${promovidos} trabajadores promovidos al turno actual`);
+        window.dispatchEvent(new CustomEvent('rooms-updated'));
+    }
+    return promovidos;
 }
 
 
@@ -461,7 +632,7 @@ export function invalidateCache(storeName) {
 export async function seedDemoData() {
     console.log("[Magia Real] Construyendo infraestructura base CON IDs FIJOS...");
     const buildingDefs = [
-        { id: 1, name: 'Edificio 220', code: '220', type: 'building', floor: 4, capacity: 0, shifts: [], notes: '', floorConfigs: {} },
+        { id: 1, name: 'R-220', code: '220', type: 'building', floor: 4, capacity: 0, shifts: [], notes: '', floorConfigs: {} },
         { id: 2, name: 'Pabellón 1', code: 'P-1', type: 'pavilion', floor: 6, capacity: 0, shifts: [], notes: '', floorConfigs: {} },
         { id: 3, name: 'Pabellón 2', code: 'P-2', type: 'pavilion', floor: 6, capacity: 0, shifts: [], notes: '', floorConfigs: {} },
         { id: 4, name: 'Pabellón 3', code: 'P-3', type: 'pavilion', floor: 6, capacity: 0, shifts: [], notes: '', floorConfigs: {} },
@@ -507,33 +678,38 @@ export async function ensureDefaultUsers() {
 
 export async function ensureAllRooms() {
     const [existingRooms, buildings] = await Promise.all([getAll('rooms'), getAll('buildings')]);
-    if (existingRooms.length >= 1418) return;
+    // R-220 (145 hab) vienen de Supabase con IDs fijos 22001-22145.
+    // Los otros 8 pabellones suman 1271 hab → total esperado = 1416.
+    // Si ya tenemos ese total (o más), no hacer nada.
+    if (existingRooms.length >= 1416) return;
 
-    console.log("[Magia Real] CARGA VELOZ Y SEGURA: Generando 1418 habitaciones...");
+    console.log("[Magia Real] CARGA VELOZ Y SEGURA: Generando habitaciones de pabellones P-1 a P-8...");
     const bIdByCode = {};
     buildings.forEach(b => bIdByCode[b.code] = b.id);
 
-    const allNewRooms = MASTER_ROOMS.map(spec => ({
-        buildingId: bIdByCode[spec.p],
-        number: String(spec.r),
-        floor: parseInt(String(spec.f).replace(/[^0-9]/g, '')) || 1,
-        bedCount: spec.b || 2,
-        status: 'free',
-        reservedCompany: (spec.p === 'P-1' || spec.p === 'P-2' || spec.p === 'P-3') ? 'Aramark' : '',
-        beds: { day: { occupant: null, company: null, shift: null }, night: (spec.b || 2) === 2 ? { occupant: null, company: null, shift: null } : null }
-    }));
+    // ⚠️ El R-220 queda EXCLUIDO: sus habitaciones se gestionan via Supabase SQL
+    // con IDs fijos 22001-22145. No tocar desde aquí.
+    const allNewRooms = MASTER_ROOMS
+        .filter(spec => spec.p !== '220') // ← excluir R-220
+        .map(spec => ({
+            buildingId: bIdByCode[spec.p],
+            number: String(spec.r),
+            floor: parseInt(String(spec.f).replace(/[^0-9]/g, '')) || 1,
+            bedCount: spec.b || 2,
+            status: 'free',
+            reservedCompany: (spec.p === 'P-1' || spec.p === 'P-2' || spec.p === 'P-3') ? 'Aramark' : '',
+            beds: { day: { occupant: null, company: null, shift: null }, night: (spec.b || 2) === 2 ? { occupant: null, company: null, shift: null } : null }
+        }));
 
     const db = await openDB();
     for (let i = 0; i < allNewRooms.length; i += 200) {
         const batch = allNewRooms.slice(i, i + 200);
-        
-        const { error } = await supabase.from('rooms').upsert(batch); 
+        const { error } = await supabase.from('rooms').upsert(batch);
         if (!error) {
             const tx = db.transaction('rooms', 'readwrite');
-            batch.forEach(r => tx.objectStore('rooms').put(r)); 
-            console.log(`[Magia Real] Lote guardado: ${Math.min(i + 200, 1418)} / 1418`);
-            
-            await new Promise(resolve => setTimeout(resolve, 500)); 
+            batch.forEach(r => tx.objectStore('rooms').put(r));
+            console.log(`[Magia Real] Lote guardado: ${Math.min(i + 200, allNewRooms.length)} / ${allNewRooms.length}`);
+            await new Promise(resolve => setTimeout(resolve, 500));
         } else {
             console.error("Fallo en lote de carga", error);
         }

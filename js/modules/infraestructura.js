@@ -60,6 +60,14 @@ export async function renderInfraestructura(container) {
               </select>
             </div>
             <div class="form-group">
+              <label class="form-label">☀️🌙 Turno del Pabellón</label>
+              <select class="form-select" id="building-main-shift">
+                <option value="mixed">Mixto (Día + Noche)</option>
+                <option value="day">☀️ Solo Día</option>
+                <option value="night">🌙 Solo Noche</option>
+              </select>
+            </div>
+            <div class="form-group">
               <label class="form-label">N° de Pisos</label>
               <input class="form-input" id="building-floors" type="number" min="1" max="20" value="2">
             </div>
@@ -389,6 +397,7 @@ function setupInfraHandlers() {
       if (b) {
         document.getElementById('building-name').value = b.name;
         document.getElementById('building-type').value = b.type;
+        document.getElementById('building-main-shift').value = b.mainShift || 'mixed';
         document.getElementById('building-floors').value = b.floor;
         document.getElementById('building-capacity').value = b.capacity;
         document.getElementById('building-notes').value = b.notes || '';
@@ -492,6 +501,7 @@ function setupInfraHandlers() {
     const data = {
       name,
       type: document.getElementById('building-type').value,
+      mainShift: document.getElementById('building-main-shift').value || 'mixed',
       floor: parseInt(document.getElementById('building-floors').value) || 1,
       capacity: parseInt(document.getElementById('building-capacity').value) || 40,
       shifts: [...currentShifts],
@@ -688,7 +698,7 @@ function setupInfraHandlers() {
     if (!r) return;
     r.bedCount = 3;
     if (!r.beds.extra) {
-        r.beds.extra = { occupant: '', arrivalDate: '', departureDate: '', company: '', shift: '' };
+        r.beds.extra = { occupant: null, arrivalDate: null, departureDate: null, company: null, shift: null, rut: null, gender: null };
     }
     await put('rooms', r);
     _updateRoomInCache(r);
@@ -794,6 +804,45 @@ function setupInfraHandlers() {
               : `<button class="btn btn-secondary btn-full" style="border: 1px dashed var(--border); color: #2b6cb0;" onclick="window.agregarTerceraCama(${r.id})">➕ Habilitar 3ra Cama</button>`
           }
       </div>
+
+      ${(() => {
+          // Mostrar sección de motivo solo si hay exactamente 1 ocupante en una hab de 2+ camas
+          const bedKeys = ['day','night','extra'].slice(0, r.bedCount || 2);
+          const ocupantes = bedKeys.filter(k => r.beds?.[k]?.occupant).length;
+          if (ocupantes !== 1 || (r.bedCount || 2) < 2) return '';
+          const motivoActual = r.lostBedReason || '';
+          const motivos = [
+              ['Género incompatible', '🚻'],
+              ['Empresa exclusiva', '🏢'],
+              ['Cama reservada', '📌'],
+              ['Cuarentena / Médico', '🏥'],
+              ['Coordinación pendiente', '⏳'],
+              ['Sin motivo registrado', '📋'],
+          ];
+          return `
+          <div style="margin-top:16px; background:#fffbeb; border:1px solid #fcd34d; border-radius:14px; padding:16px;">
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+                  <span style="font-size:18px">⚠️</span>
+                  <div>
+                      <div style="font-weight:800;font-size:13px;color:#92400e">Cama Vacía — 1 ocupante solo</div>
+                      <div style="font-size:11px;color:#b45309">Registra el motivo para el informe</div>
+                  </div>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
+                  ${motivos.map(([val, ico]) => `
+                  <button class="btn btn-sm" 
+                      style="justify-content:flex-start;gap:6px;font-size:11px;padding:8px 10px;
+                             border:2px solid ${motivoActual===val ? '#f59e0b' : 'var(--border)'};
+                             background:${motivoActual===val ? '#fef3c7' : 'white'};
+                             color:${motivoActual===val ? '#92400e' : 'var(--text-primary)'};
+                             font-weight:${motivoActual===val ? '800' : '600'}"
+                      onclick="window.guardarMotivoCamaVacia(${r.id}, '${val}')">
+                      ${ico} ${val}
+                  </button>`).join('')}
+              </div>
+              ${motivoActual ? `<div style="text-align:center;font-size:11px;color:#92400e;font-weight:700">✅ Motivo actual: ${motivoActual}</div>` : ''}
+          </div>`;
+      })()}
     `;
     
     const modalEl = document.getElementById('room-detail-modal');
@@ -851,6 +900,24 @@ function setupInfraHandlers() {
     if (panel) panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
   };
 
+  // ⚠️ Guardar motivo de cama vacía (cuando hay 1 solo ocupante)
+  window.guardarMotivoCamaVacia = async (roomId, motivo) => {
+    try {
+      const r = await _getRoomFromCache(roomId);
+      if (!r) { showToast('Habitación no encontrada', 'error'); return; }
+      r.lostBedReason = motivo;
+      await put('rooms', r);
+      _updateRoomInCache(r);
+      showToast(`✅ Motivo guardado: ${motivo}`, 'success');
+      // Refrescar el modal para mostrar el motivo seleccionado
+      await window.showRoomDetail(roomId); // ← era openRoomDetail (no existe)
+    } catch(err) {
+      console.error('[guardarMotivoCamaVacia]', err);
+      showToast('Error al guardar motivo: ' + err.message, 'error');
+    }
+  };
+
+
   // 🔒 Reportar bloqueo directamente desde el selector rápido
   window.reportarBloqueo = async (roomId, reason) => {
     const r = await _getRoomFromCache(roomId);
@@ -863,7 +930,7 @@ function setupInfraHandlers() {
     // Vaciar camas al bloquear
     if (r.beds) {
       ['day', 'night', 'extra'].forEach(k => {
-        if (r.beds[k]) r.beds[k] = { occupant: '', arrivalDate: '', departureDate: '', company: '', shift: '' };
+        if (r.beds[k]) r.beds[k] = { occupant: null, arrivalDate: null, departureDate: null, company: null, shift: null, rut: null, gender: null };
       });
     }
     r.gender = null;
@@ -1103,7 +1170,7 @@ function setupInfraHandlers() {
                     // Ignorar la cama que estamos modificando ahora mismo
                     if (String(ro.id) === String(roomId) && k === bedKey) return;
                     if (ro.beds && ro.beds[k] && ro.beds[k].occupant && ro.beds[k].rut) {
-                        const existingRut = ro.beds[k].rut.replace(/[^0-9Kk]/g, '').toUpperCase();
+                        const existingRut = String(ro.beds[k].rut).replace(/[^0-9Kk]/g, '').toUpperCase();
                         if (existingRut === cleanRut) cloneRoom = ro;
                     }
                 });
@@ -1119,7 +1186,11 @@ function setupInfraHandlers() {
         
         // 🔒 Leer habitación desde caché (tiene los datos más frescos)
         const r = await _getRoomFromCache(roomId);
-        if (!r) return;
+        if (!r) {
+            showToast('❌ Error: habitación no encontrada en sistema', 'error');
+            alert('Error interno: no se pudo localizar la habitación (ID: ' + roomId + ').\n\nCierra el modal y vuelve a abrir la habitación.');
+            return;
+        }
         
         // 🔒🔒 REGLA DE ORO BLINDADA: verificar el género leyendo DIRECTAMENTE de las camas
         // No confiar en r.gender (puede estar stale/null) — leer de los ocupantes actuales
@@ -1176,8 +1247,10 @@ Cierra el formulario y elige otra habitación.`);
         window.showRoomDetail(roomId); 
         document.getElementById('infra-search')?.dispatchEvent(new Event('input')); 
     } catch(err) {
-        console.error("Error guardando manualmente:", err);
-        showToast("Error al guardar la asignación", "error");
+        console.error("[saveManualAssignment] Error:", err);
+        const msg = err?.message || String(err);
+        showToast('❌ Error al guardar: ' + msg.slice(0, 60), 'error');
+        alert('❌ Error al guardar la asignación:\n\n' + msg + '\n\nRevisa la consola para más detalles.');
     }
   };
 
@@ -1236,7 +1309,8 @@ function renderBedDetail(bed, label, icon, roomStatus, bedBlocked, roomId, bedKe
         <div style="flex:1">
           <div style="display:flex; align-items:center; justify-content:space-between">
              <div style="font-size:14px; font-weight:800; color:var(--text-primary)">
-                 ${bed.present ? '🟢' : '🔴'} ${bed.occupant}
+                 ${bed.checkoutPending ? '🟡' : bed.present ? '🟢' : '🔴'} ${bed.occupant}
+                 ${bed.checkoutPending ? '<span style="font-size:10px;background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:99px;font-weight:700;margin-left:4px">SALIDA SOLICITADA</span>' : ''}
              </div>
              <div style="display:flex;gap:4px">
                <button class="btn btn-ghost btn-sm" style="color:#2b6cb0;font-size:12px" onclick="window.editBedInfo(${roomId}, '${bedKey}')">✏️</button>
@@ -1381,6 +1455,18 @@ async function renderRoomMap(container) {
               onmouseout="this.style.transform=''">
             📥 Carga Masiva
           </button>
+          <button onclick="window.openAngloModal()"
+              id="btn-anglo"
+              style="height:45px;padding:0 18px;border-radius:12px;border:none;cursor:pointer;
+                     background:linear-gradient(135deg,#7b1d1d,#c0392b);color:#fff;
+                     font-weight:700;font-size:13px;white-space:nowrap;
+                     box-shadow:0 4px 12px rgba(192,57,43,0.4);
+                     display:flex;align-items:center;gap:7px;flex-shrink:0;
+                     transition:transform 0.15s,box-shadow 0.15s"
+              onmouseover="this.style.transform='translateY(-1px)'"
+              onmouseout="this.style.transform=''">
+            🏔️ Anglo
+          </button>
           <button onclick="window.forceSyncToCloud()"
               id="btn-force-sync"
               style="height:45px;padding:0 18px;border-radius:12px;border:none;cursor:pointer;
@@ -1493,70 +1579,98 @@ async function renderRoomMap(container) {
   updateGridFilters();
 
   // ─────────────────────────────────────────────────────────────────────────
-  // MODAL DE RESERVA MASIVA
-  // ─────────────────────────────────────────────────────────────────────────
-
-  // ─────────────────────────────────────────────────────────────────────────
   // ☁️  FORZAR SINCRONIZACIÓN A LA NUBE — sube todo lo local a Supabase
   // ─────────────────────────────────────────────────────────────────────────
   window.forceSyncToCloud = async () => {
     const btn = document.getElementById('btn-force-sync');
-    if (btn) { btn.disabled = true; btn.textContent = '⏳ Subiendo...'; }
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Sincronizando...'; }
 
+    showToast('☁️ Iniciando sincronización con la nube...', 'info');
+
+    // Importar supabase
+    let supabase;
     try {
-      const { supabase } = await import('../supabaseClient.js');
+      const mod = await import('../supabaseClient.js');
+      supabase = mod.supabase;
+    } catch(e) {
+      showToast('❌ No se pudo conectar a Supabase: ' + e.message, 'error');
+      if (btn) { btn.disabled = false; btn.textContent = '☁️ Sincronizar Nube'; }
+      return;
+    }
 
-      const rooms    = await getAll('rooms').catch(() => []);
-      const requests = await getAll('b2b_requests').catch(() => []);
+    // Cargar datos locales
+    const [rooms, buildings, requests, quotas] = await Promise.all([
+      getAll('rooms').catch(() => []),
+      getAll('buildings').catch(() => []),
+      getAll('b2b_requests').catch(() => []),
+      getAll('gerencia_quotas').catch(() => []),
+    ]);
 
-      showToast(`☁️ Subiendo ${rooms.length} hab + ${requests.length} solicitudes...`, 'info');
+    const resultados = [];
 
-      // ── Helper: subir con reintento individual si falla el lote ─────────
-      async function upsertWithRetry(table, items, batchSize = 20) {
-        let failed = 0;
-        let lastError = '';
-        for (let i = 0; i < items.length; i += batchSize) {
-          const batch = items.slice(i, i + batchSize);
-          const { error } = await supabase.from(table).upsert(batch, { onConflict: 'id' });
-          if (error) {
-            lastError = error.message;
-            console.warn(`[Sync] ${table} batch ${i}-${i+batchSize} falló:`, error.message);
-            // Reintentar uno a uno
-            for (const record of batch) {
-              const { error: e2 } = await supabase.from(table).upsert(record, { onConflict: 'id' });
-              if (e2) {
-                console.warn(`[Sync] ${table} id=${record.id} falló:`, e2.message);
-                failed++;
-              }
-            }
+    // ── Función de upsert con reintento individual ──────────────────────────
+    const upsertTable = async (tableName, items, conflictCol = 'id', batchSize = 25) => {
+      if (!items?.length) {
+        resultados.push({ table: tableName, ok: 0, fail: 0, skipped: true });
+        return;
+      }
+
+      // Filtrar registros sin ID válido (evitan errores de upsert)
+      const validItems = items.filter(it => it[conflictCol] !== undefined && it[conflictCol] !== null);
+      let ok = 0, fail = 0, lastErr = '';
+
+      for (let i = 0; i < validItems.length; i += batchSize) {
+        const batch = validItems.slice(i, i + batchSize);
+        const { error } = await supabase.from(tableName).upsert(batch, { onConflict: conflictCol });
+        if (!error) {
+          ok += batch.length;
+        } else {
+          console.warn(`[Sync] ${tableName} lote ${i}-${i+batchSize} falló, reintentando 1x1...`, error.message);
+          lastErr = error.message;
+          // Reintento uno a uno
+          for (const rec of batch) {
+            const { error: e2 } = await supabase.from(tableName).upsert(rec, { onConflict: conflictCol });
+            if (!e2) ok++;
+            else { fail++; lastErr = e2.message; }
           }
         }
-        return { failed, lastError };
       }
 
-      // ── Rooms ────────────────────────────────────────────────────────────
-      const rResult = await upsertWithRetry('rooms', rooms, 20);
+      resultados.push({ table: tableName, ok, fail, lastErr, total: validItems.length });
+    };
 
-      // ── B2B Requests — 1 a la vez porque son objetos grandes ────────────
-      const qResult = await upsertWithRetry('b2b_requests', requests, 1);
+    // ── Subir en orden (buildings primero porque rooms los referencia) ───────
+    await upsertTable('buildings',       buildings, 'id', 20);
+    await upsertTable('rooms',           rooms,     'id', 25);
+    await upsertTable('b2b_requests',    requests,  'id',  5);
+    await upsertTable('gerencia_quotas', quotas,    'id', 20);
 
-      // ── Resultado ────────────────────────────────────────────────────────
-      const totalFail = rResult.failed + qResult.failed;
-      if (totalFail === 0) {
-        showToast(`✅ Sync completo — ${rooms.length} hab · ${requests.length} solicitudes en la nube`, 'success');
-      } else {
-        const errMsg = rResult.lastError || qResult.lastError;
-        showToast(`⚠️ ${totalFail} registros fallaron: ${errMsg.slice(0, 80)}`, 'warn');
-        console.error('[Sync] Último error:', errMsg);
-      }
+    // ── Resultado final ──────────────────────────────────────────────────────
+    const totalOk   = resultados.reduce((s, r) => s + (r.ok   || 0), 0);
+    const totalFail = resultados.reduce((s, r) => s + (r.fail || 0), 0);
+    const firstErr  = resultados.find(r => r.fail > 0)?.lastErr || '';
 
-    } catch(err) {
-      console.error('[ForceSyncToCloud]', err);
-      showToast('❌ Error: ' + err.message, 'error');
-    } finally {
-      if (btn) { btn.disabled = false; btn.textContent = '☁️ Sincronizar Nube'; }
+    const lines = resultados
+      .filter(r => !r.skipped)
+      .map(r => `${r.fail === 0 ? '✅' : '⚠️'} ${r.table}: ${r.ok}/${r.total}`);
+
+    console.log('[Sync] Resultados:', resultados);
+
+    if (totalFail === 0) {
+      showToast(
+        `✅ Sync completo — ${buildings.length} edif · ${rooms.length} hab · ${requests.length} sol. · ${quotas.length} cupos`,
+        'success'
+      );
+    } else {
+      showToast(
+        `⚠️ ${totalOk} registros subidos · ${totalFail} fallaron\n${firstErr.slice(0, 100)}`,
+        'warn'
+      );
     }
+
+    if (btn) { btn.disabled = false; btn.textContent = '☁️ Sincronizar Nube'; }
   };
+
 
   // ─────────────────────────────────────────────────────────────────────────
   // 📥  CARGA MASIVA DIRECTA — Asignación por Excel
@@ -1586,12 +1700,12 @@ async function renderRoomMap(container) {
 
         <!-- Instrucciones + descarga plantilla -->
         <div style="padding:16px 22px;background:#f0fff4;border-bottom:1px solid #c6f6d5;flex-shrink:0">
-          <div style="font-size:13px;font-weight:700;color:#276749;margin-bottom:8px">📋 Columnas de la plantilla:</div>
+          <div style="font-size:13px;font-weight:700;color:#276749;margin-bottom:8px">📋 Columnas de la plantilla (formato único compartido):</div>
           <div style="font-size:11px;color:#2d3748;font-family:monospace;background:#fff;padding:8px 12px;border-radius:8px;border:1px solid #c6f6d5;line-height:1.8">
-            Nombre · RUT · Empresa · Gerencia · NContrato · Turno · Sexo · <strong style="color:#276749">Habitacion</strong> · <strong style="color:#276749">Cama</strong> · FechaInicio · FechaTermino
+            FECHA · Empresa · Ncontrato · Gerencia · RazonSocial · <strong style="color:#276749">NombreHuesped</strong> · <strong style="color:#276749">RUTHuesped</strong> · CONTACTO · <strong style="color:#c53030">HABITACION</strong> · NombreTurno · SistemaTurno · TipoTurno · Estado · FechaInicio · FechaTermino · <strong style="color:#276749">Sexo</strong> · OBSERVACION
           </div>
           <div style="font-size:11px;color:#276749;margin-top:6px">
-            💡 <strong>Habitacion</strong> y <strong>Cama</strong> son opcionales — si los dejas vacíos el sistema asigna automáticamente.
+            💡 <strong>HABITACION</strong> es opcional — si la dejas vacía el sistema asigna automáticamente.
           </div>
           <button onclick="window._downloadCargaMasivaTemplate()"
             style="margin-top:10px;padding:8px 16px;background:linear-gradient(135deg,#276749,#38a169);color:#fff;
@@ -1686,8 +1800,8 @@ async function renderRoomMap(container) {
 
         const ws = wb.addWorksheet('Carga Masiva', { views:[{ showGridLines:true }] });
 
-        const colNames  = ['Nombre','RUT','Empresa','Gerencia','NContrato','Turno','Sexo','Habitacion','Cama','FechaInicio','FechaTermino'];
-        const colWidths = [28, 14, 20, 20, 16, 10, 8, 12, 8, 14, 14];
+        const colNames  = ['FECHA','Empresa','Ncontrato','Gerencia','RazonSocial','NombreHuesped','RUTHuesped','CONTACTO','HABITACION','NombreTurno','SistemaTurno','TipoTurno','Estado','FechaInicio','FechaTermino','Sexo','OBSERVACION'];
+        const colWidths = [14, 20, 13, 20, 34, 28, 14, 14, 12, 12, 14, 12, 12, 14, 14, 8, 28];
         ws.columns = colNames.map((n,i) => ({ header:'', width: colWidths[i] }));
 
         // Filas 1-3: cabecera roja con logo
@@ -1698,21 +1812,21 @@ async function renderRoomMap(container) {
           }
         });
 
-        ws.mergeCells('D1:K3');
-        const titleCell = ws.getCell('D1');
-        titleCell.value     = 'CARGA MASIVA DE TRABAJADORES\nPC Hotelería — Formato Admin';
-        titleCell.font      = { name:'Calibri', bold:true, size:15, color:{ argb: WHITE } };
+        ws.mergeCells('E1:Q3');
+        const titleCell = ws.getCell('E1');
+        titleCell.value     = 'SOLICITUD DE ALOJAMIENTO\nPC HOTELERÍA — Carga Masiva';
+        titleCell.font      = { name:'Calibri', bold:true, size:16, color:{ argb: WHITE } };
         titleCell.fill      = { type:'pattern', pattern:'solid', fgColor:{ argb: ARAMARK_RED } };
         titleCell.alignment = { horizontal:'center', vertical:'middle', wrapText:true };
 
-        // Intentar poner logo Aramark
+        // Logo Aramark
         try {
           const resp   = await fetch('./aramark.png');
           const buffer = await resp.arrayBuffer();
           const imgId  = wb.addImage({ buffer, extension:'png' });
           ws.addImage(imgId, { tl:{ col:0.2, row:0.2 }, ext:{ width:170, height:75 } });
         } catch(e) {
-          ws.mergeCells('A1:C3');
+          ws.mergeCells('A1:D3');
           const logoCell = ws.getCell('A1');
           logoCell.value     = 'ARAMARK';
           logoCell.font      = { name:'Calibri', bold:true, size:20, color:{ argb: WHITE } };
@@ -1720,18 +1834,19 @@ async function renderRoomMap(container) {
           logoCell.alignment = { horizontal:'center', vertical:'middle' };
         }
 
-        // Fila 4: Administrador de Contrato Anglo (igual que el portal)
-        ws.getRow(4).height = 26;
+        // Fila 4: Administrador de Contrato Anglo
+        ws.getRow(4).height = 30;
         ws.mergeCells('A4:C4');
         const angloLabel = ws.getCell('A4');
         angloLabel.value     = 'Administrador de Contrato Anglo:';
-        angloLabel.font      = { name:'Calibri', bold:true, size:11, color:{ argb: WHITE } };
+        angloLabel.font      = { name:'Calibri', bold:true, size:12, color:{ argb: WHITE } };
         angloLabel.fill      = { type:'pattern', pattern:'solid', fgColor:{ argb: ARAMARK_DARK } };
         angloLabel.alignment = { horizontal:'left', vertical:'middle' };
-        ws.mergeCells('D4:K4');
+
+        ws.mergeCells('D4:Q4');
         const angloVal = ws.getCell('D4');
         angloVal.value     = '';
-        angloVal.font      = { name:'Calibri', size:11, italic:true, color:{ argb:'FF999999' } };
+        angloVal.font      = { name:'Calibri', size:12, italic:true, color:{ argb:'FF999999' } };
         angloVal.fill      = { type:'pattern', pattern:'solid', fgColor:{ argb:'FFFFFAF0' } };
         angloVal.alignment = { horizontal:'left', vertical:'middle' };
         angloVal.note      = { texts:[{ font:{ size:10 }, text:'Ingrese aquí el nombre del Administrador de Contrato Anglo' }] };
@@ -1749,7 +1864,8 @@ async function renderRoomMap(container) {
 
         // Fila 6: ejemplo
         ws.getRow(6).height = 20;
-        const sample = ['Juan Pérez','12345678-9','Aramark','Operaciones Mina','C-2026-001','8x6','M','4101','1','2026-04-16','2026-04-23'];
+        const today = new Date().toISOString().split('T')[0];
+        const sample = [today,'Aramark','42300031','INFRAESTRUCTURA Y SERVICIO','Aramark Servicios Mineros S.A.','Juan Perez','12345678-9','987654321','','8x6','Sistema A','Dia','Pendiente','2026-04-16','2026-04-23','M',''];
         sample.forEach((val, i) => {
           const cell = ws.getRow(6).getCell(i + 1);
           cell.value     = val;
@@ -1758,9 +1874,8 @@ async function renderRoomMap(container) {
           cell.alignment = { vertical:'middle' };
         });
 
-        // Nota en Habitacion y Cama que son opcionales
-        ws.getRow(5).getCell(8).note = { texts:[{ text:'Opcional — dejar vacío para auto-asignación' }] };
-        ws.getRow(5).getCell(9).note = { texts:[{ text:'1=Cama1  2=Cama2  3=Cama3 (opcional)' }] };
+        // Nota en HABITACION
+        ws.getRow(5).getCell(9).note = { texts:[{ text:'Opcional — dejar vacío para auto-asignación por género/empresa' }] };
 
         const xlsBuffer = await wb.xlsx.writeBuffer();
         const blob      = new Blob([xlsBuffer], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
@@ -1793,53 +1908,125 @@ async function renderRoomMap(container) {
         try {
           const wb = XLSX.read(new Uint8Array(ev.target.result), { type:'array', cellDates:true });
           const ws = wb.Sheets[wb.SheetNames[0]];
-          const rows = XLSX.utils.sheet_to_json(ws, { header:1 });
+          const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:'' });
           if (rows.length < 2) { showToast('Archivo vacío o sin datos', 'error'); return; }
 
-          // Detectar si la primera fila es encabezado
-          const headerRow = rows[0].map(c => String(c||'').toLowerCase());
-          const dataStart = headerRow.some(h => h.includes('nombre') || h.includes('name')) ? 1 : 0;
+          const fmt = v => {
+            if (!v && v !== 0) return '';
+            if (v instanceof Date) return v.toISOString().split('T')[0];
+            return String(v).trim();
+          };
+          const cleanDate = v => {
+            const s = fmt(v);
+            if (!s) return '';
+            if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+            if (/^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4}$/.test(s)) {
+              const [d,m,y] = s.split(/[\/\-]/);
+              return `${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`;
+            }
+            return s.split('T')[0] || s;
+          };
 
+          // ── 1. Detectar fila de encabezados ─────────────────────────────
+          // Busca la primera fila que contiene al menos 2 nombres clave conocidos
+          const KNOWN_HEADERS = [
+            'nombrehuesped','nombre','ruthu','rut','empresa','company',
+            'habitacion','hab','room','gerencia','turno','sexo','gender',
+            'fechainicio','fechatermino','ncontrato','contrato'
+          ];
+          let headerRowIdx = -1;
+          let colMap = {}; // { fieldName: columnIndex }
+
+          for (let ri = 0; ri < Math.min(rows.length, 10); ri++) {
+            const row = rows[ri];
+            if (!row || !row.length) continue;
+            const normalized = row.map(c => fmt(c).toLowerCase().replace(/[^a-z0-9]/g,''));
+            const hits = normalized.filter(h => KNOWN_HEADERS.some(k => h.includes(k)));
+            if (hits.length >= 2) {
+              headerRowIdx = ri;
+              // Mapear cada columna conocida a su índice
+              normalized.forEach((h, idx) => {
+                if (h.includes('nombrehuesped') || (h === 'nombre' && !colMap.name)) colMap.name = idx;
+                if (h.includes('ruthue') || (h === 'rut' && !colMap.rut))            colMap.rut = idx;
+                if (h.includes('empresa') || h.includes('razon') || h.includes('company')) colMap.company = idx;
+                if (h.includes('gerencia'))          colMap.gerencia = idx;
+                if (h.includes('ncontrato') || h.includes('contrato')) colMap.contract = idx;
+                if (h.includes('habitacion') || (h === 'hab') || (h === 'room')) colMap.room = idx;
+                if (h.includes('nombreturn') || (h.includes('turno') && !colMap.shift) || h.includes('turno')) colMap.shift = idx;
+                if (h.includes('fechainicio') || h.includes('ingreso'))  colMap.arrival = idx;
+                if (h.includes('fechatermino') || h.includes('salida'))  colMap.departure = idx;
+                if (h.includes('sexo') || h.includes('genero') || h.includes('gender')) colMap.sex = idx;
+                if (h.includes('contacto') || h.includes('telefono'))    colMap.contact = idx;
+              });
+              break;
+            }
+          }
+
+          // ── 2. Fallback posicional si no se encontró header ──────────────
+          const hasHeader = headerRowIdx !== -1;
+          const dataStart = hasHeader ? headerRowIdx + 1 : 0;
+
+          if (!hasHeader) {
+            // Formato clásico posicional
+            colMap = { name:5, rut:6, company:1, gerencia:3, contract:2,
+                       shift:9, sex:15, room:8, arrival:13, departure:14, contact:7 };
+          }
+
+          // ── 3. Extraer trabajadores ──────────────────────────────────────
           window._cmWorkers = rows.slice(dataStart).map(row => {
-            if (!row || row.length < 3) return null;
-            const fmt = v => { if (!v) return ''; if (v instanceof Date) return v.toISOString().split('T')[0]; return String(v).trim(); };
-            const w = {
-              name:           fmt(row[0]),
-              rut:            fmt(row[1]),
-              company:        fmt(row[2]),
-              gerencia:       fmt(row[3]),
-              contractNumber: fmt(row[4]),
-              shift:          fmt(row[5]),
-              sex:            (fmt(row[6])||'M').toUpperCase().charAt(0),
-              roomNumber:     fmt(row[7]),   // opcional
-              bedSlot:        fmt(row[8]),   // opcional: 1, 2, 3  → day, night, extra
-              arrivalDate:    fmt(row[9]),
-              departureDate:  fmt(row[10]),
+            if (!Array.isArray(row) || row.length < 3) return null;
+            const name = fmt(row[colMap.name ?? 5]);
+            if (!name || name.toLowerCase().includes('nombrehuesped')) return null;
+            return {
+              name,
+              rut:            fmt(row[colMap.rut     ?? 6]),
+              company:        fmt(row[colMap.company  ?? 1]),
+              gerencia:       fmt(row[colMap.gerencia ?? 3]),
+              contractNumber: fmt(row[colMap.contract ?? 2]),
+              shift:          fmt(row[colMap.shift    ?? 9]),
+              sex:            (fmt(row[colMap.sex     ?? 15]) || 'M').toUpperCase().charAt(0),
+              roomNumber:     fmt(row[colMap.room     ?? 8]),
+              contact:        fmt(row[colMap.contact  ?? 7]),
+              arrivalDate:    cleanDate(row[colMap.arrival   ?? 13]),
+              departureDate:  cleanDate(row[colMap.departure ?? 14]),
+              bedSlot:        '',
             };
-            if (!w.name) return null;
-            return w;
           }).filter(Boolean);
 
           if (window._cmWorkers.length === 0) { showToast('No se encontraron trabajadores', 'error'); return; }
 
-          // Preview
-          const hasRoomInfo = window._cmWorkers.some(w => w.roomNumber);
+          // Preview — separar conteo entre hab. definida y auto
+          const conHab   = window._cmWorkers.filter(w => w.roomNumber).length;
+          const sinHab   = window._cmWorkers.length - conHab;
           document.getElementById('cm-count').textContent = window._cmWorkers.length;
-          document.getElementById('cm-mode-badge').textContent = hasRoomInfo
-            ? '🏠 Modo: Habitación especificada en Excel'
-            : '🤖 Modo: Auto-asignación por género y turno';
 
-          const slotName = s => ({ '1':'Cama 1','2':'Cama 2','3':'Cama 3' }[s] || 'Auto');
-          document.getElementById('cm-tbody').innerHTML = window._cmWorkers.map(w => `
-            <tr style="border-bottom:1px solid #f0f4f8">
+          // Badge con ambos modos si aplica
+          let badgeHtml = '';
+          if (conHab > 0 && sinHab > 0) {
+            badgeHtml = `<span style="background:#dcfce7;color:#166534;padding:3px 9px;border-radius:99px;font-size:11px;font-weight:700">🏠 ${conHab} con hab.</span>
+                         <span style="background:#dbeafe;color:#1e40af;padding:3px 9px;border-radius:99px;font-size:11px;font-weight:700;margin-left:4px">🤖 ${sinHab} auto</span>`;
+          } else if (conHab > 0) {
+            badgeHtml = `<span style="background:#dcfce7;color:#166534;padding:3px 9px;border-radius:99px;font-size:11px;font-weight:700">🏠 Todos con habitación especificada</span>`;
+          } else {
+            badgeHtml = `<span style="background:#dbeafe;color:#1e40af;padding:3px 9px;border-radius:99px;font-size:11px;font-weight:700">🤖 Todos por auto-asignación</span>`;
+          }
+          document.getElementById('cm-mode-badge').innerHTML = badgeHtml;
+
+          document.getElementById('cm-tbody').innerHTML = window._cmWorkers.map(w => {
+            const tieneHab = !!w.roomNumber;
+            const rowBg = tieneHab ? '#f0fff4' : '#f0f9ff';
+            const habCell = tieneHab
+              ? `<span style="background:#dcfce7;color:#166534;padding:3px 9px;border-radius:8px;font-weight:800;font-size:12px">🏠 Hab.${w.roomNumber}</span>`
+              : `<span style="background:#dbeafe;color:#1e40af;padding:3px 9px;border-radius:8px;font-weight:700;font-size:12px">🤖 Auto</span>`;
+            return `
+            <tr style="border-bottom:1px solid #f0f4f8;background:${rowBg}">
               <td style="padding:7px 10px;font-weight:600">${w.name}</td>
-              <td style="padding:7px 10px;color:#718096">${w.company}</td>
-              <td style="padding:7px 10px">${w.shift} / ${w.sex}</td>
-              <td style="padding:7px 10px;font-weight:700;color:${w.roomNumber ? '#276749' : '#a0aec0'}">
-                ${w.roomNumber ? `# ${w.roomNumber} ${slotName(w.bedSlot)}` : 'Auto'}
-              </td>
-              <td style="padding:7px 10px;font-size:11px">${w.arrivalDate}<br><span style="color:#c53030">${w.departureDate}</span></td>
-            </tr>`).join('');
+              <td style="padding:7px 10px;color:#718096;font-size:12px">${w.company || '—'}${w.gerencia ? '<br><span style="font-size:10px;color:#9ca3af">'+w.gerencia+'</span>' : ''}</td>
+              <td style="padding:7px 10px;font-size:12px">${w.shift || '—'} / ${w.sex}</td>
+              <td style="padding:7px 10px">${habCell}</td>
+              <td style="padding:7px 10px;font-size:11px">${w.arrivalDate || '—'}<br><span style="color:#c53030">${w.departureDate || '—'}</span></td>
+            </tr>`;
+          }).join('');
 
           document.getElementById('cm-preview').style.display = 'block';
           const btn = document.getElementById('cm-save-btn');
@@ -1862,20 +2049,40 @@ async function renderRoomMap(container) {
 
       try {
         const rooms = await getAll('rooms');
+
+        // Índice multi-clave: cada hab. se indexa por número exacto, trimmed, y como entero
+        // Esto tolera diferencias de formato entre el Excel (4101) y la BD ("4101" o 4101)
         const roomsByNumber = {};
-        rooms.forEach(r => { roomsByNumber[String(r.number)] = r; });
+        rooms.forEach(r => {
+          const n = r.number;
+          if (n === undefined || n === null) return;
+          roomsByNumber[String(n)]         = r;  // "4101"
+          roomsByNumber[String(n).trim()]  = r;  // "4101" sin espacios
+          roomsByNumber[parseInt(n, 10)]   = r;  // 4101 como entero (clave numérica)
+          // También con cero padding por si acaso: "04101"
+          const padded = String(n).trim().replace(/^0+/, '');
+          roomsByNumber[padded] = r;
+        });
+        const roomNums = [...new Set((window._cmWorkers||[]).map(w=>w.roomNumber).filter(Boolean))];
+        console.log(`[CargaMasiva] ${rooms.length} hab. en DB. Nums en Excel:`, roomNums.join(', '));
+        console.log(`[CargaMasiva] Muestra claves DB:`, Object.keys(roomsByNumber).filter(k=>k&&k!=='NaN').slice(0,8).join(' | '));
+        // Detectar mismatches
+        const numsSinMatch = roomNums.filter(n => !roomsByNumber[n] && !roomsByNumber[String(n).trim()] && !roomsByNumber[parseInt(n,10)]);
+        if (numsSinMatch.length > 0) {
+          console.warn(`[CargaMasiva] HAB. NO ENCONTRADAS EN DB:`, numsSinMatch.join(', '));
+        }
 
         const slotMap = { '1':'day','2':'night','3':'extra','a':'day','b':'night','c':'extra',
                           'cama 1':'day','cama 2':'night','cama 3':'extra','day':'day','night':'night','extra':'extra' };
 
-        let asignados = 0, fallidos = 0, yaOcupados = 0;
+        let asignados = 0, fallidos = 0, yaOcupados = 0, generoConflicto = 0, habLlenas = 0, preAsignados = 0;
         const roomsToUpdate = {};
 
         // Recolectar RUTs ya ocupados (anti-clones)
         const rutsOcupados = new Set();
         rooms.forEach(r => {
           ['day','night','extra'].forEach(k => {
-            if (r.beds?.[k]?.rut) rutsOcupados.add(r.beds[k].rut.replace(/[^0-9Kk]/g,'').toUpperCase());
+            if (r.beds?.[k]?.rut) rutsOcupados.add(String(r.beds[k].rut).replace(/[^0-9Kk]/g,'').toUpperCase());
           });
         });
 
@@ -1900,34 +2107,77 @@ async function renderRoomMap(container) {
 
           let assigned = false;
 
-          // MODO A: habitación especificada
+          // ─── MODO A: habitación especificada en el Excel ────────────────────
+          // Si el usuario especificó una habitación, SE RESPETA siempre:
+          // no se auto-asigna a otra aunque haya conflicto de género o esté llena.
           if (w.roomNumber) {
             const r = roomsToUpdate[w.roomNumber] || roomsByNumber[String(w.roomNumber)];
-            if (r) {
-              if (!r.beds) r.beds = {};
-              const preferredSlot = slotMap[(w.bedSlot||'').toLowerCase()] || null;
-              // Elegir cama: preferida si libre, si no la primera libre
-              const slots = preferredSlot ? [preferredSlot,'day','night','extra'] : ['day','night','extra'];
-              for (const slot of slots) {
-                const maxBeds = r.bedCount || 2;
-                if (slot === 'extra' && maxBeds < 3) continue;
-                if (!r.beds[slot]?.occupant) {
-                  // Check género
-                  const existGender = ['day','night','extra'].map(k => r.beds?.[k]?.occupant ? (r.beds[k].gender||null) : null).find(Boolean);
-                  if (existGender && existGender !== normalizeGender(w.sex)) break;
-                  r.beds[slot] = bedData;
-                  r.status = 'occupied';
-                  r.gender = normalizeGender(w.sex);
-                  roomsToUpdate[w.roomNumber] = r;
-                  if (cleanRut) rutsOcupados.add(cleanRut);
-                  asignados++; assigned = true; break;
+            if (!r) {
+              // Habitación no encontrada en la DB
+              console.warn(`[CargaMasiva] Hab. "${w.roomNumber}" no encontrada para ${w.name}`);
+              fallidos++;
+              continue; // No auto-asignar, solo reportar
+            }
+            if (!r.beds) r.beds = {};
+            const preferredSlot = slotMap[(w.bedSlot||'').toLowerCase()] || null;
+            const slots = preferredSlot ? [preferredSlot,'day','night','extra'] : ['day','night','extra'];
+            let habitacionLlena = true;
+            for (const slot of slots) {
+              const maxBeds = r.bedCount || 2;
+              if (slot === 'extra' && maxBeds < 3) continue;
+              if (!r.beds[slot]?.occupant) {
+                habitacionLlena = false;
+                // Verificar género — si hay conflicto, registrar pero continuar sin asignar
+                const existGender = ['day','night','extra']
+                  .map(k => r.beds?.[k]?.occupant ? (r.beds[k].gender||null) : null)
+                  .find(Boolean);
+                if (existGender && existGender !== normalizeGender(w.sex)) {
+                  generoConflicto++;
+                  break; // Conflicto en esta hab. → NO reasignar en otra
                 }
+                r.beds[slot] = bedData;
+                r.status = 'occupied';
+                r.gender = normalizeGender(w.sex);
+                roomsToUpdate[w.roomNumber] = r;
+                if (cleanRut) rutsOcupados.add(cleanRut);
+                asignados++; assigned = true; break;
               }
             }
+            if (!assigned && !habitacionLlena) { /* conflicto género, ya contado */ }
+            if (!assigned && habitacionLlena) {
+              // 🔄 MODO TURNO ROTATIVO: ¿alguna cama libera antes de que llegue el nuevo?
+              let preAsignado = false;
+              if (w.arrivalDate) {
+                for (const slot of ['day', 'night', 'extra']) {
+                  const maxBeds = r.bedCount || 2;
+                  if (slot === 'extra' && maxBeds < 3) continue;
+                  const bedActual = r.beds?.[slot];
+                  if (bedActual?.occupant && bedActual.departureDate && bedActual.departureDate <= w.arrivalDate) {
+                    // El ocupante sale ANTES O EL MISMO DÍA que llega el nuevo → pre-asignar
+                    const existGender = ['day','night','extra']
+                      .map(k => r.beds?.[k]?.occupant ? (r.beds[k].gender||null) : null)
+                      .find(Boolean);
+                    if (existGender && existGender !== normalizeGender(w.sex)) {
+                      generoConflicto++; break;
+                    }
+                    r.beds[slot] = {
+                      ...bedActual,
+                      nextOccupant: { ...bedData }  // ← pre-asignado al turno entrante
+                    };
+                    roomsToUpdate[w.roomNumber] = r;
+                    if (cleanRut) rutsOcupados.add(cleanRut);
+                    preAsignados++; preAsignado = true;
+                    assigned = true; break;
+                  }
+                }
+              }
+              if (!preAsignado) habLlenas++;
+            }
+            continue; // No caer a MODO B si se especificó habitación
           }
 
-          // MODO B: auto-asignación si no se especificó habitación o no se encontró
-          if (!assigned) {
+          // ─── MODO B: auto-asignación (solo cuando NO hay habitación definida) ─
+          {
             const wSex = normalizeGender(w.sex);
             const candidates = rooms.filter(r => {
               if (r.status === 'blocked') return false;
@@ -1938,7 +2188,7 @@ async function renderRoomMap(container) {
             }).sort((a,b) => {
               const aOcc = ['day','night','extra'].filter(k => a.beds?.[k]?.occupant).length;
               const bOcc = ['day','night','extra'].filter(k => b.beds?.[k]?.occupant).length;
-              return bOcc - aOcc; // Preferir habitaciones más llenas
+              return bOcc - aOcc;
             });
 
             for (const r of candidates) {
@@ -1974,10 +2224,13 @@ async function renderRoomMap(container) {
 
         document.getElementById('carga-masiva-modal')?.remove();
 
-        let msg = `✅ ${asignados} trabajadores asignados.`;
-        if (yaOcupados > 0) msg += ` 🛡️ ${yaOcupados} ya tenían cama (ignorados).`;
-        if (fallidos > 0)   msg += ` ⚠️ ${fallidos} sin habitación disponible.`;
-        showToast(msg, asignados > 0 ? 'success' : 'warn');
+        let msg = asignados > 0 || preAsignados > 0 ? `✅ ${asignados} asignados` : `⚠️ 0 asignados`;
+        if (preAsignados   > 0) msg += ` · 🔄 ${preAsignados} pre-asignados (turno rotativo)`;
+        if (yaOcupados     > 0) msg += ` · 🛡️ ${yaOcupados} ya tenían cama`;
+        if (habLlenas      > 0) msg += ` · 🔴 ${habLlenas} hab. llenas`;
+        if (generoConflicto> 0) msg += ` · ⚡ ${generoConflicto} conflicto género`;
+        if (fallidos       > 0) msg += ` · ❓ ${fallidos} hab. no encontradas`;
+        showToast(msg, asignados > 0 || preAsignados > 0 ? 'success' : 'warn');
 
         // Refrescar vista
         document.getElementById('infra-search')?.dispatchEvent(new Event('input'));
@@ -1990,6 +2243,231 @@ async function renderRoomMap(container) {
       }
     };
   };
+
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // 🏔️  CARGA MASIVA ANGLO — 1 por cama, HABITACION obligatoria
+  // ─────────────────────────────────────────────────────────────────────────
+  window.openAngloModal = () => {
+    const existing = document.getElementById('anglo-modal');
+    if (existing) existing.remove();
+
+    const m = document.createElement('div');
+    m.id = 'anglo-modal';
+    m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9650;display:flex;align-items:center;justify-content:center;padding:16px;';
+
+    m.innerHTML = `
+      <div style="background:#fff;border-radius:20px;width:100%;max-width:680px;max-height:92dvh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 80px rgba(0,0,0,0.4)">
+        <div style="padding:18px 22px;border-bottom:1px solid #e2e8f0;background:linear-gradient(135deg,#7b1d1d,#c0392b);display:flex;align-items:center;justify-content:space-between;flex-shrink:0">
+          <div>
+            <div style="font-size:18px;font-weight:800;color:#fff">🏔️ Carga Masiva Anglo</div>
+            <div style="font-size:12px;color:rgba(255,255,255,0.8);margin-top:2px">1 trabajador por cama · Habitación obligatoria en Excel</div>
+          </div>
+          <button onclick="document.getElementById('anglo-modal').remove()" style="background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);border-radius:8px;padding:6px 10px;cursor:pointer;font-size:16px;color:#fff">✕</button>
+        </div>
+        <div style="padding:14px 22px;background:#fff5f5;border-bottom:1px solid #feb2b2;flex-shrink:0">
+          <div style="font-size:13px;font-weight:700;color:#c0392b;margin-bottom:8px">📋 Reglas Anglo:</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px;color:#2d3748">
+            <div style="background:#fff;padding:8px 12px;border-radius:8px;border:1px solid #feb2b2">✅ <b>HABITACION obligatoria</b> — sin hab. = se omite</div>
+            <div style="background:#fff;padding:8px 12px;border-radius:8px;border:1px solid #feb2b2">🛏 <b>1 persona por cama</b> — día o noche disponible</div>
+            <div style="background:#fff;padding:8px 12px;border-radius:8px;border:1px solid #feb2b2">🔄 <b>2 cargas</b> — 1ª llena camas vacías, 2ª completa</div>
+            <div style="background:#fff;padding:8px 12px;border-radius:8px;border:1px solid #feb2b2">🏔 <b>Hab. marcada Anglo</b> — reserva exclusiva</div>
+          </div>
+          <div style="font-size:11px;color:#718096;margin-top:8px;font-family:monospace;background:#fff;padding:6px 10px;border-radius:6px">
+            Columnas: FECHA · Empresa · Ncontrato · Gerencia · RazonSocial · NombreHuesped · RUTHuesped · CONTACTO · HABITACION · NombreTurno · ... · FechaInicio · FechaTermino · Sexo · OBSERVACION
+          </div>
+        </div>
+        <div style="padding:16px 22px;flex-shrink:0">
+          <input type="file" id="anglo-file-input" accept=".xlsx,.xls,.csv" style="display:none" onchange="window._parseAngloExcel(event)">
+          <div onclick="document.getElementById('anglo-file-input').click()"
+            style="border:2.5px dashed #feb2b2;border-radius:12px;padding:24px;text-align:center;cursor:pointer;background:#fff5f5;transition:background 0.2s;user-select:none"
+            onmouseover="this.style.background='#fee2e2'" onmouseout="this.style.background='#fff5f5'">
+            <div style="font-size:32px;margin-bottom:8px">📂</div>
+            <div style="font-weight:700;color:#c0392b;font-size:14px">Seleccionar Excel Anglo</div>
+            <div style="color:#718096;font-size:12px;margin-top:4px">.xlsx · .xls · .csv</div>
+          </div>
+        </div>
+        <div id="anglo-preview" style="flex:1;overflow-y:auto;padding:0 22px 16px;display:none">
+          <div id="anglo-preview-content"></div>
+        </div>
+        <div style="padding:14px 22px;border-top:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center;flex-shrink:0;background:#fafafa">
+          <span id="anglo-count-label" style="font-size:13px;color:#718096;font-weight:600"></span>
+          <button id="anglo-save-btn" onclick="window._processAngloExcel()" disabled
+            style="padding:10px 24px;border-radius:10px;border:none;cursor:pointer;background:linear-gradient(135deg,#7b1d1d,#c0392b);color:#fff;font-weight:800;font-size:14px;opacity:0.4;transition:opacity 0.2s;box-shadow:0 4px 12px rgba(192,57,43,0.3)">
+            🏔️ Asignar Trabajadores Anglo
+          </button>
+        </div>
+      </div>`;
+
+    document.body.appendChild(m);
+    m.addEventListener('click', e => { if (e.target === m) m.remove(); });
+
+    window._parseAngloExcel = (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = async (ev) => {
+        try {
+          const XLSX = await import('https://cdn.sheetjs.com/xlsx-0.20.0/package/xlsx.mjs');
+          const wb   = XLSX.read(new Uint8Array(ev.target.result), { type: 'array', cellDates: true });
+          const ws   = wb.Sheets[wb.SheetNames[0]];
+          const raw  = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+          if (raw.length < 2) { showToast('Excel vacío o sin datos', 'warn'); return; }
+          const fmt = v => (v ?? '').toString().trim();
+          const parseDate = v => {
+            if (!v) return '';
+            if (v instanceof Date) return v.toISOString().split('T')[0];
+            return String(v).split('T')[0];
+          };
+          window._angloWorkers = [];
+          const header = raw[0].map(h => fmt(h).toLowerCase());
+          const hasHeader = header.some(h => ['nombrehuesped','nombre','nombredelhuesped'].includes(h));
+          for (let i = (hasHeader ? 1 : 0); i < raw.length; i++) {
+            const row = raw[i];
+            if (!row.some(c => fmt(c))) continue;
+            let name, rut, company, gerencia, contractNumber, roomNumber, shift, arrivalDate, departureDate, sex, contact;
+            if (hasHeader) {
+              const get = (...keys) => {
+                for (const k of keys) {
+                  const idx = header.findIndex(h => h.includes(k));
+                  if (idx !== -1) return fmt(row[idx]);
+                }
+                return '';
+              };
+              name           = get('nombrehuesped','nombre');
+              rut            = get('ruthuesped','rut');
+              company        = get('empresa','razon');
+              gerencia       = get('gerencia');
+              contractNumber = get('ncontrato','contrato');
+              roomNumber     = get('habitacion','hab');
+              shift          = get('nombreturn','turno');
+              const idxI = header.findIndex(h => h.includes('fechainicio') || h.includes('ingreso'));
+              const idxT = header.findIndex(h => h.includes('fechatermino') || h.includes('salida'));
+              arrivalDate   = idxI !== -1 ? parseDate(row[idxI]) : '';
+              departureDate = idxT !== -1 ? parseDate(row[idxT]) : '';
+              sex            = get('sexo','genero');
+              contact        = get('contacto');
+            } else {
+              name = fmt(row[5]); rut = fmt(row[6]); company = fmt(row[1]);
+              gerencia = fmt(row[3]); contractNumber = fmt(row[2]);
+              roomNumber = fmt(row[8]); shift = fmt(row[9]);
+              arrivalDate = parseDate(row[13]); departureDate = parseDate(row[14]);
+              sex = fmt(row[15]); contact = fmt(row[7]);
+            }
+            if (!name) continue;
+            window._angloWorkers.push({ name, rut, company: company || 'Anglo American', gerencia, contractNumber, roomNumber, shift, arrivalDate, departureDate, sex, contact });
+          }
+          const sinHab = window._angloWorkers.filter(w => !w.roomNumber).length;
+          const conHab = window._angloWorkers.filter(w =>  w.roomNumber).length;
+          document.getElementById('anglo-count-label').textContent =
+            `📋 ${window._angloWorkers.length} trabajadores · 🏠 ${conHab} con hab. ${sinHab ? '· ⚠️ ' + sinHab + ' sin hab.' : ''}`;
+          let rows = '';
+          window._angloWorkers.slice(0, 80).forEach((w, i) => {
+            rows += `<tr style="${i%2===0?'background:#fafafa;':''}">
+              <td style="padding:7px 10px;font-weight:700">${w.name}</td>
+              <td style="padding:7px 10px;font-size:11px;color:#64748b">${w.rut||'—'}</td>
+              <td style="padding:7px 10px">
+                ${w.roomNumber
+                  ? `<span style="background:#fee2e2;color:#c0392b;padding:2px 8px;border-radius:8px;font-weight:800;font-size:12px">🏠 ${w.roomNumber}</span>`
+                  : `<span style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:8px;font-size:11px;font-weight:700">⚠️ Sin hab.</span>`}
+              </td>
+              <td style="padding:7px 10px;font-size:11px">${w.shift||'—'}</td>
+              <td style="padding:7px 10px;font-size:11px;color:#64748b">${w.departureDate||'—'}</td>
+            </tr>`;
+          });
+          if (window._angloWorkers.length > 80) rows += `<tr><td colspan="5" style="text-align:center;padding:10px;color:#94a3b8;font-size:12px">... y ${window._angloWorkers.length-80} más</td></tr>`;
+          const preview = document.getElementById('anglo-preview');
+          document.getElementById('anglo-preview-content').innerHTML = `
+            <h4 style="font-weight:800;font-size:14px;color:#1a202c;margin:12px 0 8px">Vista previa</h4>
+            <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">
+              <thead style="background:#fee2e2"><tr>
+                <th style="padding:8px 10px;text-align:left">Nombre</th>
+                <th style="padding:8px 10px;text-align:left">RUT</th>
+                <th style="padding:8px 10px;text-align:left">Habitación</th>
+                <th style="padding:8px 10px;text-align:left">Turno</th>
+                <th style="padding:8px 10px;text-align:left">Salida</th>
+              </tr></thead>
+              <tbody>${rows}</tbody>
+            </table></div>`;
+          preview.style.display = 'block';
+          const saveBtn = document.getElementById('anglo-save-btn');
+          saveBtn.disabled = conHab === 0;
+          saveBtn.style.opacity = conHab > 0 ? '1' : '0.4';
+        } catch(err) {
+          console.error('[Anglo Parser]', err);
+          showToast('Error al leer archivo: ' + err.message, 'error');
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    };
+
+    window._processAngloExcel = async () => {
+      if (!window._angloWorkers?.length) return;
+      const btn = document.getElementById('anglo-save-btn');
+      btn.disabled = true; btn.textContent = '⏳ Asignando...';
+      try {
+        const rooms = await getAll('rooms');
+        const roomsByNumber = {};
+        rooms.forEach(r => { roomsByNumber[String(r.number)] = r; });
+        const rutsOcupados = new Set();
+        rooms.forEach(r => {
+          ['day','night','extra'].forEach(k => {
+            if (r.beds?.[k]?.rut) rutsOcupados.add(String(r.beds[k].rut).replace(/[^0-9Kk]/g,'').toUpperCase());
+          });
+        });
+        let asignados = 0, sinHab = 0, yaOcupados = 0, habLlenas = 0, noEncontradas = 0;
+        const roomsToUpdate = {};
+        for (const w of window._angloWorkers) {
+          if (!w.roomNumber) { sinHab++; continue; }
+          const cleanRut = (w.rut||'').replace(/[^0-9Kk]/g,'').toUpperCase();
+          if (cleanRut && rutsOcupados.has(cleanRut)) { yaOcupados++; continue; }
+          const r = roomsToUpdate[w.roomNumber] || roomsByNumber[String(w.roomNumber)];
+          if (!r) { noEncontradas++; continue; }
+          if (!r.beds) r.beds = {};
+          const bedData = {
+            occupant: w.name, company: w.company || 'Anglo American',
+            shift: w.shift, gender: (w.sex||'M').toUpperCase().charAt(0),
+            rut: w.rut, management: w.gerencia, contractNumber: w.contractNumber,
+            arrivalDate: w.arrivalDate, departureDate: w.departureDate, contact: w.contact,
+          };
+          let assigned = false;
+          for (const slot of ['day','night','extra']) {
+            if (slot === 'extra' && (r.bedCount||2) < 3) continue;
+            if (!r.beds[slot]?.occupant) {
+              r.beds[slot] = bedData;
+              r.status = 'occupied';
+              r.reservedCompany = 'Anglo American';
+              roomsToUpdate[w.roomNumber] = r;
+              if (cleanRut) rutsOcupados.add(cleanRut);
+              asignados++; assigned = true; break;
+            }
+          }
+          if (!assigned) habLlenas++;
+        }
+        await Promise.all(Object.values(roomsToUpdate).map(r => put('rooms', r)));
+        if (window._allRooms) {
+          Object.values(roomsToUpdate).forEach(updated => {
+            const idx = window._allRooms.findIndex(r => String(r.id) === String(updated.id));
+            if (idx !== -1) window._allRooms[idx] = updated;
+          });
+        }
+        window.dispatchEvent(new CustomEvent('rooms-updated'));
+        document.getElementById('anglo-modal')?.remove();
+        let msg = `✅ Anglo: ${asignados} asignados en ${Object.keys(roomsToUpdate).length} hab.`;
+        if (sinHab      > 0) msg += ` · ⚠️ ${sinHab} sin HABITACION`;
+        if (yaOcupados  > 0) msg += ` · 🛡️ ${yaOcupados} ya tenían cama`;
+        if (habLlenas   > 0) msg += ` · 🔴 ${habLlenas} hab. llenas`;
+        if (noEncontradas > 0) msg += ` · ❓ ${noEncontradas} hab. no encontradas`;
+        showToast(msg, asignados > 0 ? 'success' : 'warn');
+        document.getElementById('infra-search')?.dispatchEvent(new Event('input'));
+      } catch(err) {
+        console.error('[Anglo Procesado]', err);
+        showToast('Error al asignar: ' + err.message, 'error');
+        btn.disabled = false; btn.textContent = '🏔️ Asignar Trabajadores Anglo';
+      }
+    };
+  };
+
 
   // ─────────────────────────────────────────────────────────────────────────
   // 🗂️  ASIGNACIÓN DE CAMAS (reemplaza al antiguo "Reservar")

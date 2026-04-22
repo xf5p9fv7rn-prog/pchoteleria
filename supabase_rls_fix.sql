@@ -39,11 +39,21 @@ CREATE POLICY "Allow all census"
   USING (true)
   WITH CHECK (true);
 
--- ── 5. Habilitar Realtime (si no lo hiciste antes) ───────────────────────
-ALTER TABLE rooms         REPLICA IDENTITY FULL;
-ALTER TABLE b2b_requests  REPLICA IDENTITY FULL;
-ALTER TABLE buildings     REPLICA IDENTITY FULL;
-ALTER TABLE census        REPLICA IDENTITY FULL;
+-- ── 5. GERENCIA_QUOTAS ───────────────────────────────────────────────────
+ALTER TABLE gerencia_quotas ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Allow all gerencia_quotas" ON gerencia_quotas;
+CREATE POLICY "Allow all gerencia_quotas"
+  ON gerencia_quotas FOR ALL
+  USING (true)
+  WITH CHECK (true);
+
+-- ── 6. Habilitar Realtime (si no lo hiciste antes) ───────────────────────
+ALTER TABLE rooms           REPLICA IDENTITY FULL;
+ALTER TABLE b2b_requests    REPLICA IDENTITY FULL;
+ALTER TABLE buildings       REPLICA IDENTITY FULL;
+ALTER TABLE census          REPLICA IDENTITY FULL;
+ALTER TABLE gerencia_quotas REPLICA IDENTITY FULL;
 
 DO $$
 BEGIN
@@ -59,10 +69,13 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'census') THEN
     ALTER PUBLICATION supabase_realtime ADD TABLE census;
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'gerencia_quotas') THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE gerencia_quotas;
+  END IF;
 END $$;
 
 -- ── Verificar que quedó bien ──────────────────────────────────────────────
 SELECT tablename, policyname, cmd
 FROM pg_policies
-WHERE tablename IN ('rooms','b2b_requests','buildings','census')
+WHERE tablename IN ('rooms','b2b_requests','buildings','census','gerencia_quotas')
 ORDER BY tablename;

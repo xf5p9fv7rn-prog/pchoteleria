@@ -74,12 +74,15 @@ window.selectBuilding = (bid) => {
   selectedBuildingId = bid;
   selectedFloor = 'all';
   _doInfraSelectors();
-  _doMapFilter();
+  // Usar _infraBuscar si ya está definida (preserva el texto y tipo de búsqueda)
+  if (typeof window._infraBuscar === 'function') window._infraBuscar();
+  else _doMapFilter();
 };
 window.selectFloor = (floor) => {
   selectedFloor = floor;
   _doInfraSelectors();
-  _doMapFilter();
+  if (typeof window._infraBuscar === 'function') window._infraBuscar();
+  else _doMapFilter();
 };
 
 export async function renderInfraestructura(container) {
@@ -1563,69 +1566,86 @@ async function renderRoomMap(container) {
       <div class="legend-item"><div class="legend-dot" style="background:#ed8936"></div>Cama bloqueada</div>
     </div>
 
-    <div class="infra-selectors">
-      <div class="selector-group" style="margin-bottom:15px; grid-column: 1 / -1">
-        <div style="display:flex;gap:10px;align-items:center">
-          <div style="position:relative;flex:1">
-              <input type="text" id="infra-search" class="form-input"
-                oninput="window._updateGridFilters?.()"
-                placeholder="🔍 Buscar por Nº Habitación, Nombre, RUT o Empresa..."
-                style="padding-left:40px; height:45px; border-radius:12px; font-size:14px">
-              <span style="position:absolute; left:14px; top:50%; transform:translateY(-50%); font-size:18px">🔍</span>
-          </div>
-          <!-- Botón Asignación Camas (solo admin) -->
-          ${(window._currentUser?.role === 'admin' || window._currentUser?.role === 'superadmin') ? `
-          <button onclick="window.openAsignacionModal()"
-              id="btn-asignacion-camas"
-              style="height:45px;padding:0 18px;border-radius:12px;border:none;cursor:pointer;
-                     background:linear-gradient(135deg,#1e3a5f,#2c5282);color:#fff;
-                     font-weight:700;font-size:13px;white-space:nowrap;
-                     box-shadow:0 4px 12px rgba(30,58,95,0.4);
-                     display:flex;align-items:center;gap:7px;flex-shrink:0;
-                     transition:transform 0.15s,box-shadow 0.15s"
-              onmouseover="this.style.transform='translateY(-1px)';this.style.boxShadow='0 6px 18px rgba(30,58,95,0.55)'"
-              onmouseout="this.style.transform='';this.style.boxShadow='0 4px 12px rgba(30,58,95,0.4)'">
-            🗂️ Asignación Camas
-          </button>
-          <button onclick="window.openCargaMasivaModal()"
-              id="btn-carga-masiva"
-              style="height:45px;padding:0 18px;border-radius:12px;border:none;cursor:pointer;
-                     background:linear-gradient(135deg,#276749,#38a169);color:#fff;
-                     font-weight:700;font-size:13px;white-space:nowrap;
-                     box-shadow:0 4px 12px rgba(39,103,73,0.4);
-                     display:flex;align-items:center;gap:7px;flex-shrink:0;
-                     transition:transform 0.15s,box-shadow 0.15s"
-              onmouseover="this.style.transform='translateY(-1px)'"
-              onmouseout="this.style.transform=''">
-            📥 Carga Masiva
-          </button>
-          <button onclick="window.openAngloModal()"
-              id="btn-anglo"
-              style="height:45px;padding:0 18px;border-radius:12px;border:none;cursor:pointer;
-                     background:linear-gradient(135deg,#7b1d1d,#c0392b);color:#fff;
-                     font-weight:700;font-size:13px;white-space:nowrap;
-                     box-shadow:0 4px 12px rgba(192,57,43,0.4);
-                     display:flex;align-items:center;gap:7px;flex-shrink:0;
-                     transition:transform 0.15s,box-shadow 0.15s"
-              onmouseover="this.style.transform='translateY(-1px)'"
-              onmouseout="this.style.transform=''">
-            🏔️ Anglo
-          </button>
-          <button onclick="window.forceSyncToCloud()"
-              id="btn-force-sync"
-              style="height:45px;padding:0 18px;border-radius:12px;border:none;cursor:pointer;
-                     background:linear-gradient(135deg,#6b46c1,#9f7aea);color:#fff;
-                     font-weight:700;font-size:13px;white-space:nowrap;
-                     box-shadow:0 4px 12px rgba(107,70,193,0.4);
-                     display:flex;align-items:center;gap:7px;flex-shrink:0;
-                     transition:transform 0.15s,box-shadow 0.15s"
-              onmouseover="this.style.transform='translateY(-1px)'"
-              onmouseout="this.style.transform=''">
-            ☁️ Sincronizar Nube
-          </button>` : ''}
+    <!-- BUSCADOR ROBUSTO -->
+    <div style="background:#fff;border:1.5px solid #e2e8f0;border-radius:16px;padding:14px 16px;margin-bottom:14px;box-shadow:0 2px 8px rgba(0,0,0,0.06)">
+      <!-- Fila 1: campo de texto + botón buscar + limpiar -->
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
+        <div style="position:relative;flex:1">
+          <span style="position:absolute;left:12px;top:50%;transform:translateY(-50%);font-size:16px;pointer-events:none">🔍</span>
+          <input type="text" id="infra-search"
+            placeholder="Buscar por Nombre, RUT, Gerencia o Habitación..."
+            style="width:100%;padding:10px 12px 10px 38px;border:1.5px solid #e2e8f0;border-radius:10px;font-size:14px;outline:none;box-sizing:border-box;transition:border-color 0.2s"
+            onfocus="this.style.borderColor='#667eea'"
+            onblur="this.style.borderColor='#e2e8f0'"
+            onkeydown="if(event.key==='Enter') window._infraBuscar()">
         </div>
+        <button onclick="window._infraBuscar()"
+          style="height:42px;padding:0 20px;background:linear-gradient(135deg,#667eea,#5a67d8);color:#fff;
+                 border:none;border-radius:10px;font-weight:800;font-size:14px;cursor:pointer;
+                 white-space:nowrap;flex-shrink:0;transition:transform 0.15s,opacity 0.15s"
+          onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'">
+          🔍 Buscar
+        </button>
+        <button onclick="document.getElementById('infra-search').value='';window._infraBuscar()"
+          style="height:42px;padding:0 14px;background:#f7fafc;color:#64748b;
+                 border:1.5px solid #e2e8f0;border-radius:10px;font-weight:700;font-size:13px;cursor:pointer;flex-shrink:0">
+          ✕ Limpiar
+        </button>
+        <!-- Botones admin -->
+        ${(window._currentUser?.role === 'admin' || window._currentUser?.role === 'superadmin') ? `
+        <button onclick="window.openAsignacionModal()" id="btn-asignacion-camas"
+          style="height:42px;padding:0 14px;border-radius:10px;border:none;cursor:pointer;
+                 background:linear-gradient(135deg,#1e3a5f,#2c5282);color:#fff;
+                 font-weight:700;font-size:12px;white-space:nowrap;flex-shrink:0">
+          🗂️ Asignación
+        </button>
+        <button onclick="window.openCargaMasivaModal()" id="btn-carga-masiva"
+          style="height:42px;padding:0 14px;border-radius:10px;border:none;cursor:pointer;
+                 background:linear-gradient(135deg,#276749,#38a169);color:#fff;
+                 font-weight:700;font-size:12px;white-space:nowrap;flex-shrink:0">
+          📥 Masiva
+        </button>
+        <button onclick="window.openAngloModal()" id="btn-anglo"
+          style="height:42px;padding:0 14px;border-radius:10px;border:none;cursor:pointer;
+                 background:linear-gradient(135deg,#7b1d1d,#c0392b);color:#fff;
+                 font-weight:700;font-size:12px;white-space:nowrap;flex-shrink:0">
+          🏔️ Anglo
+        </button>
+        <button onclick="window.forceSyncToCloud()" id="btn-force-sync"
+          style="height:42px;padding:0 14px;border-radius:10px;border:none;cursor:pointer;
+                 background:linear-gradient(135deg,#6b46c1,#9f7aea);color:#fff;
+                 font-weight:700;font-size:12px;white-space:nowrap;flex-shrink:0">
+          ☁️ Sync
+        </button>` : ''}
       </div>
+      <!-- Fila 2: tipo de búsqueda + resultado -->
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.5px">Buscar por:</span>
+        <button id="sf-nombre" onclick="window._infraSetSearchType('nombre',this)"
+          style="padding:4px 12px;border-radius:99px;border:1.5px solid #667eea;background:#eef2ff;color:#4338ca;font-size:12px;font-weight:700;cursor:pointer">
+          👤 Nombre
+        </button>
+        <button id="sf-rut" onclick="window._infraSetSearchType('rut',this)"
+          style="padding:4px 12px;border-radius:99px;border:1.5px solid #e2e8f0;background:#f8fafc;color:#64748b;font-size:12px;font-weight:600;cursor:pointer">
+          🪪 RUT
+        </button>
+        <button id="sf-gerencia" onclick="window._infraSetSearchType('gerencia',this)"
+          style="padding:4px 12px;border-radius:99px;border:1.5px solid #e2e8f0;background:#f8fafc;color:#64748b;font-size:12px;font-weight:600;cursor:pointer">
+          🎯 Gerencia
+        </button>
+        <button id="sf-habitacion" onclick="window._infraSetSearchType('habitacion',this)"
+          style="padding:4px 12px;border-radius:99px;border:1.5px solid #e2e8f0;background:#f8fafc;color:#64748b;font-size:12px;font-weight:600;cursor:pointer">
+          🏠 N° Hab.
+        </button>
+        <button id="sf-todos" onclick="window._infraSetSearchType('todos',this)"
+          style="padding:4px 12px;border-radius:99px;border:1.5px solid #e2e8f0;background:#f8fafc;color:#64748b;font-size:12px;font-weight:600;cursor:pointer">
+          🔎 Todos
+        </button>
+        <span id="infra-search-count" style="margin-left:auto;font-size:12px;color:#94a3b8;font-weight:600"></span>
+      </div>
+    </div>
 
+    <div class="infra-selectors">
       <div class="selector-group">
         <label class="form-label">🏢 Seleccionar Pabellón / Edificio:</label>
         <div class="button-selector" id="building-selector-bar">
@@ -1641,14 +1661,114 @@ async function renderRoomMap(container) {
     <div id="room-map-grid"></div>
   `;
 
-  window._allRooms = rooms;
+  window._allRooms     = rooms;
   window._allBuildings = buildings;
+  window._searchType   = 'nombre'; // tipo activo por defecto
 
-  // oninput ya está en el HTML del input — no necesitamos addEventListener aquí
+  // ── Función de búsqueda: COMPLETAMENTE SELF-CONTAINED ────────────────────
+  // No depende de closures ni del scope de renderRoomMap.
+  // Lee estado directamente de window._allRooms, window._allBuildings,
+  // selectedBuildingId y selectedFloor (variables de módulo = siempre presentes).
+  window._infraBuscar = function() {
+    const allRooms = window._allRooms;
+    if (!allRooms || allRooms.length === 0) {
+      console.warn('[Búsqueda] _allRooms no disponible aún');
+      return;
+    }
+    const raw    = (document.getElementById('infra-search')?.value || '').trim();
+    const search = raw.toLowerCase();
+    const type   = window._searchType || 'todos';
 
-  // Usar funciones de nivel de módulo (no redefine closures aquí)
+    let filtered = allRooms;
+
+    // Filtro por edificio/piso (estado del módulo)
+    if (selectedBuildingId !== 'all') {
+      filtered = filtered.filter(r => String(r.buildingId) === String(selectedBuildingId));
+    }
+    if (selectedFloor !== 'all') {
+      filtered = filtered.filter(r => String(r.floor) === String(selectedFloor));
+    }
+
+    // Filtro por texto
+    if (search) {
+      const sClean = search.replace(/[^0-9k]/g, '');
+      filtered = filtered.filter(r => {
+        const beds = ['day','night','extra'].map(k => r.beds?.[k] || {});
+
+        if (type === 'habitacion') {
+          return String(r.number||'').toLowerCase().includes(search);
+        }
+        if (type === 'nombre') {
+          return beds.some(b => (b.occupant||'').toLowerCase().includes(search));
+        }
+        if (type === 'rut') {
+          return beds.some(b => {
+            const rut = (b.rut||'').toLowerCase().replace(/[^0-9k]/g,'');
+            return sClean ? rut.includes(sClean) : rut.includes(search);
+          });
+        }
+        if (type === 'gerencia') {
+          return beds.some(b =>
+            (b.management||b.gerencia||'').toLowerCase().includes(search) ||
+            (b.company||'').toLowerCase().includes(search)
+          );
+        }
+        // 'todos': busca en todo
+        const num   = String(r.number||'').toLowerCase();
+        return num.includes(search) ||
+               beds.some(b =>
+                 (b.occupant||'').toLowerCase().includes(search) ||
+                 (b.company||'').toLowerCase().includes(search) ||
+                 (b.management||b.gerencia||'').toLowerCase().includes(search) ||
+                 (sClean && (b.rut||'').toLowerCase().replace(/[^0-9k]/g,'').includes(sClean))
+               );
+      });
+    }
+
+    // Mostrar conteo resultado
+    const countEl = document.getElementById('infra-search-count');
+    if (countEl) {
+      countEl.textContent = search
+        ? `${filtered.length} resultado${filtered.length !== 1 ? 's' : ''} de ${allRooms.length}`
+        : `${allRooms.length} habitaciones`;
+    }
+
+    // Actualizar grid — renderGrid es function declaration, siempre disponible
+    renderGrid(filtered);
+  };
+
+  // Alias para el sistema anterior (retrocompatibilidad)
+  window._updateGridFilters = window._infraBuscar;
+
+  // ── Selector de tipo de búsqueda ─────────────────────────────────────────
+  window._infraSetSearchType = function(type, btn) {
+    window._searchType = type;
+    // Resetear estilos de todos los botones
+    ['sf-nombre','sf-rut','sf-gerencia','sf-habitacion','sf-todos'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) {
+        el.style.background = '#f8fafc';
+        el.style.borderColor = '#e2e8f0';
+        el.style.color = '#64748b';
+        el.style.fontWeight = '600';
+      }
+    });
+    // Resaltar activo
+    if (btn) {
+      btn.style.background = '#eef2ff';
+      btn.style.borderColor = '#667eea';
+      btn.style.color = '#4338ca';
+      btn.style.fontWeight = '700';
+    }
+    // Si hay texto, re-filtrar automáticamente
+    if (document.getElementById('infra-search')?.value?.trim()) {
+      window._infraBuscar();
+    }
+  };
+
+  // ── Render inicial: selectores + grid completo ────────────────────────────
   _doInfraSelectors();
-  _doMapFilter();
+  window._infraBuscar(); // Muestra todas las habitaciones (sin texto = sin filtro)
 
   // ─────────────────────────────────────────────────────────────────────────
   // ☁️  FORZAR SINCRONIZACIÓN A LA NUBE — sube todo lo local a Supabase

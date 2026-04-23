@@ -958,6 +958,44 @@ function setupInfraHandlers() {
   };
 
   // 🗑️ VACIAR CAMA INDIVIDUAL
+
+  // ✅ AUTORIZAR CHECK-IN: El admin verifica el carnet y da acceso al portal
+  window.autorizarCheckin = async (roomId, bedKey) => {
+    try {
+      const r = await _getRoomFromCache(roomId);
+      if (!r || !r.beds?.[bedKey]?.occupant) {
+        showToast('No hay trabajador en esta cama', 'error');
+        return;
+      }
+      r.beds[bedKey].checkinAuthorized = true;
+      r.beds[bedKey].authorizedAt = new Date().toISOString();
+      await put('rooms', r);
+      _updateRoomInCache(r);
+      showToast(`✅ Check-in autorizado para ${r.beds[bedKey].occupant.split('(')[0].trim()}`, 'success');
+      window.showRoomDetail(roomId);
+    } catch(err) {
+      console.error('[autorizarCheckin]', err);
+      showToast('Error al autorizar: ' + err.message, 'error');
+    }
+  };
+
+  // ✅ REVOCAR AUTORIZACIÓN: Quita el permiso de check-in
+  window.revocarAutorizacion = async (roomId, bedKey) => {
+    if (!confirm('¿Revocar la autorización de check-in para este trabajador?')) return;
+    try {
+      const r = await _getRoomFromCache(roomId);
+      if (!r) return;
+      r.beds[bedKey].checkinAuthorized = false;
+      r.beds[bedKey].authorizedAt = null;
+      await put('rooms', r);
+      _updateRoomInCache(r);
+      showToast('Autorización revocada', 'info');
+      window.showRoomDetail(roomId);
+    } catch(err) {
+      showToast('Error: ' + err.message, 'error');
+    }
+  };
+
   window.vaciarCama = async (roomId, bedKey) => {
     if (!confirm('¿Vaciar esta cama?')) return;
     try {
@@ -1309,8 +1347,9 @@ function renderBedDetail(bed, label, icon, roomStatus, bedBlocked, roomId, bedKe
         <div style="flex:1">
           <div style="display:flex; align-items:center; justify-content:space-between">
              <div style="font-size:14px; font-weight:800; color:var(--text-primary)">
-                 ${bed.checkoutPending ? '🟡' : bed.present ? '🟢' : '🔴'} ${bed.occupant}
+                 ${bed.checkoutPending ? '🟡' : bed.present ? '🟢' : bed.checkinAuthorized ? '🔵' : '🔴'} ${bed.occupant}
                  ${bed.checkoutPending ? '<span style="font-size:10px;background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:99px;font-weight:700;margin-left:4px">SALIDA SOLICITADA</span>' : ''}
+                 ${(!bed.present && !bed.checkoutPending && bed.checkinAuthorized) ? '<span style="font-size:10px;background:#ebf8ff;color:#2b6cb0;padding:2px 8px;border-radius:99px;font-weight:700;margin-left:4px">✅ AUTORIZADO</span>' : ''}
              </div>
              <div style="display:flex;gap:4px">
                <button class="btn btn-ghost btn-sm" style="color:#2b6cb0;font-size:12px" onclick="window.editBedInfo(${roomId}, '${bedKey}')">✏️</button>
@@ -1341,6 +1380,32 @@ function renderBedDetail(bed, label, icon, roomStatus, bedBlocked, roomId, bedKe
               <button class="btn btn-primary btn-sm" style="flex:1" onclick="window.saveBedEdit(${roomId}, '${bedKey}')">💾 Guardar</button>
               <button class="btn btn-secondary btn-sm" onclick="document.getElementById('edit-panel-${roomId}-${bedKey}').style.display='none'">✕</button>
             </div>
+          </div>
+          <!-- ✅ Autorización Check-in Panel -->
+          <div style="margin-top:12px;">
+            ${bed.present ? `
+              <div style="display:flex;align-items:center;gap:10px;background:#f0fff4;border:1.5px solid #9ae6b4;border-radius:10px;padding:10px 14px">
+                <span style="font-size:20px">🟢</span>
+                <div>
+                  <div style="font-size:12px;font-weight:800;color:#276749">CHECK-IN CONFIRMADO</div>
+                  <div style="font-size:11px;color:#48bb78">${bed.lastCheckIn ? 'Registrado: ' + new Date(bed.lastCheckIn).toLocaleString('es-CL',{hour:'2-digit',minute:'2-digit',day:'2-digit',month:'2-digit'}) : 'Presente en campamento'}</div>
+                </div>
+              </div>` : (bed.checkinAuthorized ? `
+              <div style="display:flex;align-items:center;justify-content:space-between;background:#ebf8ff;border:1.5px solid #90cdf4;border-radius:10px;padding:10px 14px;gap:8px">
+                <div style="display:flex;align-items:center;gap:10px">
+                  <span style="font-size:20px">🔵</span>
+                  <div>
+                    <div style="font-size:12px;font-weight:800;color:#2b6cb0">CHECK-IN AUTORIZADO</div>
+                    <div style="font-size:11px;color:#63b3ed">Esperando confirmación del trabajador</div>
+                  </div>
+                </div>
+                <button class="btn btn-ghost btn-sm" style="color:#e53e3e;font-size:11px;white-space:nowrap" onclick="window.revocarAutorizacion(${roomId}, '${bedKey}')">✕ Revocar</button>
+              </div>` : `
+              <button class="btn btn-primary btn-sm"
+                style="width:100%;background:linear-gradient(135deg,#3182ce,#2b6cb0);font-size:13px;padding:11px;border-radius:10px;letter-spacing:0.3px;font-weight:700"
+                onclick="window.autorizarCheckin(${roomId}, '${bedKey}')">
+                ✅ Autorizar Check-in (verificó carnet)
+              </button>`)}
           </div>
           <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-top:8px">
             <div class="meta-item">

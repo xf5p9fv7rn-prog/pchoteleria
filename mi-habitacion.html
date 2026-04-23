@@ -529,10 +529,22 @@
 
             <div class="ticket-footer">
 
-                <!-- Estado 1: Pendiente de check-in -->
-                <div id="checkin-section">
+                <!-- Estado 1A: No autorizado aún -->
+                <div id="not-authorized-section" style="display:none">
+                    <div style="background:#fff5f5;border:2px solid #feb2b2;border-radius:14px;padding:16px;text-align:center">
+                        <div style="font-size:32px;margin-bottom:8px">🔴</div>
+                        <div style="font-size:14px;font-weight:800;color:#c53030;margin-bottom:6px">INGRESO AÚN NO AUTORIZADO</div>
+                        <div style="font-size:12px;color:#742a2a;line-height:1.5">
+                            Dirígete a <strong>Recepción</strong> con tu carnet de identidad.<br>
+                            El personal autorizará tu check-in.
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Estado 1B: Autorizado — puede confirmar llegada -->
+                <div id="checkin-section" style="display:none">
                     <p class="checkin-hint">
-                        ✅ Confirma tu llegada para registrar tu entrada al campamento.
+                        ✅ Tu ingreso fue autorizado en recepción. Confirma tu llegada.
                     </p>
                     <button class="btn-checkin" id="btn-checkin" onclick="window.marcarAsistencia()">
                         ✅ CONFIRMAR LLEGADA
@@ -732,6 +744,7 @@
 
             window._currentRoomData = roomInfo;
             window._currentBedKey   = bedKey;
+            window._currentBedData  = foundBed; // referencia directa a la cama
 
             const bedLabel = bedKey === 'day' ? 'Cama 1 (A)' : bedKey === 'night' ? 'Cama 2 (B)' : 'Cama Extra';
 
@@ -766,6 +779,28 @@
             setProgress(100, '✅ ¡Habitación encontrada!');
             await new Promise(r => setTimeout(r, 400)); // pequeña pausa visual
             setProgress(0);
+            // Determinar qué sección del ticket mostrar
+            const foundBedFinal = window._currentBedData;
+            const isAuthorized  = foundBedFinal?.checkinAuthorized === true;
+            const isPresent     = foundBedFinal?.present === true;
+
+            document.getElementById('not-authorized-section').style.display = 'none';
+            document.getElementById('checkin-section').style.display        = 'none';
+            document.getElementById('success-section').style.display        = 'none';
+            document.getElementById('checkout-done-section').style.display  = 'none';
+
+            if (isPresent || foundBedFinal?.checkoutPending) {
+                document.getElementById('success-section').style.display = 'block';
+                const ci = foundBedFinal?.lastCheckIn;
+                document.getElementById('t-time').textContent = ci
+                    ? new Date(ci).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' })
+                    : 'ya registrado';
+            } else if (isAuthorized) {
+                document.getElementById('checkin-section').style.display = 'block';
+            } else {
+                document.getElementById('not-authorized-section').style.display = 'block';
+            }
+
             document.getElementById('search-view').style.display = 'none';
             document.getElementById('ticket-view').style.display = 'block';
 

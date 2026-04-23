@@ -3002,22 +3002,24 @@ async function renderBuildingsList(container) {
     getAll('rooms').catch(() => [])
   ]);
 
-  // Normalizar empresa a Title Case para agrupar aramark/ARAMARK/Aramark como una sola
   const normalizeCompany = (name) => {
-      if (!name) return 'Sin Empresa';
-      return name.trim().toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+    if (!name) return 'Sin Empresa';
+    return name.trim().toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
   };
 
-  // ── Estadísticas por edificio ──────────────────────────────────────────
-  function getBuildingStats(buildingId) {
-    const bRooms = rooms.filter(r => String(r.buildingId) === String(buildingId));
+  function pctColor(p) {
+    if (p >= 90) return '#e53e3e';
+    if (p >= 60) return '#dd6b20';
+    return '#38a169';
+  }
+
+  function getBedStats(roomList) {
     let totalBeds = 0, occupiedBeds = 0, maleCount = 0, femaleCount = 0;
     const companyMap = {};
-
-    bRooms.forEach(r => {
-      ['day', 'night', 'extra'].forEach(k => {
-        const limit = k === 'extra' ? (r.bedCount >= 3 ? 1 : 0) : (k === 'night' ? (r.bedCount >= 2 ? 1 : 0) : 1);
-        if (!limit) return;
+    roomList.forEach(r => {
+      ['day','night','extra'].forEach(k => {
+        const hasSlot = k === 'extra' ? (r.bedCount >= 3) : k === 'night' ? (r.bedCount >= 2) : true;
+        if (!hasSlot) return;
         totalBeds++;
         const bed = r.beds?.[k];
         if (bed?.occupant) {
@@ -3029,262 +3031,341 @@ async function renderBuildingsList(container) {
         }
       });
     });
-
-    const freeBeds = totalBeds - occupiedBeds;
     const pct = totalBeds > 0 ? Math.round((occupiedBeds / totalBeds) * 100) : 0;
-    return { totalBeds, occupiedBeds, freeBeds, pct, maleCount, femaleCount, companyMap, totalRooms: bRooms.length, bRooms };
+    return { totalBeds, occupiedBeds, freeBeds: totalBeds - occupiedBeds, maleCount, femaleCount, pct, companyMap, totalRooms: roomList.length };
   }
 
-  // ── Estadísticas por piso para el panel expandible ─────────────────────
-  function getFloorStats(bRooms, floorNum) {
-    const fRooms = bRooms.filter(r => String(r.floor) === String(floorNum));
-    let totalBeds = 0, occupiedBeds = 0, maleCount = 0, femaleCount = 0;
-    fRooms.forEach(r => {
-      ['day', 'night', 'extra'].forEach(k => {
-        const limit = k === 'extra' ? (r.bedCount >= 3 ? 1 : 0) : (k === 'night' ? (r.bedCount >= 2 ? 1 : 0) : 1);
-        if (!limit) return;
-        totalBeds++;
-        const bed = r.beds?.[k];
-        if (bed?.occupant) {
-          occupiedBeds++;
-          const g = bed.gender || r.gender || 'M';
-          if (g === 'F') femaleCount++; else maleCount++;
-        }
-      });
-    });
-    return { totalBeds, occupiedBeds, freeBeds: totalBeds - occupiedBeds, maleCount, femaleCount, totalRooms: fRooms.length };
+  function chipSet(s) {
+    return `
+      <div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center">
+        <div style="background:#f0fff4;border:1.5px solid #9ae6b4;border-radius:8px;padding:4px 9px;text-align:center">
+          <div style="font-size:15px;font-weight:900;color:#276749;line-height:1">${s.freeBeds}</div>
+          <div style="font-size:8px;font-weight:700;color:#38a169;text-transform:uppercase">libres</div>
+        </div>
+        <div style="background:#fff5f5;border:1.5px solid #fc8181;border-radius:8px;padding:4px 9px;text-align:center">
+          <div style="font-size:15px;font-weight:900;color:#c53030;line-height:1">${s.occupiedBeds}</div>
+          <div style="font-size:8px;font-weight:700;color:#e53e3e;text-transform:uppercase">ocup.</div>
+        </div>
+        ${s.maleCount > 0 ? `<div style="background:#ebf8ff;border:1.5px solid #90cdf4;border-radius:8px;padding:4px 9px;text-align:center"><div style="font-size:14px;font-weight:900;color:#2b6cb0;line-height:1">${s.maleCount}</div><div style="font-size:8px;font-weight:700;color:#3182ce;text-transform:uppercase">H</div></div>` : ''}
+        ${s.femaleCount > 0 ? `<div style="background:#fff5f7;border:1.5px solid #f9a8d4;border-radius:8px;padding:4px 9px;text-align:center"><div style="font-size:14px;font-weight:900;color:#97266d;line-height:1">${s.femaleCount}</div><div style="font-size:8px;font-weight:700;color:#97266d;text-transform:uppercase">M</div></div>` : ''}
+      </div>`;
   }
 
-  function pctColor(p) {
-    if (p >= 90) return '#e53e3e';
-    if (p >= 60) return '#dd6b20';
-    return '#38a169';
+  function progressBar(pct, color, height = 4) {
+    return `<div style="height:${height}px;background:#e2e8f0;border-radius:3px;overflow:hidden;margin-top:4px">
+      <div style="width:${pct}%;height:100%;background:${color};border-radius:3px;transition:width 0.5s ease"></div>
+    </div>`;
   }
 
-  // ── Totales globales ────────────────────────────────────────────────────
-  let globalBeds = 0, globalOcc = 0, globalMale = 0, globalFemale = 0;
-  const globalCompanies = {};
-  buildings.forEach(b => {
-    const s = getBuildingStats(b.id);
-    globalBeds += s.totalBeds;
-    globalOcc += s.occupiedBeds;
-    globalMale += s.maleCount;
-    globalFemale += s.femaleCount;
-    Object.entries(s.companyMap).forEach(([c, n]) => { globalCompanies[c] = (globalCompanies[c] || 0) + n; });
-  });
-  const globalPct = globalBeds > 0 ? Math.round((globalOcc / globalBeds) * 100) : 0;
-  const topCompanies = Object.entries(globalCompanies).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  // ── Separar edificio único (R-220) de pabellones (Pérez Caladera) ─
+  const standalone = buildings.filter(b => b.type === 'building');
+  const pavilions  = buildings.filter(b => b.type === 'pavilion' || b.type !== 'building');
 
-  // ── Tarjetas compactas con chips + panel por piso ───────────────────────
-  const cards = buildings.map(b => {
-    const s = getBuildingStats(b.id);
-    const color = pctColor(s.pct);
-    const companies = Object.entries(s.companyMap).sort((a, b) => b[1] - a[1]);
+  // ── TOTALES GLOBALES ───────────────────────────────────────────────
+  const globalStats = getBedStats(rooms);
+  const globalColor = pctColor(globalStats.pct);
+  const topCompanies = Object.entries(globalStats.companyMap).sort((a,b) => b[1]-a[1]).slice(0, 6);
 
-    // Obtener pisos únicos de este edificio
-    const floors = [...new Set(s.bRooms.map(r => r.floor))].sort((a, b) => a - b);
+  // ═══════════════════════════════════════════════════════════════════
+  // SECCIÓN 1: R-220 y otros edificios standalone
+  // Accordion: Edificio → Pisos → (click piso: habitaciones detalladas)
+  // ═══════════════════════════════════════════════════════════════════
+  function renderStandaloneCards() {
+    return standalone.map(b => {
+      const bRooms = rooms.filter(r => String(r.buildingId) === String(b.id));
+      const bs = getBedStats(bRooms);
+      const color = pctColor(bs.pct);
 
-    // Panel por piso
-    const floorRows = floors.map(f => {
-      const fs = getFloorStats(s.bRooms, f);
-      const fpct = fs.totalBeds > 0 ? Math.round((fs.occupiedBeds / fs.totalBeds) * 100) : 0;
-      const fcolor = pctColor(fpct);
+      const floors = [...new Set(bRooms.map(r => r.floor))].sort((a,b2) => a - b2);
+      const companies = Object.entries(bs.companyMap).sort((a,b2) => b2[1]-a[1]);
+
+      const floorRows = floors.map(f => {
+        const fRooms = bRooms.filter(r => String(r.floor) === String(f));
+        const fs = getBedStats(fRooms);
+        const fpct = fs.pct;
+        const fc = pctColor(fpct);
+
+        // Habitaciones del piso — detalle expandible
+        const roomItems = fRooms.sort((a,b2) => String(a.number).localeCompare(String(b2.number), undefined, {numeric:true})).map(r => {
+          const occupants = ['day','night','extra']
+            .filter(k => r.beds?.[k]?.occupant)
+            .map(k => {
+              const bed = r.beds[k];
+              const stateIcon = bed.checkoutPending ? '🟡' : bed.present ? '🟢' : bed.checkinAuthorized ? '🔵' : '🔴';
+              return `<div style="font-size:11px;color:#4a5568;display:flex;align-items:center;gap:4px;padding:2px 0">
+                ${stateIcon} <span style="font-weight:700">${bed.occupant.split('(')[0].trim()}</span>
+                <span style="color:#a0aec0;font-size:10px">${bed.company ? '· ' + bed.company : ''}</span>
+              </div>`;
+            }).join('');
+
+          const bg = r.status === 'free' ? '#f0fff4' : r.status === 'blocked' ? '#f7fafc' : '#fffaf0';
+          const dot = r.status === 'free' ? '#38a169' : r.status === 'blocked' ? '#718096' : '#e53e3e';
+
+          return `<div style="border:1px solid #e2e8f0;border-radius:8px;padding:8px 10px;background:${bg};cursor:pointer"
+                       onclick="window.showRoomDetail(${r.id})">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:${occupants ? 4 : 0}px">
+              <div style="width:8px;height:8px;border-radius:50%;background:${dot};flex-shrink:0"></div>
+              <span style="font-size:12px;font-weight:800;color:#1a202c">Hab. ${r.number}</span>
+            </div>
+            ${occupants || '<div style="font-size:10px;color:#a0aec0">Disponible</div>'}
+          </div>`;
+        }).join('');
+
+        return `
+        <div style="border-bottom:1px solid #f1f5f9">
+          <!-- Fila de piso (siempre visible) -->
+          <div style="display:flex;align-items:center;gap:10px;padding:10px 16px;cursor:pointer;transition:background 0.15s"
+               onmouseover="this.style.background='#fafafa'" onmouseout="this.style.background='transparent'"
+               onclick="window.toggleFloorDetail('floor-${b.id}-${f}', this)">
+            <div style="min-width:56px;background:linear-gradient(135deg,#4a5568,#2d3748);border-radius:8px;padding:4px 8px;text-align:center;flex-shrink:0">
+              <div style="font-size:9px;color:rgba(255,255,255,0.6);font-weight:700;text-transform:uppercase">Piso</div>
+              <div style="font-size:16px;font-weight:900;color:#fff;line-height:1">${f}</div>
+            </div>
+            ${chipSet(fs)}
+            <div style="flex:1">
+              ${progressBar(fpct, fc)}
+              <div style="font-size:10px;color:${fc};font-weight:700;margin-top:2px">${fpct}% ocup. · ${fs.totalRooms} hab.</div>
+            </div>
+            <span style="font-size:14px;color:#a0aec0;transition:transform 0.25s" class="floor-arrow">▾</span>
+          </div>
+          <!-- Habitaciones del piso (expandible) -->
+          <div id="floor-${b.id}-${f}" style="display:none;padding:8px 16px 12px;background:#f8fafc">
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:6px">
+              ${roomItems}
+            </div>
+          </div>
+        </div>`;
+      }).join('');
+
+      const companyPills = companies.map(([name, count]) => {
+        const cpct = bs.occupiedBeds > 0 ? Math.round(count / bs.occupiedBeds * 100) : 0;
+        return `<span style="display:inline-flex;align-items:center;gap:4px;background:#f7fafc;border:1px solid var(--border);border-radius:99px;padding:3px 10px;font-size:11px;font-weight:700;color:var(--text-primary)">
+          🏢 ${name} <span style="color:${color};font-weight:900">${cpct}%</span> (${count})
+        </span>`;
+      }).join('');
+
       return `
-      <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid #f1f5f9;transition:background 0.15s" 
-           onmouseover="this.style.background='#fafafa'" onmouseout="this.style.background='transparent'">
-        <!-- Píldora piso -->
-        <div style="min-width:72px;background:linear-gradient(135deg,#4a5568,#2d3748);border-radius:8px;
-                    padding:5px 10px;text-align:center;flex-shrink:0">
-          <div style="font-size:10px;color:rgba(255,255,255,0.6);font-weight:700;text-transform:uppercase;letter-spacing:0.5px">Piso</div>
-          <div style="font-size:16px;font-weight:900;color:#fff;line-height:1">${f}</div>
+      <div class="card" id="bcard-${b.id}" style="overflow:hidden;border:1px solid var(--border)">
+        <!-- Header -->
+        <div style="display:flex;align-items:center;gap:12px;padding:14px 16px;cursor:pointer;user-select:none"
+             onclick="window.toggleBuildingStats('${b.id}')">
+          <div style="width:44px;height:44px;border-radius:12px;background:${color};display:flex;align-items:center;justify-content:center;font-size:22px;color:#fff;flex-shrink:0;box-shadow:0 4px 10px ${color}55">🏢</div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:15px;font-weight:800;color:var(--text-primary)">${b.name}</div>
+            <div style="font-size:11px;color:var(--text-secondary);margin-top:1px">${b.floor} pisos · ${bs.totalRooms} habitaciones</div>
+          </div>
+          ${chipSet(bs)}
+          <div style="text-align:center;flex-shrink:0;margin-left:4px">
+            <div style="font-size:20px;font-weight:900;color:${color};line-height:1">${bs.pct}%</div>
+            <div style="font-size:9px;color:var(--text-muted);font-weight:600">OCUP.</div>
+          </div>
+          <span id="barrow-${b.id}" style="font-size:16px;color:var(--text-muted);transition:transform 0.25s;margin-left:4px">▾</span>
         </div>
-        <!-- Chips camas -->
-        <div style="display:flex;gap:8px;flex-wrap:wrap;flex:1">
-          <div style="display:flex;align-items:center;gap:6px;background:#f0fff4;border:1.5px solid #9ae6b4;border-radius:10px;padding:6px 12px">
-            <div style="width:28px;height:28px;background:#38a169;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:13px;color:#fff;font-weight:900">${fs.freeBeds}</div>
-            <div>
-              <div style="font-size:9px;color:#276749;font-weight:700;text-transform:uppercase;letter-spacing:0.3px">Libres</div>
-              <div style="font-size:10px;color:#2f855a;font-weight:600">🛏️ camas</div>
+        <div style="height:3px;background:#e2e8f0"><div style="width:${bs.pct}%;height:100%;background:${color};transition:width 0.6s ease"></div></div>
+        <!-- Panel expandible -->
+        <div id="bstats-${b.id}" style="display:none">
+          <div style="padding:10px 16px 0;display:flex;align-items:center;justify-content:space-between">
+            <div style="font-size:11px;font-weight:800;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.8px">📊 Pisos</div>
+            <div style="display:flex;gap:6px">
+              <button class="btn btn-secondary btn-sm" style="font-size:11px" onclick="event.stopPropagation();window.switchInfraTab('map');window.selectBuilding(${b.id})">🗺️ Mapa</button>
+              <button class="btn btn-secondary btn-sm" style="font-size:11px" onclick="event.stopPropagation();window.openBuildingForm(${b.id})">✏️</button>
             </div>
           </div>
-          <div style="display:flex;align-items:center;gap:6px;background:#fff5f5;border:1.5px solid #fc8181;border-radius:10px;padding:6px 12px">
-            <div style="width:28px;height:28px;background:#e53e3e;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:13px;color:#fff;font-weight:900">${fs.occupiedBeds}</div>
-            <div>
-              <div style="font-size:9px;color:#c53030;font-weight:700;text-transform:uppercase;letter-spacing:0.3px">Ocupadas</div>
-              <div style="font-size:10px;color:#c53030;font-weight:600">🛏️ camas</div>
+          <div style="margin:8px 0 0">${floorRows || '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12px">Sin pisos</div>'}</div>
+          ${companies.length > 0 ? `
+          <div style="padding:10px 16px 14px;border-top:1px dashed #e2e8f0;margin-top:4px">
+            <div style="font-size:10px;font-weight:800;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:7px">Empresas presentes</div>
+            <div style="display:flex;flex-wrap:wrap;gap:5px">${companyPills}</div>
+          </div>` : ''}
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // SECCIÓN 2: Pérez Caladera — accordion Pabellón → Piso → Habitaciones
+  // ═══════════════════════════════════════════════════════════════════
+  function renderCaleraSection() {
+    if (pavilions.length === 0) return '';
+
+    const caleraRooms = rooms.filter(r => pavilions.some(p => String(p.id) === String(r.buildingId)));
+    const caleraStats = getBedStats(caleraRooms);
+    const cc = pctColor(caleraStats.pct);
+
+    const pavilionCards = pavilions.map(p => {
+      const pRooms = rooms.filter(r => String(r.buildingId) === String(p.id));
+      const ps = getBedStats(pRooms);
+      const pc = pctColor(ps.pct);
+
+      const floors = [...new Set(pRooms.map(r => r.floor))].sort((a,b) => a - b);
+
+      const floorRows = floors.map(f => {
+        const fRooms = pRooms.filter(r => String(r.floor) === String(f));
+        const fs = getBedStats(fRooms);
+        const fc = pctColor(fs.pct);
+
+        const roomItems = fRooms.sort((a,b) => String(a.number).localeCompare(String(b.number), undefined, {numeric:true})).map(r => {
+          const occupants = ['day','night','extra']
+            .filter(k => r.beds?.[k]?.occupant)
+            .map(k => {
+              const bed = r.beds[k];
+              const si = bed.checkoutPending ? '🟡' : bed.present ? '🟢' : bed.checkinAuthorized ? '🔵' : '🔴';
+              return `<div style="font-size:11px;color:#4a5568;display:flex;align-items:center;gap:4px;padding:2px 0">
+                ${si} <span style="font-weight:700">${bed.occupant.split('(')[0].trim()}</span>
+                <span style="color:#a0aec0;font-size:10px">${bed.company ? '· ' + bed.company : ''}</span>
+              </div>`;
+            }).join('');
+
+          const bg = r.status === 'free' ? '#f0fff4' : r.status === 'blocked' ? '#f7fafc' : '#fffaf0';
+          const dot = r.status === 'free' ? '#38a169' : r.status === 'blocked' ? '#718096' : '#e53e3e';
+
+          return `<div style="border:1px solid #e2e8f0;border-radius:8px;padding:8px 10px;background:${bg};cursor:pointer"
+                       onclick="window.showRoomDetail(${r.id})">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:${occupants ? 4 : 0}px">
+              <div style="width:8px;height:8px;border-radius:50%;background:${dot};flex-shrink:0"></div>
+              <span style="font-size:12px;font-weight:800;color:#1a202c">Hab. ${r.number}</span>
+            </div>
+            ${occupants || '<div style="font-size:10px;color:#a0aec0">Disponible</div>'}
+          </div>`;
+        }).join('');
+
+        return `
+        <div style="border-bottom:1px solid #f1f5f9">
+          <div style="display:flex;align-items:center;gap:10px;padding:8px 16px;cursor:pointer;transition:background 0.15s"
+               onmouseover="this.style.background='#fafafa'" onmouseout="this.style.background='transparent'"
+               onclick="window.toggleFloorDetail('floor-pav-${p.id}-${f}', this)">
+            <div style="min-width:52px;background:linear-gradient(135deg,#667eea,#5a67d8);border-radius:8px;padding:4px 8px;text-align:center;flex-shrink:0">
+              <div style="font-size:9px;color:rgba(255,255,255,0.7);font-weight:700;text-transform:uppercase">Piso</div>
+              <div style="font-size:15px;font-weight:900;color:#fff;line-height:1">${f}</div>
+            </div>
+            ${chipSet(fs)}
+            <div style="flex:1">
+              ${progressBar(fs.pct, fc)}
+              <div style="font-size:10px;color:${fc};font-weight:700;margin-top:2px">${fs.pct}% · ${fs.totalRooms} hab.</div>
+            </div>
+            <span style="font-size:13px;color:#a0aec0;transition:transform 0.25s" class="floor-arrow">▾</span>
+          </div>
+          <div id="floor-pav-${p.id}-${f}" style="display:none;padding:8px 16px 12px;background:#f8fafc">
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:6px">
+              ${roomItems}
             </div>
           </div>
-          ${fs.maleCount > 0 ? `
-          <div style="display:flex;align-items:center;gap:6px;background:#ebf8ff;border:1.5px solid #90cdf4;border-radius:10px;padding:6px 12px">
-            <div style="width:28px;height:28px;background:#2b6cb0;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:14px;color:#fff;font-weight:900">${fs.maleCount}</div>
-            <div style="font-size:10px;color:#2c5282;font-weight:700">🔵 H</div>
-          </div>` : ''}
-          ${fs.femaleCount > 0 ? `
-          <div style="display:flex;align-items:center;gap:6px;background:#fff5f7;border:1.5px solid #f9a8d4;border-radius:10px;padding:6px 12px">
-            <div style="width:28px;height:28px;background:#97266d;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:14px;color:#fff;font-weight:900">${fs.femaleCount}</div>
-            <div style="font-size:10px;color:#702459;font-weight:700">🔴 M</div>
-          </div>` : ''}
-        </div>
-        <!-- Hab count + barra -->
-        <div style="text-align:right;flex-shrink:0;min-width:70px">
-          <div style="font-size:11px;color:var(--text-secondary)">${fs.totalRooms} hab.</div>
-          <div style="margin-top:4px;height:5px;background:#e2e8f0;border-radius:3px;overflow:hidden;width:60px">
-            <div style="width:${fpct}%;height:100%;background:${fcolor};border-radius:3px;transition:width 0.5s ease"></div>
+        </div>`;
+      }).join('');
+
+      const companies = Object.entries(ps.companyMap).sort((a,b) => b[1]-a[1]);
+
+      return `
+      <div style="border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;background:#fff;margin-bottom:6px">
+        <!-- Header del pabellón -->
+        <div style="display:flex;align-items:center;gap:10px;padding:11px 14px;cursor:pointer;user-select:none"
+             onclick="window.toggleBuildingStats('pav-${p.id}')">
+          <div style="width:38px;height:38px;border-radius:10px;background:${pc};display:flex;align-items:center;justify-content:center;font-size:18px;color:#fff;flex-shrink:0">🏠</div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:14px;font-weight:800;color:var(--text-primary)">${p.name}</div>
+            <div style="font-size:10px;color:var(--text-secondary)">${p.floor || floors.length} pisos · ${ps.totalRooms} hab.</div>
           </div>
-          <div style="font-size:10px;color:${fcolor};font-weight:700;margin-top:2px">${fpct}%</div>
+          ${chipSet(ps)}
+          <div style="text-align:center;margin-left:4px;flex-shrink:0">
+            <div style="font-size:17px;font-weight:900;color:${pc}">${ps.pct}%</div>
+          </div>
+          <span id="barrow-pav-${p.id}" style="font-size:14px;color:#a0aec0;transition:transform 0.25s">▾</span>
         </div>
-        <!-- Botón ver mapa -->
-        <button class="btn btn-ghost btn-sm" style="flex-shrink:0;font-size:11px;padding:4px 8px"
-            onclick="event.stopPropagation(); window.switchInfraTab('map'); window.selectBuilding(${b.id}); window.selectFloor(${f})">
-          🗺️
-        </button>
+        <div style="height:3px;background:#e2e8f0"><div style="width:${ps.pct}%;height:100%;background:${pc}"></div></div>
+        <!-- Pisos expandibles -->
+        <div id="bstats-pav-${p.id}" style="display:none">
+          ${floorRows}
+          ${companies.length > 0 ? `
+          <div style="padding:8px 14px 12px;border-top:1px dashed #e2e8f0">
+            <div style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:5px">Empresas</div>
+            <div style="display:flex;flex-wrap:wrap;gap:4px">
+              ${companies.map(([n,c]) => `<span style="background:#f7fafc;border:1px solid #e2e8f0;border-radius:99px;padding:2px 8px;font-size:10px;font-weight:700">🏢 ${n} (${c})</span>`).join('')}
+            </div>
+          </div>` : ''}
+        </div>
       </div>`;
     }).join('');
 
-    // Panel de empresas
-    const companyPills = companies.map(([name, count]) => {
-      const cpct = s.occupiedBeds > 0 ? Math.round((count / s.occupiedBeds) * 100) : 0;
-      return `<span style="display:inline-flex;align-items:center;gap:4px;background:#f7fafc;border:1px solid var(--border);
-                border-radius:99px;padding:3px 10px;font-size:11px;font-weight:700;color:var(--text-primary)">
-        🏢 ${name} <span style="color:${color};font-weight:900">${cpct}%</span> (${count})
-      </span>`;
-    }).join('');
-
     return `
-    <div class="card" id="bcard-${b.id}" style="overflow:hidden;transition:box-shadow 0.2s;border:1px solid var(--border)">
-      <!-- ── HEADER COMPACTO (siempre visible) ── -->
-      <div style="display:flex;align-items:center;gap:12px;padding:14px 16px;cursor:pointer;user-select:none"
-           onclick="window.toggleBuildingStats('${b.id}')">
-        <!-- Ícono -->
-        <div style="width:44px;height:44px;border-radius:12px;background:${color};display:flex;align-items:center;
-                    justify-content:center;font-size:22px;color:#fff;flex-shrink:0;box-shadow:0 4px 10px ${color}55">🏢</div>
-        <!-- Nombre e info -->
+    <div class="card" style="overflow:hidden;border:1px solid var(--border);margin-bottom:0">
+      <!-- Header de Pérez Caladera -->
+      <div style="display:flex;align-items:center;gap:12px;padding:14px 16px;cursor:pointer;user-select:none;background:linear-gradient(135deg,#f7f8ff,#eef0ff)"
+           onclick="window.toggleBuildingStats('calera-campus')">
+        <div style="width:44px;height:44px;border-radius:12px;background:linear-gradient(135deg,#667eea,#5a67d8);display:flex;align-items:center;justify-content:center;font-size:22px;color:#fff;flex-shrink:0;box-shadow:0 4px 10px rgba(102,126,234,0.4)">🏘️</div>
         <div style="flex:1;min-width:0">
-          <div style="font-size:15px;font-weight:800;color:var(--text-primary)">${b.name}</div>
-          <div style="font-size:11px;color:var(--text-secondary);margin-top:1px">${b.floor} pisos · ${s.totalRooms} habitaciones</div>
+          <div style="font-size:15px;font-weight:800;color:#1a202c">Pérez Caladera</div>
+          <div style="font-size:11px;color:#64748b;margin-top:1px">${pavilions.length} pabellones · ${caleraStats.totalRooms} habitaciones</div>
         </div>
-        <!-- Chips resumen: libres y ocupadas -->
-        <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
-          <div style="display:flex;flex-direction:column;align-items:center;background:#f0fff4;border:1.5px solid #9ae6b4;
-                      border-radius:10px;padding:5px 10px;min-width:52px">
-            <span style="font-size:18px;font-weight:900;color:#276749;line-height:1">${s.freeBeds}</span>
-            <span style="font-size:8px;font-weight:700;color:#38a169;text-transform:uppercase;letter-spacing:0.3px">libres</span>
-          </div>
-          <div style="display:flex;flex-direction:column;align-items:center;background:#fff5f5;border:1.5px solid #fc8181;
-                      border-radius:10px;padding:5px 10px;min-width:52px">
-            <span style="font-size:18px;font-weight:900;color:#c53030;line-height:1">${s.occupiedBeds}</span>
-            <span style="font-size:8px;font-weight:700;color:#e53e3e;text-transform:uppercase;letter-spacing:0.3px">ocupadas</span>
-          </div>
-          ${s.maleCount > 0 || s.femaleCount > 0 ? `
-          <div style="display:flex;flex-direction:column;align-items:center;background:#ebf8ff;border:1.5px solid #90cdf4;
-                      border-radius:10px;padding:5px 10px;min-width:42px">
-            <span style="font-size:14px;font-weight:900;color:#2b6cb0;line-height:1">${s.maleCount}</span>
-            <span style="font-size:8px;font-weight:700;color:#3182ce;text-transform:uppercase">M</span>
-          </div>
-          <div style="display:flex;flex-direction:column;align-items:center;background:#fff5f7;border:1.5px solid #f9a8d4;
-                      border-radius:10px;padding:5px 10px;min-width:42px">
-            <span style="font-size:14px;font-weight:900;color:#97266d;line-height:1">${s.femaleCount}</span>
-            <span style="font-size:8px;font-weight:700;color:#97266d;text-transform:uppercase">F</span>
-          </div>` : ''}
-        </div>
-        <!-- % + flecha -->
-        <div style="text-align:center;flex-shrink:0;margin-left:6px">
-          <div style="font-size:20px;font-weight:900;color:${color};line-height:1">${s.pct}%</div>
+        ${chipSet(caleraStats)}
+        <div style="text-align:center;flex-shrink:0;margin-left:4px">
+          <div style="font-size:20px;font-weight:900;color:${cc};line-height:1">${caleraStats.pct}%</div>
           <div style="font-size:9px;color:var(--text-muted);font-weight:600">OCUP.</div>
         </div>
-        <span id="barrow-${b.id}" style="font-size:16px;color:var(--text-muted);transition:transform 0.25s;margin-left:4px">▾</span>
+        <span id="barrow-calera-campus" style="font-size:16px;color:var(--text-muted);transition:transform 0.25s">▾</span>
       </div>
-
-      <!-- Barra de progreso delgada -->
-      <div style="height:3px;background:#e2e8f0;margin:0">
-        <div style="width:${s.pct}%;height:100%;background:${color};transition:width 0.6s ease"></div>
-      </div>
-
-      <!-- ── PANEL EXPANDIBLE: DESGLOSE POR PISO ── -->
-      <div id="bstats-${b.id}" style="display:none">
-        <!-- Título sección pisos -->
-        <div style="padding:10px 16px 0;display:flex;align-items:center;justify-content:space-between">
-          <div style="font-size:11px;font-weight:800;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.8px">
-            📊 Desglose por Piso
-          </div>
-          <div style="display:flex;gap:6px">
-            <button class="btn btn-secondary btn-sm" style="font-size:11px"
-                onclick="event.stopPropagation(); window.switchInfraTab('map'); window.selectBuilding(${b.id})">
-              🗺️ Ver Mapa
-            </button>
-            <button class="btn btn-secondary btn-sm" style="font-size:11px"
-                onclick="event.stopPropagation(); window.openBuildingForm(${b.id})">✏️ Editar</button>
-            <button class="btn btn-secondary btn-sm" style="font-size:11px;color:var(--red-600)"
-                onclick="event.stopPropagation(); window.deleteBuilding(${b.id})">🗑️</button>
-          </div>
-        </div>
-
-        <!-- Filas por piso -->
-        <div style="margin:8px 0 0">
-          ${floorRows || '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12px">Sin pisos registrados</div>'}
-        </div>
-
-        <!-- Empresas presentes -->
-        ${companies.length > 0 ? `
-        <div style="padding:10px 16px 14px;border-top:1px dashed #e2e8f0;margin-top:4px">
-          <div style="font-size:10px;font-weight:800;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:7px">Empresas presentes</div>
-          <div style="display:flex;flex-wrap:wrap;gap:5px">${companyPills}</div>
-        </div>` : ''}
+      <div style="height:3px;background:#e2e8f0"><div style="width:${caleraStats.pct}%;height:100%;background:${cc}"></div></div>
+      <!-- Pabellones expandibles -->
+      <div id="bstats-calera-campus" style="display:none;padding:12px 12px 8px">
+        ${pavilionCards}
       </div>
     </div>`;
-  });
+  }
 
+  // ── HTML FINAL ──────────────────────────────────────────────────────
   container.innerHTML = `
     <!-- RESUMEN GLOBAL -->
     <div style="background:linear-gradient(135deg,#1a202c 0%,#2d3748 100%);border-radius:18px;padding:20px;margin-bottom:20px;color:white">
       <div style="font-size:13px;font-weight:700;opacity:0.7;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">📊 Resumen Global del Campamento</div>
       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px">
         <div style="text-align:center">
-          <div style="font-size:32px;font-weight:900;color:#68d391">${globalBeds - globalOcc}</div>
+          <div style="font-size:32px;font-weight:900;color:#68d391">${globalStats.freeBeds}</div>
           <div style="font-size:11px;opacity:0.7;font-weight:600">CAMAS LIBRES</div>
         </div>
         <div style="text-align:center">
-          <div style="font-size:32px;font-weight:900;color:#fc8181">${globalOcc}</div>
+          <div style="font-size:32px;font-weight:900;color:#fc8181">${globalStats.occupiedBeds}</div>
           <div style="font-size:11px;opacity:0.7;font-weight:600">OCUPADAS</div>
         </div>
         <div style="text-align:center">
-          <div style="font-size:32px;font-weight:900;color:#63b3ed">${globalMale}</div>
+          <div style="font-size:32px;font-weight:900;color:#63b3ed">${globalStats.maleCount}</div>
           <div style="font-size:11px;opacity:0.7;font-weight:600">🔵 HOMBRES</div>
         </div>
         <div style="text-align:center">
-          <div style="font-size:32px;font-weight:900;color:#f687b3">${globalFemale}</div>
+          <div style="font-size:32px;font-weight:900;color:#f687b3">${globalStats.femaleCount}</div>
           <div style="font-size:11px;opacity:0.7;font-weight:600">🔴 MUJERES</div>
         </div>
       </div>
       <div style="display:flex;align-items:center;gap:10px">
         <div style="flex:1;height:12px;background:rgba(255,255,255,0.15);border-radius:6px;overflow:hidden">
-          <div style="width:${globalPct}%;height:100%;background:linear-gradient(90deg,#68d391,#48bb78);border-radius:6px;transition:width 0.8s ease"></div>
+          <div style="width:${globalStats.pct}%;height:100%;background:linear-gradient(90deg,#68d391,#48bb78);border-radius:6px;transition:width 0.8s ease"></div>
         </div>
-        <div style="font-size:20px;font-weight:900;color:#68d391;min-width:50px;text-align:right">${globalPct}%</div>
+        <div style="font-size:20px;font-weight:900;color:#68d391;min-width:50px;text-align:right">${globalStats.pct}%</div>
       </div>
       ${topCompanies.length > 0 ? `
       <div style="margin-top:14px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.1)">
         <div style="font-size:11px;opacity:0.6;font-weight:600;margin-bottom:8px">TOP EMPRESAS</div>
         <div style="display:flex;flex-wrap:wrap;gap:6px">
-          ${topCompanies.map(([name, count]) => `
-            <span style="background:rgba(255,255,255,0.1);border-radius:99px;padding:4px 12px;font-size:12px;font-weight:700">
-              ${name}: ${count} <span style="opacity:0.6">(${globalOcc > 0 ? Math.round(count/globalOcc*100) : 0}%)</span>
-            </span>`).join('')}
+          ${topCompanies.map(([name, count]) => `<span style="background:rgba(255,255,255,0.1);border-radius:99px;padding:4px 12px;font-size:12px;font-weight:700">${name}: ${count} <span style="opacity:0.6">(${globalStats.occupiedBeds > 0 ? Math.round(count/globalStats.occupiedBeds*100) : 0}%)</span></span>`).join('')}
         </div>
       </div>` : ''}
     </div>
 
-    <!-- LISTA DE EDIFICIOS/PABELLONES -->
-    <div style="display:flex;flex-direction:column;gap:10px">
-      ${cards.join('')}
-    </div>
+    <!-- EDIFICIOS STANDALONE (R-220) -->
+    ${standalone.length > 0 ? `
+    <div style="font-size:11px;font-weight:800;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.8px;margin-bottom:8px;padding-left:2px">🏢 Edificio Solo</div>
+    <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:20px">
+      ${renderStandaloneCards()}
+    </div>` : ''}
+
+    <!-- PÉREZ CALADERA (pabellones) -->
+    ${pavilions.length > 0 ? `
+    <div style="font-size:11px;font-weight:800;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.8px;margin-bottom:8px;padding-left:2px">🏘️ Campamento Pérez Caladera</div>
+    ${renderCaleraSection()}` : ''}
   `;
 
-  // Toggle con animación suave
+  // ── Toggle genérico ────────────────────────────────────────────────
   window.toggleBuildingStats = (id) => {
     const panel = document.getElementById(`bstats-${id}`);
     const arrow = document.getElementById(`barrow-${id}`);
-    const card  = document.getElementById(`bcard-${id}`);
     if (!panel) return;
     const isOpen = panel.style.display !== 'none';
     if (isOpen) {
@@ -3301,14 +3382,23 @@ async function renderBuildingsList(container) {
       panel.style.opacity = '0';
       panel.style.overflow = 'hidden';
       requestAnimationFrame(() => {
-        panel.style.transition = 'max-height 0.35s ease, opacity 0.25s';
+        panel.style.transition = 'max-height 0.4s ease, opacity 0.3s';
         panel.style.maxHeight = panel.scrollHeight + 'px';
         panel.style.opacity = '1';
-        setTimeout(() => { panel.style.maxHeight = 'none'; panel.style.transition = ''; panel.style.overflow = 'visible'; }, 360);
+        setTimeout(() => { panel.style.maxHeight = 'none'; panel.style.transition = ''; panel.style.overflow = 'visible'; }, 420);
       });
     }
     if (arrow) arrow.style.transform = isOpen ? '' : 'rotate(180deg)';
-    if (card)  card.style.boxShadow  = isOpen ? '' : '0 6px 24px rgba(0,0,0,0.10)';
+  };
+
+  // ── Toggle de piso (dentro del pabellón/edificio) ─────────────────
+  window.toggleFloorDetail = (id, rowEl) => {
+    const panel = document.getElementById(id);
+    if (!panel) return;
+    const isOpen = panel.style.display !== 'none';
+    panel.style.display = isOpen ? 'none' : 'block';
+    const arrow = rowEl?.querySelector('.floor-arrow');
+    if (arrow) arrow.style.transform = isOpen ? '' : 'rotate(180deg)';
   };
 
   window.deleteBuilding = async (id) => {

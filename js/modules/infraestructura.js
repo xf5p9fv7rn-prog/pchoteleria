@@ -1599,20 +1599,28 @@ async function renderRoomMap(container) {
   // incluso después de que renderRoomMap haya terminado de ejecutarse
   window._updateGridFilters = function updateGridFilters() {
     // Guardia: si no hay rooms cargados aún, no hacer nada
-    if (!window._allRooms || window._allRooms.length === 0) return;
+    if (!window._allRooms || window._allRooms.length === 0) {
+        console.warn('[Filter] _allRooms vacío, ignorando');
+        return;
+    }
 
-    const search = (document.getElementById('infra-search')?.value || '').toLowerCase().trim();
+    const searchRaw = document.getElementById('infra-search')?.value || '';
+    const search = searchRaw.toLowerCase().trim();
+    console.log('[Filter] search="' + search + '" building=' + selectedBuildingId + ' floor=' + selectedFloor + ' total=' + window._allRooms.length);
 
     let filtered = window._allRooms;
 
     if (selectedBuildingId !== 'all') {
       filtered = filtered.filter(r => String(r.buildingId) === String(selectedBuildingId));
+      console.log('[Filter] Tras filtro edificio:', filtered.length);
     }
     if (selectedFloor !== 'all') {
       filtered = filtered.filter(r => String(r.floor) === String(selectedFloor));
+      console.log('[Filter] Tras filtro piso:', filtered.length);
     }
 
     if (search) {
+        const sClean = search.replace(/[^0-9k]/g, '') || search;
         filtered = filtered.filter(r => {
             const num  = String(r.number || '').toLowerCase();
             const dName = (r.beds?.day?.occupant   || '').toLowerCase();
@@ -1624,13 +1632,13 @@ async function renderRoomMap(container) {
             const dRut  = (r.beds?.day?.rut        || '').toLowerCase().replace(/[^0-9k]/g, '');
             const nRut  = (r.beds?.night?.rut      || '').toLowerCase().replace(/[^0-9k]/g, '');
             const eRut  = (r.beds?.extra?.rut      || '').toLowerCase().replace(/[^0-9k]/g, '');
-            const sClean = search.replace(/[^0-9k]/g, '') || search;
 
             return num.includes(search) ||
                    dName.includes(search) || nName.includes(search) || eName.includes(search) ||
                    dComp.includes(search) || nComp.includes(search) || eComp.includes(search) ||
                    (sClean && (dRut.includes(sClean) || nRut.includes(sClean) || eRut.includes(sClean)));
         });
+        console.log('[Filter] Tras filtro texto ("' + search + '"):', filtered.length, 'resultados');
     }
 
     renderGrid(filtered);

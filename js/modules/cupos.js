@@ -239,10 +239,10 @@ export async function renderCupos(container) {
           <!-- Acciones -->
           <div style="margin-top:12px;padding-top:10px;border-top:1px solid ${borderCard};display:flex;gap:6px">
             <button class="btn" style="flex:1;font-size:12px;padding:6px;background:white;border:1px solid #e2e8f0;color:#4a5568"
-              onclick="window._editQuota('${encodeURIComponent(fullKey)}','${company.replace(/'/g,"\\'")  }','${gerencia.replace(/'/g,"\\'")}'   )">
-              ✏️ Editar cupo
+              onclick="window._editQuota('${encodeURIComponent(fullKey)}','${company.replace(/'/g,"\\'")}','${gerencia.replace(/'/g,"\\'")}')">
+              ✏️ ${quota ? 'Editar cupo' : 'Definir cupo'}
             </button>
-            ${['admin','superadmin'].includes(window._currentUser?.role) ? `
+            ${quota && ['admin','superadmin'].includes(window._currentUser?.role) ? `
             <button class="btn" style="font-size:12px;padding:6px 10px;background:#fff5f5;border:1px solid #fecaca;color:#c0392b;font-weight:700"
               onclick="window._deleteQuota('${encodeURIComponent(fullKey)}','${company.replace(/'/g,"\\'")}','${gerencia.replace(/'/g,"\\'")}')">
               🗑️
@@ -455,42 +455,48 @@ export async function renderCupos(container) {
 
         document.getElementById('dq-confirm').onclick = async () => {
             dlg.remove();
+            const btn = document.createElement('div');
+
             try {
+                // Decodificar la clave — formato: "company||gerencia" (case original)
                 const fullKey = decodeURIComponent(encodedKey);
-                const [compLower, gerLower] = fullKey.split('||');
+                const sepIdx  = fullKey.indexOf('||');
+                const compVal = fullKey.substring(0, sepIdx).trim();
+                const gerVal  = fullKey.substring(sepIdx + 2).trim();
 
-                // ☁️ Usar getAllQuotas() que lee Supabase primero (no solo IndexedDB local)
-                const allQuotas = await getAllQuotas();
-                const record = allQuotas.find(q =>
-                    (q.company||'').trim().toLowerCase() === compLower &&
-                    (q.gerencia||'').trim().toLowerCase() === gerLower
+                showToast(`⏳ Eliminando cupo de "${gerVal}"...`, 'info');
+
+                // 1. ☁️ Borrar en Supabase con ilike (case-insensitive, sin depender del ID)
+                const { error: sbErr, data: deleted } = await supabase
+                    .from('gerencia_quotas')
+                    .delete()
+                    .ilike('company',  compVal)
+                    .ilike('gerencia', gerVal)
+                    .select(); // retorna filas borradas para debug
+
+                if (sbErr) {
+                    console.error('[Cupos] Error Supabase al borrar:', sbErr);
+                    showToast(`⚠️ Error en la nube: ${sbErr.message}`, 'error');
+                    return;
+                }
+                console.log('[Cupos] Filas borradas en Supabase:', deleted);
+
+                // 2. Limpiar IndexedDB — borrar TODOS los registros que coincidan
+                const localAll = await getAll('gerencia_quotas').catch(() => []);
+                const toDelete = localAll.filter(q =>
+                    (q.company  || '').trim().toLowerCase() === compVal.toLowerCase() &&
+                    (q.gerencia || '').trim().toLowerCase() === gerVal.toLowerCase()
                 );
-
-                // 1. Borrar de Supabase (por ID si lo tenemos, o por company+gerencia como fallback)
-                let sbErr;
-                if (record?.id) {
-                    const res = await supabase.from('gerencia_quotas').delete().eq('id', record.id);
-                    sbErr = res.error;
-                } else {
-                    // Fallback: borrar por campos (sin ID)
-                    const res = await supabase.from('gerencia_quotas')
-                        .delete()
-                        .ilike('company', compLower)
-                        .ilike('gerencia', gerLower);
-                    sbErr = res.error;
-                }
-                if (sbErr) console.warn('[Cupos] Error al borrar en Supabase:', sbErr.message);
-
-                // 2. Borrar de IndexedDB local (si existe)
-                if (record?.id) {
-                    await remove('gerencia_quotas', record.id).catch(() => {});
+                for (const q of toDelete) {
+                    await remove('gerencia_quotas', q.id).catch(() => {});
                 }
 
-                showToast(`✅ Cupo de "${gerencia}" eliminado`, 'success');
+                showToast(`✅ Cupo de "${gerVal}" eliminado`, 'success');
                 await renderCupos(container);
+
             } catch(err) {
                 console.error('[deleteQuota]', err);
-                showToast('Error al eliminar el cupo', 'error');
+                showToast('Error al eliminar: ' + err.message, 'error');
             }
         };
     };

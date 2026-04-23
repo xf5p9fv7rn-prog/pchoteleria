@@ -1,4 +1,4 @@
-const CACHE_NAME = 'campmanager-v166';
+const CACHE_NAME = 'campmanager-v167';
 
 const ASSETS = [
   '/',

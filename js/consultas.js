@@ -201,7 +201,8 @@ function detectarIntencion(pregunta) {
         { id: 'CAMAS_PERDIDAS', palabras: ['camas perdidas', 'cama perdida', 'perdida', 'perdidas', 'desperdicio', 'desperdiciada', 'sola', 'solo en la habitacion', 'habitacion con uno', 'media habitacion', 'medio llena', 'subutilizada', 'subutilizado', 'inefici'] },
         { id: 'HABITACIONES_LIBRES', palabras: ['libre', 'disponible', 'vacia', 'vacias', 'sin ocupar', 'desocupada'] },
         { id: 'HABITACIONES_OCUPADAS', palabras: ['ocupad', 'full', 'completa', 'llena', 'con gente'] },
-        { id: 'CUPOS_GERENCIA', palabras: ['cupo', 'gerencia', 'cupos por gerencia', 'por gerencia', 'limite gerencia', 'disponibles por gerencia', 'camas gerencia', 'cuantas camas tiene', 'cupos disponibles'] },
+        { id: 'CUPOS_GERENCIA', palabras: ['cupo', 'cupos por gerencia', 'limite gerencia', 'disponibles por gerencia', 'camas gerencia', 'cuantas camas tiene', 'cupos disponibles'] },
+        { id: 'GERENCIAS_DETALLE', palabras: ['gerencia', 'gerencias', 'por gerencia', 'todas las gerencias', 'desglose gerencia', 'empresas por gerencia', 'que gerencias hay', 'ver gerencias'] },
         { id: 'TURNO_DIA_NOCHE', palabras: ['camas dia', 'camas de dia', 'camas noche', 'camas de noche', 'turno dia', 'turno noche', 'disponibles de dia', 'disponibles de noche', 'pabellon noche', 'pabellon dia', 'camas por turno', 'turno', 'dia disponible', 'noche disponible'] },
         { id: 'CAMAS_CAPACIDAD', palabras: ['capacidad', 'espacio', 'cuantas camas', 'total camas', 'camas disponibles', 'camas libres'] },
         { id: 'TRABAJADORES_EMPRESA', palabras: ['trabajador', 'personal', 'emplead', 'gente', 'quien esta', 'quien hay', 'cuantos son', 'anglo', 'aramark', 'constructora', 'empresa'] },
@@ -1385,6 +1386,9 @@ export async function procesarConsulta(pregunta) {
         case 'CUPOS_GERENCIA':
             cuerpo = generarCuposGerencia(datos);
             break;
+        case 'GERENCIAS_DETALLE':
+            cuerpo = generarGerenciasDetalle(datos);
+            break;
         case 'HABITACION_DETALLE':
             cuerpo = generarHabitacionDetalle(datos, habNumero);
             break;
@@ -1399,6 +1403,135 @@ export async function procesarConsulta(pregunta) {
     }
 
     return headerHTML + cuerpo;
+}
+
+// ── Gerencias con desglose por empresa (accordion) ──────────────────────────
+function generarGerenciasDetalle(datos) {
+    const { rooms } = datos;
+
+    // Agrupar: gerencia → empresa → [trabajadores]
+    const gerMap = {}; // { gerencia: { empresa: [{name, rut, room, bed, present, authorized}] } }
+    rooms.forEach(r => {
+        ['day','night','extra'].forEach(bk => {
+            const bed = r.beds?.[bk];
+            if (!bed?.occupant) return;
+            const gerencia = (bed.management || bed.gerencia || 'Sin Gerencia').trim();
+            const empresa  = (bed.company || 'Sin Empresa').trim();
+            if (!gerMap[gerencia]) gerMap[gerencia] = {};
+            if (!gerMap[gerencia][empresa]) gerMap[gerencia][empresa] = [];
+            gerMap[gerencia][empresa].push({
+                name:       bed.occupant.split('(')[0].trim(),
+                rut:        bed.rut || '—',
+                room:       r.number,
+                bed:        bk === 'day' ? 'Día' : bk === 'night' ? 'Noche' : 'Extra',
+                present:    bed.present || false,
+                authorized: bed.checkinAuthorized || false,
+                checkout:   bed.checkoutPending   || false
+            });
+        });
+    });
+
+    if (Object.keys(gerMap).length === 0) {
+        return `<div class="informe-section"><p style="text-align:center;padding:40px;color:#94a3b8">ℹ️ No hay trabajadores con gerencia asignada en este momento.</p></div>`;
+    }
+
+    const totalTrabaj = Object.values(gerMap).reduce((sum, emps) =>
+        sum + Object.values(emps).reduce((s2, ws) => s2 + ws.length, 0), 0);
+    const totalGerencias = Object.keys(gerMap).length;
+    const totalEmpresas  = new Set(Object.values(gerMap).flatMap(e => Object.keys(e))).size;
+
+    // Generar HTML accordion por gerencia
+    let gId = 0;
+    const sections = Object.entries(gerMap)
+        .sort((a,b) => a[0].localeCompare(b[0]))
+        .map(([gerencia, empresas]) => {
+            gId++;
+            const totalG = Object.values(empresas).reduce((s, ws) => s + ws.length, 0);
+            const presentG = Object.values(empresas).flat().filter(w => w.present).length;
+            const empCards = Object.entries(empresas)
+                .sort((a,b) => b[1].length - a[1].length)
+                .map(([empresa, workers]) => {
+                    const workerRows = workers.map(w => {
+                        const si = w.checkout ? '🟡' : w.present ? '🟢' : w.authorized ? '🔵' : '🔴';
+                        return `<tr style="border-bottom:1px solid #f1f5f9">
+                            <td style="padding:7px 10px;font-weight:700;font-size:12px">${si} ${w.name}</td>
+                            <td style="padding:7px 10px;font-size:11px;color:#64748b">${w.rut}</td>
+                            <td style="padding:7px 10px;font-size:11px;font-weight:600">Hab. ${w.room}</td>
+                            <td style="padding:7px 10px;font-size:11px;color:#94a3b8">${w.bed}</td>
+                        </tr>`;
+                    }).join('');
+                    return `
+                    <div style="border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;margin-bottom:8px">
+                        <div style="background:#f8fafc;padding:10px 14px;display:flex;align-items:center;justify-content:space-between">
+                            <div style="font-size:13px;font-weight:800;color:#1e293b">🏢 ${empresa}</div>
+                            <span style="background:#dbeafe;color:#1d4ed8;border-radius:99px;padding:2px 10px;font-size:11px;font-weight:700">${workers.length} personas</span>
+                        </div>
+                        <div style="overflow-x:auto">
+                            <table style="width:100%;border-collapse:collapse">
+                                <thead><tr style="background:#f1f5f9">
+                                    <th style="padding:6px 10px;font-size:10px;font-weight:700;color:#64748b;text-align:left;text-transform:uppercase">Trabajador</th>
+                                    <th style="padding:6px 10px;font-size:10px;font-weight:700;color:#64748b;text-align:left;text-transform:uppercase">RUT</th>
+                                    <th style="padding:6px 10px;font-size:10px;font-weight:700;color:#64748b;text-align:left;text-transform:uppercase">Hab.</th>
+                                    <th style="padding:6px 10px;font-size:10px;font-weight:700;color:#64748b;text-align:left;text-transform:uppercase">Turno</th>
+                                </tr></thead>
+                                <tbody>${workerRows}</tbody>
+                            </table>
+                        </div>
+                    </div>`;
+                }).join('');
+
+            return `
+            <div style="border:1.5px solid #e2e8f0;border-radius:14px;overflow:hidden;margin-bottom:12px;background:#fff">
+                <!-- Header gerencia -->
+                <div style="display:flex;align-items:center;gap:12px;padding:14px 16px;cursor:pointer;background:linear-gradient(135deg,#f8fafc,#f1f5f9)"
+                     onclick="document.getElementById('ger-${gId}').style.display = document.getElementById('ger-${gId}').style.display === 'none' ? 'block' : 'none'; this.querySelector('.ger-arrow').style.transform = this.querySelector('.ger-arrow').style.transform === 'rotate(180deg)' ? '' : 'rotate(180deg)'">
+                    <div style="width:42px;height:42px;border-radius:12px;background:linear-gradient(135deg,#6366f1,#4f46e5);display:flex;align-items:center;justify-content:center;font-size:20px;color:#fff;flex-shrink:0">🎯</div>
+                    <div style="flex:1">
+                        <div style="font-size:15px;font-weight:800;color:#1e293b">${gerencia}</div>
+                        <div style="font-size:11px;color:#64748b;margin-top:2px">${Object.keys(empresas).length} empresa${Object.keys(empresas).length !== 1 ? 's' : ''} · ${totalG} trabajadores</div>
+                    </div>
+                    <div style="display:flex;gap:6px;align-items:center">
+                        <div style="background:#dcfce7;border:1px solid #86efac;border-radius:8px;padding:4px 10px;text-align:center">
+                            <div style="font-size:14px;font-weight:900;color:#166534">${presentG}</div>
+                            <div style="font-size:8px;font-weight:700;color:#16a34a;text-transform:uppercase">presente</div>
+                        </div>
+                        <div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:8px;padding:4px 10px;text-align:center">
+                            <div style="font-size:14px;font-weight:900;color:#991b1b">${totalG - presentG}</div>
+                            <div style="font-size:8px;font-weight:700;color:#dc2626;text-transform:uppercase">en tránsito</div>
+                        </div>
+                    </div>
+                    <span class="ger-arrow" style="font-size:16px;color:#94a3b8;transition:transform 0.25s">▾</span>
+                </div>
+                <!-- Empresas (expandible) -->
+                <div id="ger-${gId}" style="display:none;padding:12px 14px">
+                    ${empCards}
+                </div>
+            </div>`;
+        }).join('');
+
+    return `
+    <div class="informe-section">
+        <div class="kpi-grid">
+            <div class="kpi-card kpi-red">
+                <div class="kpi-icon">🎯</div>
+                <div class="kpi-value">${totalGerencias}</div>
+                <div class="kpi-label">Gerencias</div>
+            </div>
+            <div class="kpi-card kpi-blue">
+                <div class="kpi-icon">🏢</div>
+                <div class="kpi-value">${totalEmpresas}</div>
+                <div class="kpi-label">Empresas</div>
+            </div>
+            <div class="kpi-card kpi-green">
+                <div class="kpi-icon">👷</div>
+                <div class="kpi-value">${totalTrabaj}</div>
+                <div class="kpi-label">Trabajadores</div>
+            </div>
+        </div>
+        <h3 class="section-title">🎯 Gerencias — Desglose por Empresa</h3>
+        <p style="font-size:12px;color:#94a3b8;margin-bottom:16px">Toca cada gerencia para ver las empresas y trabajadores asignados.</p>
+        ${sections}
+    </div>`;
 }
 
 export { cargarDatos, extraerTrabajadores, calcularEstadisticasHabitaciones };

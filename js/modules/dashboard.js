@@ -19,6 +19,14 @@ export async function renderDashboard(container) {
     const total = rooms.length;
     const occPct = total ? Math.round((occupied / total) * 100) : 0;
 
+    // Contar camas individuales ocupadas (da el total real de huéspedes)
+    let totalWorkers = 0;
+    rooms.forEach(r => {
+        ['day', 'night', 'extra'].forEach(k => {
+            if (r.beds?.[k]?.occupant) totalWorkers++;
+        });
+    });
+
     // Normalizar nombre de empresa: Title Case para agrupar sin importar mayúsculas
     const normalizeCompany = (name) => {
         if (!name) return 'Sin Empresa';
@@ -248,9 +256,9 @@ export async function renderDashboard(container) {
       </div>
       <div class="kpi-card">
         <div class="kpi-icon purple">👥</div>
-        <div class="kpi-value">${occupied * 2}</div>
+        <div style="font-size:28px;font-weight:900;color:var(--text-primary)">${totalWorkers}</div>
         <div class="kpi-label">Trabajadores Alojados</div>
-        <div class="kpi-change up">+12 esta semana</div>
+        <div class="kpi-change up">camas reales ocupadas</div>
       </div>
     </div>
 

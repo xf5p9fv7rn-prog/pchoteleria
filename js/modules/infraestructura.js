@@ -1672,12 +1672,19 @@ async function renderRoomMap(container) {
   window._infraBuscar = function() {
     const allRooms = window._allRooms;
     if (!allRooms || allRooms.length === 0) {
+      showToast('⚠️ Datos no cargados. Espera un momento y vuelve a intentarlo.', 'warn');
       console.warn('[Búsqueda] _allRooms no disponible aún');
       return;
     }
     const raw    = (document.getElementById('infra-search')?.value || '').trim();
     const search = raw.toLowerCase();
     const type   = window._searchType || 'todos';
+
+    // Mostrar en countEl cuántos rooms hay para confirmar que los datos están
+    const countElDiag = document.getElementById('infra-search-count');
+    if (countElDiag && !search) {
+      countElDiag.textContent = `${allRooms.length} habitaciones cargadas`;
+    }
 
     let filtered = allRooms;
 
@@ -1733,8 +1740,16 @@ async function renderRoomMap(container) {
         : `${allRooms.length} habitaciones`;
     }
 
-    // Actualizar grid — renderGrid es function declaration, siempre disponible
-    renderGrid(filtered);
+    // Actualizar grid usando window._renderGrid (evita problemas de scope/hoisting)
+    if (typeof window._renderGrid === 'function') {
+      window._renderGrid(filtered);
+    } else {
+      // Fallback: intentar renderGrid directamente
+      try { renderGrid(filtered); } catch(e) {
+        console.error('[_infraBuscar] renderGrid no disponible:', e.message);
+        showToast('Error al filtrar: recarga la página', 'error');
+      }
+    }
   };
 
   // Alias para el sistema anterior (retrocompatibilidad)
@@ -2991,6 +3006,8 @@ function renderGrid(rooms) {
       </div>`;
   }).join('');
 }
+window._renderGrid = renderGrid; // expuesto para uso desde closures
+
 
 function renderRoomCard(r) {
   const dayBedObj = r.beds?.day;

@@ -624,11 +624,16 @@ function renderRequestCard(req, roomsMap = {}) {
                 </tr>`).join('')}
             </tbody>
           </table>
-          </div>
           </div><!-- /scroll-table wrapper -->
-          <div style="margin-top:12px;display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;
+          <div style="margin-top:12px;display:flex;justify-content:flex-start;align-items:center;gap:8px;flex-wrap:wrap;
                       position:sticky;bottom:0;background:white;padding:10px 0 4px;
                       border-top:1px solid var(--border);z-index:10">
+            <!-- ✅ Descarga Excel de esta solicitud — siempre visible -->
+            <button class="btn btn-secondary btn-sm"
+              style="background:linear-gradient(135deg,#f0fff4,#dcfce7);color:#276749;border:1.5px solid #9ae6b4;font-weight:700;margin-right:auto"
+              onclick="event.stopPropagation();window.downloadSolicitudExcel('${req.id}')">
+              📥 Descargar Excel
+            </button>
             ${req.status === 'pending' ? `
               <button class="btn btn-secondary btn-sm" style="background:#fff5f5;color:#c53030;border:1px solid #feb2b2" onclick="window.updateRequestStatus('${req.id}', 'rejected')">❌ Rechazar</button>
               <button class="btn btn-primary btn-sm" style="background:#f0fff4;color:#276749;border:1px solid #c6f6d5" onclick="window.updateRequestStatus('${req.id}', 'accepted')">✅ Aceptar</button>
@@ -1780,5 +1785,200 @@ window.limpiarTodasAsignaciones = async () => {
     } catch(e) {
         console.error(e);
         showToast('Error al limpiar base de datos', 'error');
+    }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 📥  DESCARGAR EXCEL DE UNA SOLICITUD ESPECÍFICA
+// Genera un Excel corporativo Aramark con los datos completos de la solicitud
+// ─────────────────────────────────────────────────────────────────────────────
+window.downloadSolicitudExcel = async (reqId) => {
+    try {
+        // Cargar ExcelJS si no está disponible
+        if (typeof ExcelJS === 'undefined') {
+            showToast('⏳ Cargando generador Excel...', 'info');
+            await new Promise((resolve, reject) => {
+                const s = document.createElement('script');
+                s.src = 'https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js';
+                s.onload = resolve; s.onerror = reject;
+                document.head.appendChild(s);
+            });
+        }
+
+        const requests = await getAll('b2b_requests');
+        const req = requests.find(r => String(r.id) === String(reqId));
+        if (!req) { showToast('Solicitud no encontrada', 'error'); return; }
+
+        const workers = req.workers || [];
+        if (workers.length === 0) { showToast('Esta solicitud no tiene trabajadores', 'warn'); return; }
+
+        // ── Colores corporativos ─────────────────────────────────────────────
+        const RED    = 'FFCC0000';
+        const DARK   = 'FF8B0000';
+        const WHITE  = 'FFFFFFFF';
+        const GRAY   = 'FFF5F5F5';
+        const HDR_BG = 'FF1A202C';
+        const GREEN  = 'FF276749';
+
+        const wb = new ExcelJS.Workbook();
+        wb.creator = 'PC Hotelería'; wb.created = new Date();
+
+        const ws = wb.addWorksheet('Trabajadores', { views: [{ showGridLines: true }] });
+
+        // ── Columnas ─────────────────────────────────────────────────────────
+        const cols = [
+            { header: 'RUT',          key: 'rut',        width: 15 },
+            { header: 'Nombre',       key: 'name',       width: 30 },
+            { header: 'Gerencia',     key: 'mgmt',       width: 25 },
+            { header: 'Empresa',      key: 'company',    width: 28 },
+            { header: 'Sexo',         key: 'sex',        width: 8  },
+            { header: 'Turno',        key: 'shift',      width: 14 },
+            { header: 'Hab. Asig.',   key: 'room',       width: 12 },
+            { header: 'Fecha Ingreso',key: 'arrival',    width: 15 },
+            { header: 'Fecha Salida', key: 'departure',  width: 15 },
+            { header: 'Estado',       key: 'status',     width: 14 },
+            { header: 'Observación',  key: 'obs',        width: 30 },
+        ];
+        ws.columns = cols.map(c => ({ key: c.key, width: c.width }));
+
+        // ── Fila 1-3: cabecera roja Aramark ──────────────────────────────────
+        [1, 2, 3].forEach(r => {
+            for (let c = 1; c <= cols.length; c++) {
+                ws.getRow(r).getCell(c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: RED } };
+            }
+            ws.getRow(r).height = 26;
+        });
+        ws.mergeCells(`D1:K3`);
+        const title = ws.getCell('D1');
+        title.value     = `PLANILLA DE ALOJAMIENTO — ${(req.company || '').toUpperCase()}\nPC Hotelería · ${new Date().toLocaleDateString('es-CL')}`;
+        title.font      = { name: 'Calibri', bold: true, size: 15, color: { argb: WHITE } };
+        title.fill      = { type: 'pattern', pattern: 'solid', fgColor: { argb: RED } };
+        title.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+
+        // Logo / nombre Aramark
+        try {
+            const resp   = await fetch('./aramark.png');
+            const buffer = await resp.arrayBuffer();
+            const imgId  = wb.addImage({ buffer, extension: 'png' });
+            ws.addImage(imgId, { tl: { col: 0.1, row: 0.1 }, ext: { width: 160, height: 72 } });
+        } catch {
+            ws.mergeCells('A1:C3');
+            const logo = ws.getCell('A1');
+            logo.value     = 'ARAMARK';
+            logo.font      = { name: 'Calibri', bold: true, size: 18, color: { argb: WHITE } };
+            logo.fill      = { type: 'pattern', pattern: 'solid', fgColor: { argb: RED } };
+            logo.alignment = { horizontal: 'center', vertical: 'middle' };
+        }
+
+        // ── Fila 4: Metadatos de la solicitud ────────────────────────────────
+        ws.getRow(4).height = 22;
+        const meta = [
+            ['Empresa:', req.company || '—'],
+            ['Contrato N°:', req.contractNumber || '—'],
+            ['Gerencia:', req.gerencia || '—'],
+            ['Admin Anglo:', req.angloAdmin || '—'],
+            ['Contacto:', req.contactName || '—'],
+            ['Recibida:', req.receivedDate ? new Date(req.receivedDate).toLocaleDateString('es-CL') : '—'],
+        ];
+
+        // Filas 4-9: Metadatos en 2 columnas
+        meta.forEach(([label, value], i) => {
+            const row = ws.getRow(4 + i);
+            row.height = 18;
+            const labelCell = row.getCell(1);
+            labelCell.value     = label;
+            labelCell.font      = { name: 'Calibri', bold: true, size: 10, color: { argb: WHITE } };
+            labelCell.fill      = { type: 'pattern', pattern: 'solid', fgColor: { argb: DARK } };
+            labelCell.alignment = { horizontal: 'left', vertical: 'middle' };
+
+            ws.mergeCells(4 + i, 2, 4 + i, 5);
+            const valCell = row.getCell(2);
+            valCell.value     = value;
+            valCell.font      = { name: 'Calibri', size: 10 };
+            valCell.alignment = { horizontal: 'left', vertical: 'middle' };
+        });
+
+        // ── Fila 10: Encabezados de tabla ────────────────────────────────────
+        const hdrRow = ws.getRow(10);
+        hdrRow.height = 20;
+        cols.forEach((col, i) => {
+            const cell = hdrRow.getCell(i + 1);
+            cell.value     = col.header;
+            cell.font      = { name: 'Calibri', bold: true, size: 10, color: { argb: WHITE } };
+            cell.fill      = { type: 'pattern', pattern: 'solid', fgColor: { argb: HDR_BG } };
+            cell.alignment = { horizontal: 'center', vertical: 'middle' };
+            cell.border    = { bottom: { style: 'medium', color: { argb: RED } } };
+        });
+
+        // ── Filas de trabajadores ────────────────────────────────────────────
+        workers.forEach((w, idx) => {
+            const row = ws.getRow(11 + idx);
+            row.height = 18;
+            const isAssigned = !!(w.assignedRoomStr && w.assignedRoomStr !== 'CLON_RECHAZADO');
+            const bg = idx % 2 === 0 ? 'FFFAFAFA' : 'FFFFFFFF';
+
+            const statusText = w.assignedRoomStr === 'CLON_RECHAZADO' ? 'Clon descartado'
+                             : isAssigned ? 'Asignado'
+                             : 'Pendiente';
+
+            const statusColor = w.assignedRoomStr === 'CLON_RECHAZADO' ? 'FFc53030'
+                              : isAssigned ? GREEN
+                              : 'FF B7791F';
+
+            [
+                w.rut || '',
+                w.name || '',
+                w.management || '',
+                w.legalName || w.company || '',
+                w.sex || '',
+                w.shiftName || w.shift || '',
+                w.assignedRoomStr && w.assignedRoomStr !== 'CLON_RECHAZADO' ? `Hab. ${w.assignedRoomStr.split('_')[0]}` : '',
+                w.arrivalDate ? new Date(w.arrivalDate + 'T12:00:00').toLocaleDateString('es-CL') : '',
+                w.departureDate ? new Date(w.departureDate + 'T12:00:00').toLocaleDateString('es-CL') : '',
+                statusText,
+                w.observation || '',
+            ].forEach((val, ci) => {
+                const cell = row.getCell(ci + 1);
+                cell.value     = val;
+                cell.font      = ci === 9
+                    ? { name: 'Calibri', size: 9, bold: true, color: { argb: statusColor } }
+                    : { name: 'Calibri', size: 9 };
+                cell.fill      = { type: 'pattern', pattern: 'solid', fgColor: { argb: bg } };
+                cell.alignment = { vertical: 'middle', horizontal: ci === 0 ? 'center' : 'left' };
+            });
+        });
+
+        // ── Fila de totales ──────────────────────────────────────────────────
+        const totalRow = ws.getRow(11 + workers.length);
+        totalRow.height = 20;
+        const totalCell = totalRow.getCell(1);
+        ws.mergeCells(11 + workers.length, 1, 11 + workers.length, 6);
+        totalCell.value     = `TOTAL TRABAJADORES: ${workers.length}   ·   ASIGNADOS: ${workers.filter(w => w.assignedRoomStr && w.assignedRoomStr !== 'CLON_RECHAZADO').length}   ·   PENDIENTES: ${workers.filter(w => !w.assignedRoomStr).length}`;
+        totalCell.font      = { name: 'Calibri', bold: true, size: 10, color: { argb: WHITE } };
+        totalCell.fill      = { type: 'pattern', pattern: 'solid', fgColor: { argb: HDR_BG } };
+        totalCell.alignment = { horizontal: 'center', vertical: 'middle' };
+
+        // ── Descargar ────────────────────────────────────────────────────────
+        const buffer = await wb.xlsx.writeBuffer();
+        const blob   = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+        const fname  = `Solicitud_${(req.company || 'empresa').replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.xlsx`;
+
+        if (window.showSaveFilePicker) {
+            try {
+                const handle   = await window.showSaveFilePicker({ suggestedName: fname, types: [{ description: 'Excel', accept: { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] } }] });
+                const writable = await handle.createWritable();
+                await writable.write(blob); await writable.close();
+                showToast(`✅ Excel descargado: ${fname}`, 'success'); return;
+            } catch(e) { if (e.name === 'AbortError') return; }
+        }
+        const url = URL.createObjectURL(blob);
+        const a   = Object.assign(document.createElement('a'), { href: url, download: fname });
+        document.body.appendChild(a); a.click();
+        setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 2000);
+        showToast(`✅ ${fname} descargado`, 'success');
+
+    } catch(err) {
+        console.error('[downloadSolicitudExcel]', err);
+        showToast('Error al generar Excel: ' + err.message, 'error');
     }
 };

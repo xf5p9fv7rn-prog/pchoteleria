@@ -453,13 +453,21 @@
                 class="rut-input"
                 placeholder="12345678-9"
                 autocomplete="off"
-                inputmode="text"
+                inputmode="numeric"
                 maxlength="12"
             >
 
             <button class="btn-buscar" id="btn-buscar" onclick="window.searchRoom()">
                 🔍 Buscar mi habitación
             </button>
+
+            <!-- Barra de progreso animada -->
+            <div id="progress-bar-wrap" style="display:none; margin-top:16px;">
+                <div style="height:6px; background:#fee2e2; border-radius:99px; overflow:hidden;">
+                    <div id="progress-bar" style="height:100%; background:linear-gradient(90deg,#c0392b,#e74c3c); border-radius:99px; width:0%; transition:width 0.4s ease;"></div>
+                </div>
+                <p id="progress-msg" style="text-align:center; font-size:13px; font-weight:700; color:#c0392b; margin-top:10px;">🔍 Buscando tu habitación...</p>
+            </div>
 
             <div id="no-result" class="no-result">
                 ❌ No se encontró habitación asignada para ese RUT.<br>
@@ -597,6 +605,16 @@
     window._currentBedKey   = null;
 
     // ── Buscar habitación por RUT ─────────────────────────────────────────
+    // ── Helper: actualizar barra de progreso ─────────────────────────────
+    function setProgress(pct, msg) {
+        const bar = document.getElementById('progress-bar');
+        const msgEl = document.getElementById('progress-msg');
+        const wrap = document.getElementById('progress-bar-wrap');
+        if (wrap) wrap.style.display = pct > 0 ? 'block' : 'none';
+        if (bar) bar.style.width = pct + '%';
+        if (msgEl && msg) msgEl.textContent = msg;
+    }
+
     window.searchRoom = async () => {
         const btn = document.getElementById('btn-buscar');
         const noResult = document.getElementById('no-result');
@@ -610,25 +628,30 @@
 
         const rutClean = rutRaw.replace(/[^0-9Kk]/g, '').toUpperCase();
 
-        btn.innerHTML = '<span class="spinner"></span> Buscando...';
-        btn.disabled = true;
+        btn.style.display = 'none';
+        setProgress(15, '🔍 Buscando tu habitación...');
 
         try {
             const sb = await getSb();
 
             // ── 1ª OPCIÓN: RPC server-side (instantáneo, no descarga nada) ──
             let rooms = null;
+            // 🚀 1ª OPCIÓN: RPC server-side — instantáneo (<1 segundo)
+            setProgress(40, '⚡ Consultando base de datos...');
             const rpc = await sb.rpc('find_room_by_rut', { p_rut: rutClean });
 
             if (!rpc.error && Array.isArray(rpc.data)) {
                 rooms = rpc.data;
+                setProgress(85, '✅ Habitación encontrada...');
                 console.log('[mi-hab] RPC rooms:', rooms.length);
             } else {
-                // ── 2ª OPCIÓN: Descarga paginada completa (fallback) ──
+                // ── 2ª OPCIÓN: Descarga paginada (fallback si RPC no está instalado) ──
                 console.warn('[mi-hab] RPC no disponible, descargando con paginación…');
+                setProgress(30, '📥 Cargando datos del campamento...');
                 rooms = [];
                 let offset = 0;
                 const PAGE = 500;
+                let page = 0;
                 while (true) {
                     const { data, error } = await sb
                         .from('rooms')
@@ -636,9 +659,13 @@
                         .range(offset, offset + PAGE - 1);
                     if (error || !data || data.length === 0) break;
                     rooms = rooms.concat(data);
+                    page++;
+                    const pct = 30 + Math.min(50, page * 17); // 30→80%
+                    setProgress(pct, `📥 Cargando... ${rooms.length} habitaciones`);
                     if (data.length < PAGE) break;
                     offset += PAGE;
                 }
+                setProgress(85, '🔍 Buscando tu asignación...');
                 console.log('[mi-hab] Fallback rooms descargadas:', rooms.length);
             }
 
@@ -684,12 +711,13 @@
             }
 
             if (!foundBed || !roomInfo) {
+                setProgress(0);
                 noResult.innerHTML = `❌ No se encontró habitación para <strong>${rutRaw}</strong>.<br>
                     <span style="font-size:12px;color:#718096;font-weight:600;margin-top:4px;display:block">
                         Verifica que tu RUT esté correcto o consulta en recepción.
                     </span>`;
                 noResult.style.display = 'block';
-                btn.innerHTML = '🔍 Buscar mi habitación';
+                btn.style.display = 'flex';
                 btn.disabled = false;
                 return;
             }
@@ -735,6 +763,9 @@
             }
 
             // ── Mostrar ticket ────────────────────────────────────────
+            setProgress(100, '✅ ¡Habitación encontrada!');
+            await new Promise(r => setTimeout(r, 400)); // pequeña pausa visual
+            setProgress(0);
             document.getElementById('search-view').style.display = 'none';
             document.getElementById('ticket-view').style.display = 'block';
 
@@ -744,7 +775,8 @@
             noResult.style.display = 'block';
         }
 
-        btn.innerHTML = '🔍 Buscar mi habitación';
+        setProgress(0);
+        btn.style.display = 'flex';
         btn.disabled  = false;
     };
 

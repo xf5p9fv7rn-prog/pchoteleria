@@ -1542,9 +1542,11 @@ async function renderRoomMap(container) {
   }
 
   function updateGridFilters() {
-    const grid = document.getElementById('room-map-grid');
-    const search = document.getElementById('infra-search').value.toLowerCase();
-    
+    // Guardia: si no hay rooms cargados aún, no hacer nada
+    if (!window._allRooms || window._allRooms.length === 0) return;
+
+    const search = (document.getElementById('infra-search')?.value || '').toLowerCase().trim();
+
     let filtered = window._allRooms;
 
     if (selectedBuildingId !== 'all') {
@@ -1556,19 +1558,22 @@ async function renderRoomMap(container) {
 
     if (search) {
         filtered = filtered.filter(r => {
-            const num = String(r.number).toLowerCase();
-            const dName = (r.beds?.day?.occupant || '').toLowerCase();
+            const num  = String(r.number || '').toLowerCase();
+            const dName = (r.beds?.day?.occupant   || '').toLowerCase();
             const nName = (r.beds?.night?.occupant || '').toLowerCase();
             const eName = (r.beds?.extra?.occupant || '').toLowerCase();
-            const dComp = (r.beds?.day?.company || '').toLowerCase();
-            const nComp = (r.beds?.night?.company || '').toLowerCase();
-            const dRut = (r.beds?.day?.rut || '').toLowerCase();
-            const nRut = (r.beds?.night?.rut || '').toLowerCase();
+            const dComp = (r.beds?.day?.company    || '').toLowerCase();
+            const nComp = (r.beds?.night?.company  || '').toLowerCase();
+            const eComp = (r.beds?.extra?.company  || '').toLowerCase();
+            const dRut  = (r.beds?.day?.rut        || '').toLowerCase().replace(/[^0-9k]/g, '');
+            const nRut  = (r.beds?.night?.rut      || '').toLowerCase().replace(/[^0-9k]/g, '');
+            const eRut  = (r.beds?.extra?.rut      || '').toLowerCase().replace(/[^0-9k]/g, '');
+            const sClean = search.replace(/[^0-9k]/g, '') || search;
 
-            return num.includes(search) || 
+            return num.includes(search) ||
                    dName.includes(search) || nName.includes(search) || eName.includes(search) ||
-                   dComp.includes(search) || nComp.includes(search) ||
-                   dRut.includes(search) || nRut.includes(search);
+                   dComp.includes(search) || nComp.includes(search) || eComp.includes(search) ||
+                   (sClean && (dRut.includes(sClean) || nRut.includes(sClean) || eRut.includes(sClean)));
         });
     }
 

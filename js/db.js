@@ -180,6 +180,16 @@ async function descargarDesdeNubeSilencioso(storeName, db) {
                 if (data.length < 500) isFetching = false;
             } else isFetching = false;
         }
+        // 🔒 PROTECCIÓN ESPECIAL b2b_requests:
+        // Si Supabase devuelve 0 solicitudes pero hay datos locales,
+        // es muy probable que la nube esté vacía por un fallo de sync anterior.
+        // En ese caso, NO pisamos los datos locales — las solicitudes son valiosas.
+        if (storeName === 'b2b_requests' && allData.length === 0) {
+            console.log('[Sync] b2b_requests vacías en nube — preservando datos locales');
+            _isSyncing[storeName] = false;
+            return;
+        }
+
         // 🔒 MERGE SEGURO: NO hacemos clear(). Solo insertamos/actualizamos item a item.
         // Registros modificados localmente están protegidos 5 min post-cambio o hasta upsert exitoso.
         if (allData.length > 0) {

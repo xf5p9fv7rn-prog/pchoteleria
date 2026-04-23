@@ -241,16 +241,23 @@ async function initApp() {
     const hash = location.hash.replace('#', '') || 'dashboard';
     await navigate(hash in ROUTES ? hash : 'dashboard');
 
-    window.addEventListener('hashchange', () => {
-        // 🔒 No navegar si hay un modal o drawer abierto — evita redirect al Dashboard
-        // al cerrar modales de infraestructura que alteran el hash
+    // popstate: dispara cuando el usuario presiona el botón Atrás/Adelante del navegador
+    window.addEventListener('popstate', (e) => {
+        // 🔒 No navegar si hay un modal o drawer abierto
         const anyModalOpen = document.querySelector(
             '.modal-overlay.visible, .side-drawer-overlay.visible, #room-detail-modal.visible'
         );
-        if (anyModalOpen) return;
-        const r = location.hash.replace('#', '');
+        if (anyModalOpen) {
+            // Cerrar el modal y restaurar hash sin navegar
+            document.querySelectorAll('.modal-overlay.visible').forEach(m => m.classList.remove('visible'));
+            history.pushState({ route: currentRoute }, '', '#' + currentRoute);
+            return;
+        }
+        const r = e.state?.route || location.hash.replace('#', '') || 'dashboard';
         if (r in ROUTES) navigate(r);
     });
+    // Reemplazar el estado inicial para que el primer popstate tenga datos
+    history.replaceState({ route: currentRoute }, '', location.hash || '#dashboard');
 }
 
 function showLoginOverlay() {
@@ -409,7 +416,12 @@ async function navigate(route) {
         });
     }
 
-    history.replaceState(null, '', '#' + route);
+    // pushState registra la ruta en el historial del navegador
+    // Así el botón Atrás del navegador vuelve a la pestaña anterior (no sale de la app)
+    const newHash = '#' + route;
+    if (location.hash !== newHash) {
+        history.pushState({ route }, '', newHash);
+    }
     closeMobileSidebar();
 }
 

@@ -1450,8 +1450,10 @@ function renderBedDetail(bed, label, icon, roomStatus, bedBlocked, roomId, bedKe
   </div>`;
 }
 
+// La función real se asigna a window dentro de renderRoomMap
+// para acceder al closure (rooms, buildings, filtros de estado)
 function updateGridFilters() {
-    window.selectFloor(selectedFloor);
+    if (typeof window._updateGridFilters === 'function') window._updateGridFilters();
 }
 
 async function switchTab(tab, container) {
@@ -1565,21 +1567,8 @@ async function renderRoomMap(container) {
   window._allRooms = rooms;
   window._allBuildings = buildings;
 
-  window.selectBuilding = (bid) => {
-    selectedBuildingId = bid;
-    selectedFloor = 'all';
-    renderInfraSelectors();
-    updateGridFilters();
-  };
-
-  window.selectFloor = (floor) => {
-    selectedFloor = floor;
-    renderInfraSelectors();
-    updateGridFilters();
-  };
-
   document.getElementById('infra-search').addEventListener('input', () => {
-    updateGridFilters();
+    window._updateGridFilters?.();
   });
 
   function renderInfraSelectors() {
@@ -1606,7 +1595,9 @@ async function renderRoomMap(container) {
     }
   }
 
-  function updateGridFilters() {
+  // Exponer al scope global para que selectBuilding/selectFloor puedan llamarla
+  // incluso después de que renderRoomMap haya terminado de ejecutarse
+  window._updateGridFilters = function updateGridFilters() {
     // Guardia: si no hay rooms cargados aún, no hacer nada
     if (!window._allRooms || window._allRooms.length === 0) return;
 
@@ -1643,7 +1634,21 @@ async function renderRoomMap(container) {
     }
 
     renderGrid(filtered);
-  }
+  };
+
+  // El buscador y los botones siempre llaman a la versión global
+  window.selectBuilding = (bid) => {
+    selectedBuildingId = bid;
+    selectedFloor = 'all';
+    renderInfraSelectors();
+    window._updateGridFilters();
+  };
+
+  window.selectFloor = (floor) => {
+    selectedFloor = floor;
+    renderInfraSelectors();
+    window._updateGridFilters();
+  };
 
   renderInfraSelectors();
   updateGridFilters();

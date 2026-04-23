@@ -145,12 +145,27 @@ export async function renderInfraestructura(container) {
               </select>
             </div>
             <div class="form-group">
-              <label class="form-label">N° de Pisos</label>
+              <label class="form-label">N° de Pisos *</label>
               <input class="form-input" id="building-floors" type="number" min="1" max="20" value="2">
             </div>
+            <div class="form-group" id="rooms-per-floor-group">
+              <label class="form-label">🚪 Habitaciones por Piso *</label>
+              <input class="form-input" id="building-rooms-per-floor" type="number" min="1" max="200" value="20"
+                placeholder="Ej: 20 → genera Hab. 1-20 por piso">
+              <div style="font-size:11px;color:#64748b;margin-top:3px">💡 Al crear: genera hab. automáticamente (ej. P1-01, P1-02...)</div>
+            </div>
+            <div class="form-group" id="beds-per-room-group">
+              <label class="form-label">🛏️ Camas por Habitación</label>
+              <select class="form-select" id="building-beds-per-room">
+                <option value="2" selected>2 camas (Día + Noche)</option>
+                <option value="1">1 cama (Solo Día)</option>
+                <option value="3">3 camas (Día + Noche + Extra)</option>
+              </select>
+            </div>
             <div class="form-group">
-              <label class="form-label">Capacidad (personas)</label>
-              <input class="form-input" id="building-capacity" type="number" min="1" value="40">
+              <label class="form-label">Capacidad total (auto)</label>
+              <input class="form-input" id="building-capacity" type="number" min="1" value="40" readonly
+                style="background:#f8fafc;color:#64748b;cursor:not-allowed">
             </div>
           </div>
           <div class="form-group">
@@ -488,6 +503,20 @@ function setupInfraHandlers() {
       renderShiftTags();
       renderFloorConfigs(2, {});
     }
+    // Mostrar/ocultar campos de generación de hab. (solo en modo creación)
+    const rGroup = document.getElementById('rooms-per-floor-group');
+    const bGroup = document.getElementById('beds-per-room-group');
+    const capInput = document.getElementById('building-capacity');
+    if (editId) {
+      if (rGroup) rGroup.style.display = 'none';
+      if (bGroup) bGroup.style.display = 'none';
+      if (capInput) { capInput.readOnly = false; capInput.style.cursor = ''; capInput.style.background = ''; capInput.style.color = ''; }
+    } else {
+      if (rGroup) rGroup.style.display = '';
+      if (bGroup) bGroup.style.display = '';
+      if (capInput) { capInput.readOnly = true; capInput.style.cursor = 'not-allowed'; capInput.style.background = '#f8fafc'; capInput.style.color = '#64748b'; }
+      document.getElementById('building-rooms-per-floor').value = '20';
+    }
     document.getElementById('building-modal').classList.add('visible');
   };
 
@@ -568,6 +597,12 @@ function setupInfraHandlers() {
     const editId = document.getElementById('building-edit-id').value;
     const name = document.getElementById('building-name').value.trim();
     if (!name) { showToast('Ingrese el nombre del edificio', 'warn'); return; }
+
+    const numFloors      = parseInt(document.getElementById('building-floors').value) || 1;
+    const roomsPerFloor  = parseInt(document.getElementById('building-rooms-per-floor')?.value) || 0;
+    const bedsPerRoom    = parseInt(document.getElementById('building-beds-per-room')?.value) || 2;
+    const buildingType   = document.getElementById('building-type').value;
+
     const floorConfigs = {};
     document.querySelectorAll('#floor-configs-container [data-floor]').forEach(el => {
         const f = el.dataset.floor;
@@ -575,20 +610,68 @@ function setupInfraHandlers() {
         floorConfigs[f][el.dataset.field] = el.value.trim();
     });
 
+    const capacity = numFloors * roomsPerFloor * bedsPerRoom || parseInt(document.getElementById('building-capacity').value) || 40;
+
     const data = {
       name,
-      type: document.getElementById('building-type').value,
+      type: buildingType,
       mainShift: document.getElementById('building-main-shift').value || 'mixed',
-      floor: parseInt(document.getElementById('building-floors').value) || 1,
-      capacity: parseInt(document.getElementById('building-capacity').value) || 40,
+      floor: numFloors,
+      capacity,
       shifts: [...currentShifts],
       floorConfigs,
       notes: document.getElementById('building-notes').value,
     };
     if (editId) data.id = parseInt(editId);
+
     await put('buildings', data);
+
+    // ── CREAR HABITACIONES AUTOMÁTICAMENTE (solo al crear nuevo) ──────────
+    if (!editId && roomsPerFloor > 0) {
+      // Obtener el ID del nuevo building recién guardado
+      const allBuildings = await getAll('buildings');
+      const newB = allBuildings.find(b => b.name === name && !b._processed);
+      const buildingId = newB?.id;
+
+      if (buildingId) {
+        showToast(`⏳ Generando ${numFloors * roomsPerFloor} habitaciones...`, 'info');
+
+        // Generar código de prefijo: primera letra(s) del nombre + número
+        // Ej: "Pabellón A" → "A", "Pabellón 12" → "P12"
+        const rawName = name.replace(/pabellón|pabellon|edificio|módulo|modulo/gi, '').trim();
+        const prefix  = rawName.replace(/\s+/g, '').substring(0, 3).toUpperCase() || 'P';
+
+        const roomsToCreate = [];
+        for (let floor = 1; floor <= numFloors; floor++) {
+          for (let n = 1; n <= roomsPerFloor; n++) {
+            const num = n < 10 ? `0${n}` : `${n}`;
+            roomsToCreate.push({
+              buildingId,
+              number:    `${prefix}${floor}-${num}`,
+              floor,
+              status:    'free',
+              bedCount:  bedsPerRoom,
+              beds:      {},
+              gender:    null,
+            });
+          }
+        }
+
+        // Guardar en lotes para no bloquear el hilo
+        for (const room of roomsToCreate) {
+          await put('rooms', room);
+        }
+        showToast(`✅ ${name} creado con ${roomsToCreate.length} habitaciones`, 'success');
+      } else {
+        showToast('Edificio guardado (habitaciones pendientes - reintenta)', 'warn');
+      }
+    } else if (editId) {
+      showToast('Edificio actualizado', 'success');
+    } else {
+      showToast('Edificio guardado (agrega habitaciones con Asignación Camas)', 'success');
+    }
+
     window.closeBuildingModal();
-    showToast(editId ? 'Edificio actualizado' : 'Edificio guardado', 'success');
     await window.switchInfraTab(activeTab);
   };
 

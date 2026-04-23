@@ -458,22 +458,33 @@ export async function renderCupos(container) {
             try {
                 const fullKey = decodeURIComponent(encodedKey);
                 const [compLower, gerLower] = fullKey.split('||');
-                const quotas = await getAll('gerencia_quotas');
-                const record = quotas.find(q =>
+
+                // ☁️ Usar getAllQuotas() que lee Supabase primero (no solo IndexedDB local)
+                const allQuotas = await getAllQuotas();
+                const record = allQuotas.find(q =>
                     (q.company||'').trim().toLowerCase() === compLower &&
                     (q.gerencia||'').trim().toLowerCase() === gerLower
                 );
-                if (!record) { showToast('No se encontró el registro para borrar', 'error'); return; }
 
-                // 1. Borrar de Supabase
-                const { error: sbErr } = await supabase
-                    .from('gerencia_quotas')
-                    .delete()
-                    .eq('id', record.id);
+                // 1. Borrar de Supabase (por ID si lo tenemos, o por company+gerencia como fallback)
+                let sbErr;
+                if (record?.id) {
+                    const res = await supabase.from('gerencia_quotas').delete().eq('id', record.id);
+                    sbErr = res.error;
+                } else {
+                    // Fallback: borrar por campos (sin ID)
+                    const res = await supabase.from('gerencia_quotas')
+                        .delete()
+                        .ilike('company', compLower)
+                        .ilike('gerencia', gerLower);
+                    sbErr = res.error;
+                }
                 if (sbErr) console.warn('[Cupos] Error al borrar en Supabase:', sbErr.message);
 
-                // 2. Borrar de IndexedDB local
-                await remove('gerencia_quotas', record.id);
+                // 2. Borrar de IndexedDB local (si existe)
+                if (record?.id) {
+                    await remove('gerencia_quotas', record.id).catch(() => {});
+                }
 
                 showToast(`✅ Cupo de "${gerencia}" eliminado`, 'success');
                 await renderCupos(container);

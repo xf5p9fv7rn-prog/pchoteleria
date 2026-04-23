@@ -8,6 +8,80 @@ let activeTab = 'map'; // 'map' | 'buildings' | 'rooms'
 let mapFilter = 'all';
 let searchQuery = '';
 
+// ── Filtro del mapa de habitaciones (nivel módulo — siempre accesible via window) ──
+function _doMapFilter() {
+  if (!window._allRooms || window._allRooms.length === 0) return;
+
+  const search = (document.getElementById('infra-search')?.value || '').toLowerCase().trim();
+  let filtered = window._allRooms;
+
+  if (selectedBuildingId !== 'all') {
+    filtered = filtered.filter(r => String(r.buildingId) === String(selectedBuildingId));
+  }
+  if (selectedFloor !== 'all') {
+    filtered = filtered.filter(r => String(r.floor) === String(selectedFloor));
+  }
+  if (search) {
+    const sClean = search.replace(/[^0-9k]/g, '') || search;
+    filtered = filtered.filter(r => {
+      const num   = String(r.number || '').toLowerCase();
+      const dName = (r.beds?.day?.occupant   || '').toLowerCase();
+      const nName = (r.beds?.night?.occupant || '').toLowerCase();
+      const eName = (r.beds?.extra?.occupant || '').toLowerCase();
+      const dComp = (r.beds?.day?.company    || '').toLowerCase();
+      const nComp = (r.beds?.night?.company  || '').toLowerCase();
+      const eComp = (r.beds?.extra?.company  || '').toLowerCase();
+      const dRut  = (r.beds?.day?.rut        || '').toLowerCase().replace(/[^0-9k]/g, '');
+      const nRut  = (r.beds?.night?.rut      || '').toLowerCase().replace(/[^0-9k]/g, '');
+      const eRut  = (r.beds?.extra?.rut      || '').toLowerCase().replace(/[^0-9k]/g, '');
+      return num.includes(search) ||
+             dName.includes(search) || nName.includes(search) || eName.includes(search) ||
+             dComp.includes(search) || nComp.includes(search) || eComp.includes(search) ||
+             (sClean && (dRut.includes(sClean) || nRut.includes(sClean) || eRut.includes(sClean)));
+    });
+  }
+  renderGrid(filtered);
+}
+
+// ── Actualizar los selectores de edificio/piso en el DOM ──────────────────────
+function _doInfraSelectors() {
+  const buildings = window._allBuildings || [];
+  const fGroup = document.getElementById('floor-selector-group');
+  const fBar   = document.getElementById('floor-selector-bar');
+  const bBar   = document.getElementById('building-selector-bar');
+  if (bBar) {
+    bBar.innerHTML =
+      `<button class="sel-btn ${selectedBuildingId === 'all' ? 'active' : ''}" onclick="window.selectBuilding('all')">Todos</button>` +
+      buildings.map(b => `<button class="sel-btn ${selectedBuildingId == b.id ? 'active' : ''}" onclick="window.selectBuilding(${b.id})">${b.name}</button>`).join('');
+  }
+  if (selectedBuildingId === 'all') {
+    if (fGroup) fGroup.style.display = 'none';
+  } else {
+    if (fGroup) fGroup.style.display = 'block';
+    const b = buildings.find(x => x.id == selectedBuildingId);
+    const floorCount = b ? (b.floor || 1) : 1;
+    let btns = `<button class="sel-btn ${selectedFloor === 'all' ? 'active' : ''}" onclick="window.selectFloor('all')">Todos</button>`;
+    for (let i = 1; i <= floorCount; i++) {
+      btns += `<button class="sel-btn ${selectedFloor == i ? 'active' : ''}" onclick="window.selectFloor(${i})">Piso ${i}</button>`;
+    }
+    if (fBar) fBar.innerHTML = btns;
+  }
+}
+
+// ── Exponer todo al scope global desde el inicio del módulo ──────────────────
+window._updateGridFilters = _doMapFilter;
+window.selectBuilding = (bid) => {
+  selectedBuildingId = bid;
+  selectedFloor = 'all';
+  _doInfraSelectors();
+  _doMapFilter();
+};
+window.selectFloor = (floor) => {
+  selectedFloor = floor;
+  _doInfraSelectors();
+  _doMapFilter();
+};
+
 export async function renderInfraestructura(container) {
   // 🧹 ANTI-DUPLICADOS: Limpiar modales flotantes de renders anteriores.
   // Si el usuario navega a otro módulo y vuelve, renderInfraestructura crea modales
@@ -1493,7 +1567,10 @@ async function renderRoomMap(container) {
       <div class="selector-group" style="margin-bottom:15px; grid-column: 1 / -1">
         <div style="display:flex;gap:10px;align-items:center">
           <div style="position:relative;flex:1">
-              <input type="text" id="infra-search" class="form-input" placeholder="🔍 Buscar por Nº Habitación, Nombre, RUT o Empresa..." style="padding-left:40px; height:45px; border-radius:12px; font-size:14px">
+              <input type="text" id="infra-search" class="form-input"
+                oninput="window._updateGridFilters?.()"
+                placeholder="🔍 Buscar por Nº Habitación, Nombre, RUT o Empresa..."
+                style="padding-left:40px; height:45px; border-radius:12px; font-size:14px">
               <span style="position:absolute; left:14px; top:50%; transform:translateY(-50%); font-size:18px">🔍</span>
           </div>
           <!-- Botón Asignación Camas (solo admin) -->
@@ -1567,99 +1644,11 @@ async function renderRoomMap(container) {
   window._allRooms = rooms;
   window._allBuildings = buildings;
 
-  document.getElementById('infra-search').addEventListener('input', () => {
-    window._updateGridFilters?.();
-  });
+  // oninput ya está en el HTML del input — no necesitamos addEventListener aquí
 
-  function renderInfraSelectors() {
-    const fGroup = document.getElementById('floor-selector-group');
-    const fBar = document.getElementById('floor-selector-bar');
-    const bBar = document.getElementById('building-selector-bar');
-
-    if (bBar && buildings) {
-        bBar.innerHTML = `<button class="sel-btn ${selectedBuildingId === 'all' ? 'active' : ''}" onclick="window.selectBuilding('all')">Todos</button>` + 
-          buildings.map(b => `<button class="sel-btn ${selectedBuildingId == b.id ? 'active' : ''}" onclick="window.selectBuilding(${b.id})">${b.name}</button>`).join('');
-    }
-
-    if (selectedBuildingId === 'all') {
-        if (fGroup) fGroup.style.display = 'none';
-    } else {
-        if (fGroup) fGroup.style.display = 'block';
-        const b = buildings.find(x => x.id == selectedBuildingId);
-        const floorCount = b ? b.floor : 1;
-        let floorBtns = `<button class="sel-btn ${selectedFloor === 'all' ? 'active' : ''}" onclick="window.selectFloor('all')">Todos</button>`;
-        for (let i = 1; i <= floorCount; i++) {
-            floorBtns += `<button class="sel-btn ${selectedFloor == i ? 'active' : ''}" onclick="window.selectFloor(${i})">Piso ${i}</button>`;
-        }
-        if (fBar) fBar.innerHTML = floorBtns;
-    }
-  }
-
-  // Exponer al scope global para que selectBuilding/selectFloor puedan llamarla
-  // incluso después de que renderRoomMap haya terminado de ejecutarse
-  window._updateGridFilters = function updateGridFilters() {
-    // Guardia: si no hay rooms cargados aún, no hacer nada
-    if (!window._allRooms || window._allRooms.length === 0) {
-        console.warn('[Filter] _allRooms vacío, ignorando');
-        return;
-    }
-
-    const searchRaw = document.getElementById('infra-search')?.value || '';
-    const search = searchRaw.toLowerCase().trim();
-    console.log('[Filter] search="' + search + '" building=' + selectedBuildingId + ' floor=' + selectedFloor + ' total=' + window._allRooms.length);
-
-    let filtered = window._allRooms;
-
-    if (selectedBuildingId !== 'all') {
-      filtered = filtered.filter(r => String(r.buildingId) === String(selectedBuildingId));
-      console.log('[Filter] Tras filtro edificio:', filtered.length);
-    }
-    if (selectedFloor !== 'all') {
-      filtered = filtered.filter(r => String(r.floor) === String(selectedFloor));
-      console.log('[Filter] Tras filtro piso:', filtered.length);
-    }
-
-    if (search) {
-        const sClean = search.replace(/[^0-9k]/g, '') || search;
-        filtered = filtered.filter(r => {
-            const num  = String(r.number || '').toLowerCase();
-            const dName = (r.beds?.day?.occupant   || '').toLowerCase();
-            const nName = (r.beds?.night?.occupant || '').toLowerCase();
-            const eName = (r.beds?.extra?.occupant || '').toLowerCase();
-            const dComp = (r.beds?.day?.company    || '').toLowerCase();
-            const nComp = (r.beds?.night?.company  || '').toLowerCase();
-            const eComp = (r.beds?.extra?.company  || '').toLowerCase();
-            const dRut  = (r.beds?.day?.rut        || '').toLowerCase().replace(/[^0-9k]/g, '');
-            const nRut  = (r.beds?.night?.rut      || '').toLowerCase().replace(/[^0-9k]/g, '');
-            const eRut  = (r.beds?.extra?.rut      || '').toLowerCase().replace(/[^0-9k]/g, '');
-
-            return num.includes(search) ||
-                   dName.includes(search) || nName.includes(search) || eName.includes(search) ||
-                   dComp.includes(search) || nComp.includes(search) || eComp.includes(search) ||
-                   (sClean && (dRut.includes(sClean) || nRut.includes(sClean) || eRut.includes(sClean)));
-        });
-        console.log('[Filter] Tras filtro texto ("' + search + '"):', filtered.length, 'resultados');
-    }
-
-    renderGrid(filtered);
-  };
-
-  // El buscador y los botones siempre llaman a la versión global
-  window.selectBuilding = (bid) => {
-    selectedBuildingId = bid;
-    selectedFloor = 'all';
-    renderInfraSelectors();
-    window._updateGridFilters();
-  };
-
-  window.selectFloor = (floor) => {
-    selectedFloor = floor;
-    renderInfraSelectors();
-    window._updateGridFilters();
-  };
-
-  renderInfraSelectors();
-  updateGridFilters();
+  // Usar funciones de nivel de módulo (no redefine closures aquí)
+  _doInfraSelectors();
+  _doMapFilter();
 
   // ─────────────────────────────────────────────────────────────────────────
   // ☁️  FORZAR SINCRONIZACIÓN A LA NUBE — sube todo lo local a Supabase

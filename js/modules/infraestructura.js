@@ -101,6 +101,10 @@ export async function renderInfraestructura(container) {
         <h2 class="section-title">Infraestructura</h2>
         <p class="section-subtitle">Gestión de edificios, pabellones y habitaciones</p>
       </div>
+      <button class="btn btn-primary" onclick="window.openCheckinEmpresa()"
+        style="background:linear-gradient(135deg,#276749,#38a169);border:none;font-weight:700;font-size:13px;display:flex;align-items:center;gap:6px">
+        ✅ Check-in por Empresa
+      </button>
     </div>
 
     <div class="tab-bar" id="infra-tabs">
@@ -110,6 +114,50 @@ export async function renderInfraestructura(container) {
     </div>
 
     <div id="infra-content"></div>
+
+    <!-- ═══════════════════════════════════════════════════════════════════
+         MODAL CHECK-IN POR EMPRESA
+    ═══════════════════════════════════════════════════════════════════ -->
+    <div class="modal-overlay" id="checkin-empresa-modal">
+      <div class="modal" style="max-width:700px;width:95vw">
+        <div class="modal-header" style="background:linear-gradient(135deg,#1a202c,#2d3748);color:#fff;border-radius:var(--radius-lg) var(--radius-lg) 0 0">
+          <div class="modal-header-icon" style="background:rgba(104,211,145,0.25);font-size:22px">✅</div>
+          <div style="flex:1">
+            <h3 style="font-size:16px;font-weight:700;color:#fff">Check-in por Empresa</h3>
+            <p style="font-size:12px;color:rgba(255,255,255,0.65)">Confirmar llegada masiva de trabajadores</p>
+          </div>
+          <button class="modal-close btn" onclick="window.closeCheckinEmpresa()" style="color:#fff">✕</button>
+        </div>
+
+        <!-- Barra de búsqueda y empresa selector -->
+        <div style="padding:14px 16px;background:#f8fafc;border-bottom:1px solid var(--border);display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          <input type="text" id="ci-search" class="form-input" placeholder="🔍 Buscar trabajador, RUT..."
+            style="flex:1;min-width:180px;height:36px" oninput="window._ciFilter()">
+          <select id="ci-company-filter" class="form-select" style="min-width:180px;height:36px" onchange="window._ciFilter()">
+            <option value="">— Todas las empresas —</option>
+          </select>
+          <span id="ci-counter" style="font-size:12px;font-weight:700;color:#4a5568;white-space:nowrap"></span>
+        </div>
+
+        <!-- Lista de empresas + trabajadores pendientes -->
+        <div id="ci-body" style="max-height:55vh;overflow-y:auto;padding:14px 16px"></div>
+
+        <!-- Footer -->
+        <div class="modal-footer" style="justify-content:space-between;flex-wrap:wrap;gap:8px">
+          <div style="font-size:12px;color:var(--text-secondary)">
+            🔵 AUTORIZADO &nbsp;|&nbsp; 🟢 PRESENTE &nbsp;|&nbsp; 🔴 SIN CHECK-IN
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-secondary" onclick="window.closeCheckinEmpresa()">Cerrar</button>
+            <button class="btn btn-primary" id="ci-confirm-all-btn"
+              style="background:linear-gradient(135deg,#276749,#38a169);border:none"
+              onclick="window._ciConfirmSelected()">
+              ✅ Confirmar Check-in Seleccionados
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <div class="modal-overlay" id="building-modal">
       <div class="modal">
@@ -1208,7 +1256,253 @@ function setupInfraHandlers() {
     }
   };
 
+  // ══════════════════════════════════════════════════════════════════════════
+  // ✅ CHECK-IN POR EMPRESA — Confirmar llegada masiva de trabajadores
+  // ══════════════════════════════════════════════════════════════════════════
 
+  // Estado interno del modal
+  let _ciAllWorkers = [];   // [{roomId, bedKey, occupant, rut, company, shift, management, present, checkinAuthorized}]
+  let _ciSelected  = new Set(); // Set de "roomId__bedKey" seleccionados para check-in
+
+  window.openCheckinEmpresa = async () => {
+    const modal = document.getElementById('checkin-empresa-modal');
+    if (!modal) return;
+
+    // Cargar todas las habitaciones
+    const rooms = await getAll('rooms').catch(() => []);
+
+    // Construir lista de trabajadores con cama asignada
+    _ciAllWorkers = [];
+    _ciSelected   = new Set();
+
+    rooms.forEach(r => {
+      ['day', 'night', 'extra'].forEach(bedKey => {
+        const bed = r.beds?.[bedKey];
+        if (!bed?.occupant) return;
+        _ciAllWorkers.push({
+          roomId:            r.id,
+          roomNumber:        r.number,
+          bedKey,
+          occupant:          bed.occupant,
+          rut:               bed.rut || '',
+          company:           (bed.company || '').trim(),
+          shift:             bed.shift || '',
+          management:        bed.management || bed.gerencia || '',
+          present:           !!bed.present,
+          checkinAuthorized: !!bed.checkinAuthorized,
+          checkoutPending:   !!bed.checkoutPending,
+          arrivalDate:       bed.arrivalDate || '',
+          departureDate:     bed.departureDate || '',
+        });
+      });
+    });
+
+    // Rellenar selector de empresas
+    const companies = [...new Set(_ciAllWorkers.map(w => w.company).filter(Boolean))].sort();
+    const sel = document.getElementById('ci-company-filter');
+    if (sel) {
+      sel.innerHTML = '<option value="">— Todas las empresas —</option>' +
+        companies.map(c => `<option value="${c}">${c}</option>`).join('');
+    }
+
+    // Limpiar buscador
+    const inp = document.getElementById('ci-search');
+    if (inp) inp.value = '';
+
+    _ciRender(_ciAllWorkers);
+    modal.classList.add('visible');
+  };
+
+  window.closeCheckinEmpresa = () => {
+    document.getElementById('checkin-empresa-modal')?.classList.remove('visible');
+  };
+
+  // Render del cuerpo del modal — agrupa por empresa
+  function _ciRender(workers) {
+    const body = document.getElementById('ci-body');
+    if (!body) return;
+
+    // Contar pendientes
+    const pending = workers.filter(w => !w.present && !w.checkoutPending);
+    const counter = document.getElementById('ci-counter');
+    if (counter) counter.textContent = `${pending.length} pendientes · ${workers.filter(w=>w.present).length} presentes`;
+
+    if (workers.length === 0) {
+      body.innerHTML = `<div style="text-align:center;padding:48px 16px;color:#94a3b8">
+        <div style="font-size:3rem;margin-bottom:12px">✅</div>
+        <div style="font-size:15px;font-weight:700">Sin trabajadores pendientes</div>
+        <div style="font-size:12px;margin-top:6px">Todos han hecho check-in o no hay asignaciones</div>
+      </div>`;
+      return;
+    }
+
+    // Agrupar por empresa
+    const byCompany = {};
+    workers.forEach(w => {
+      const key = w.company || '(Sin empresa)';
+      if (!byCompany[key]) byCompany[key] = [];
+      byCompany[key].push(w);
+    });
+
+    const normalizeCompany = n => n ? n.trim().replace(/\b\w/g, c => c.toUpperCase()) : '(Sin empresa)';
+
+    let html = '';
+    Object.entries(byCompany).sort(([a],[b]) => a.localeCompare(b)).forEach(([company, ws]) => {
+      const pendingWs = ws.filter(w => !w.present && !w.checkoutPending);
+      const presentWs = ws.filter(w => w.present);
+      const allPendingIds = pendingWs.map(w => `${w.roomId}__${w.bedKey}`);
+      const companyKey = encodeURIComponent(company);
+
+      html += `
+      <div style="margin-bottom:16px;border:1.5px solid #e2e8f0;border-radius:14px;overflow:hidden">
+        <!-- Header empresa -->
+        <div style="background:linear-gradient(135deg,#f7f8ff,#eef0ff);padding:12px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <div style="flex:1">
+            <div style="font-size:14px;font-weight:800;color:#1a202c">${normalizeCompany(company)}</div>
+            <div style="font-size:11px;color:#64748b;margin-top:2px">
+              ${ws.length} trabajadores · <span style="color:#276749;font-weight:700">${presentWs.length} presentes</span> · <span style="color:#c53030;font-weight:700">${pendingWs.length} pendientes</span>
+            </div>
+          </div>
+          ${pendingWs.length > 0 ? `
+          <button style="background:linear-gradient(135deg,#276749,#38a169);color:#fff;border:none;border-radius:8px;padding:6px 14px;font-size:12px;font-weight:700;cursor:pointer"
+            onclick="window._ciSelectCompany('${companyKey}', ${JSON.stringify(allPendingIds)})">
+            ☑️ Seleccionar todos
+          </button>` : ''}
+        </div>
+
+        <!-- Tabla de trabajadores -->
+        <table style="width:100%;border-collapse:collapse">
+          <thead>
+            <tr style="background:#f8fafc">
+              <th style="padding:6px 12px;font-size:9px;text-transform:uppercase;color:#718096;text-align:left;width:32px"></th>
+              <th style="padding:6px 12px;font-size:9px;text-transform:uppercase;color:#718096;text-align:left">Trabajador</th>
+              <th style="padding:6px 4px;font-size:9px;text-transform:uppercase;color:#718096;text-align:center;width:70px">Hab.</th>
+              <th style="padding:6px 4px;font-size:9px;text-transform:uppercase;color:#718096;text-align:center;width:60px">Cama</th>
+              <th style="padding:6px 12px;font-size:9px;text-transform:uppercase;color:#718096;text-align:center;width:80px">Estado</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${ws.map((w, i) => {
+              const wid = `${w.roomId}__${w.bedKey}`;
+              const isSelected = _ciSelected.has(wid);
+              const isPending  = !w.present && !w.checkoutPending;
+              const bedLabel   = w.bedKey === 'day' ? '☀️ Día' : w.bedKey === 'night' ? '🌙 Noche' : '➕ Extra';
+              const stateIcon  = w.present ? '🟢 Presente' : w.checkoutPending ? '🟡 Salida' : w.checkinAuthorized ? '🔵 Autorizado' : '🔴 Pendiente';
+              const rowBg      = i % 2 === 0 ? '#fff' : '#fafafa';
+
+              return `<tr style="background:${rowBg};border-bottom:1px solid #f1f5f9">
+                <td style="padding:8px 12px">
+                  ${isPending ? `<input type="checkbox" data-wid="${wid}" style="width:16px;height:16px;accent-color:#38a169;cursor:pointer"
+                    ${isSelected ? 'checked' : ''}
+                    onchange="window._ciToggle('${wid}', this.checked)">` : ''}
+                </td>
+                <td style="padding:8px 12px">
+                  <div style="font-size:13px;font-weight:700;color:#1a202c">${w.occupant.split('(')[0].trim()}</div>
+                  <div style="font-size:10px;color:#718096">${w.rut ? 'RUT: ' + w.rut : ''} ${w.management ? '· ' + w.management : ''}</div>
+                </td>
+                <td style="padding:8px 4px;text-align:center;font-size:12px;font-weight:700;color:#2d3748">Hab.${w.roomNumber}</td>
+                <td style="padding:8px 4px;text-align:center;font-size:11px;color:#4a5568">${bedLabel}</td>
+                <td style="padding:8px 12px;text-align:center">
+                  <span style="font-size:10px;font-weight:700;white-space:nowrap">${stateIcon}</span>
+                </td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>`;
+    });
+
+    body.innerHTML = html;
+  }
+
+  // Filtro de búsqueda + empresa
+  window._ciFilter = () => {
+    const query   = (document.getElementById('ci-search')?.value || '').toLowerCase().trim();
+    const company = document.getElementById('ci-company-filter')?.value || '';
+
+    const filtered = _ciAllWorkers.filter(w => {
+      const matchCompany = !company || w.company === company;
+      const matchQuery   = !query ||
+        w.occupant.toLowerCase().includes(query) ||
+        w.rut.toLowerCase().includes(query) ||
+        w.management.toLowerCase().includes(query) ||
+        w.roomNumber?.toString().includes(query);
+      return matchCompany && matchQuery;
+    });
+    _ciRender(filtered);
+  };
+
+  // Toggle individual
+  window._ciToggle = (wid, checked) => {
+    if (checked) _ciSelected.add(wid);
+    else         _ciSelected.delete(wid);
+    // Actualizar counter
+    const counter = document.getElementById('ci-counter');
+    if (counter) {
+      const pending = _ciAllWorkers.filter(w => !w.present && !w.checkoutPending).length;
+      counter.textContent = `${pending} pendientes · ${_ciSelected.size} seleccionados`;
+    }
+  };
+
+  // Seleccionar TODOS de una empresa
+  window._ciSelectCompany = (encodedCompany, wids) => {
+    const company = decodeURIComponent(encodedCompany);
+    // ¿Ya están todos seleccionados? → deseleccionar
+    const allSelected = wids.every(id => _ciSelected.has(id));
+    if (allSelected) {
+      wids.forEach(id => _ciSelected.delete(id));
+    } else {
+      wids.forEach(id => _ciSelected.add(id));
+    }
+    window._ciFilter(); // Re-render con filtro actual
+  };
+
+  // CONFIRMAR CHECK-IN de los seleccionados
+  window._ciConfirmSelected = async () => {
+    if (_ciSelected.size === 0) {
+      showToast('Selecciona al menos un trabajador', 'warn');
+      return;
+    }
+
+    const btn = document.getElementById('ci-confirm-all-btn');
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Confirmando...'; }
+
+    let confirmed = 0;
+    const now = new Date().toISOString();
+    const rooms = await getAll('rooms').catch(() => []);
+
+    const roomsById = Object.fromEntries(rooms.map(r => [String(r.id), r]));
+    const toUpdate  = new Set();
+
+    for (const wid of _ciSelected) {
+      const [roomId, bedKey] = wid.split('__');
+      const r = roomsById[roomId];
+      if (!r?.beds?.[bedKey]?.occupant) continue;
+
+      r.beds[bedKey].present           = true;
+      r.beds[bedKey].checkinAuthorized = true;
+      r.beds[bedKey].checkinAt         = now;
+      r.status = 'occupied';
+      toUpdate.add(roomId);
+      confirmed++;
+    }
+
+    // Guardar todas las habitaciones modificadas
+    for (const roomId of toUpdate) {
+      const r = roomsById[roomId];
+      await put('rooms', r).catch(() => {});
+      _updateRoomInCache?.(r);
+    }
+
+    if (btn) { btn.disabled = false; btn.textContent = '✅ Confirmar Check-in Seleccionados'; }
+
+    showToast(`✅ Check-in confirmado para ${confirmed} trabajador${confirmed !== 1 ? 'es' : ''}`, 'success');
+    _ciSelected.clear();
+
+    // Refrescar el modal con los datos actualizados
+    await window.openCheckinEmpresa();
+    window._renderGrid?.();
+  };
 
 
 

@@ -532,85 +532,234 @@
                     });
                 }
 
+                // Leer valores del formulario para pre-rellenar
+                var companyVal  = (document.getElementById('pub-company')?.value || '').trim();
+                var contractVal = (document.getElementById('pub-contract-number')?.value || '').trim();
+                var gerenciaVal = (document.getElementById('pub-gerencia')?.value || '').trim();
+                var today       = new Date().toISOString().split('T')[0];
+
                 var wb = new ExcelJS.Workbook();
                 wb.creator  = 'PC Hotelería';
                 wb.created  = new Date();
 
-                var ws = wb.addWorksheet('Solicitud Alojamiento', {
-                    views: [{ showGridLines: true }]
+                var ws = wb.addWorksheet('Nómina Trabajadores', {
+                    pageSetup: { paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1 },
+                    views: [{ showGridLines: true, state: 'frozen', xSplit: 0, ySplit: 6 }]
                 });
 
-                var colNames  = ['FECHA','Empresa','Ncontrato','Gerencia','RazonSocial','NombreHuesped','RUTHuesped','CONTACTO','HABITACION','NombreTurno','SistemaTurno','TipoTurno','Estado','FechaInicio','FechaTermino','Sexo','OBSERVACION'];
-                var colWidths = [14, 20, 13, 20, 34, 28, 14, 14, 12, 12, 14, 12, 12, 14, 14, 8, 28];
-                ws.columns = colNames.map(function(n, i){ return { header:'', width: colWidths[i] }; });
+                // ─── Columnas ────────────────────────────────────────────────────
+                // Col: A=Fecha  B=Empresa  C=N°Contrato  D=Gerencia  E=RazonSocial
+                //      F=NombreCompleto  G=RUT  H=Contacto  I=Habitacion
+                //      J=NombreTurno  K=SistemaTurno  L=TipoTurno  M=Estado
+                //      N=FechaInicio  O=FechaTermino  P=Sexo  Q=Observacion
+                ws.columns = [
+                    { key:'A', width:14 }, { key:'B', width:24 }, { key:'C', width:14 },
+                    { key:'D', width:24 }, { key:'E', width:36 }, { key:'F', width:30 },
+                    { key:'G', width:14 }, { key:'H', width:14 }, { key:'I', width:12 },
+                    { key:'J', width:12 }, { key:'K', width:14 }, { key:'L', width:12 },
+                    { key:'M', width:13 }, { key:'N', width:14 }, { key:'O', width:14 },
+                    { key:'P', width:8  }, { key:'Q', width:28 }
+                ];
 
-                ws.getRow(1).height = 28;
-                ws.getRow(2).height = 28;
-                ws.getRow(3).height = 28;
+                var NCOLS = 17;
 
+                // ─── FILA 1-3: ENCABEZADO CON LOGO ───────────────────────────────
                 for (var r = 1; r <= 3; r++) {
-                    for (var c = 1; c <= colNames.length; c++) {
+                    ws.getRow(r).height = r === 2 ? 44 : 22;
+                    for (var c = 1; c <= NCOLS; c++) {
                         ws.getRow(r).getCell(c).fill = { type:'pattern', pattern:'solid', fgColor:{ argb: ARAMARK_RED } };
                     }
                 }
 
-                ws.mergeCells('E1:Q3');
-                var titleCell = ws.getCell('E1');
-                titleCell.value     = 'SOLICITUD DE ALOJAMIENTO\nPC HOTELERÍA — Turno ' + turnoTitle;
-                titleCell.font      = { name:'Calibri', bold:true, size:17, color:{ argb: WHITE } };
-                titleCell.fill      = { type:'pattern', pattern:'solid', fgColor:{ argb: ARAMARK_RED } };
-                titleCell.alignment = { horizontal:'center', vertical:'middle', wrapText:true };
-
+                // Insertar logo
                 try {
                     var resp    = await fetch('./aramark.png');
                     var buffer  = await resp.arrayBuffer();
                     var imageId = wb.addImage({ buffer: buffer, extension: 'png' });
-                    ws.addImage(imageId, { tl:{ col:0.2, row:0.2 }, ext:{ width:170, height:75 } });
+                    ws.addImage(imageId, { tl:{ col:0.1, row:0.1 }, ext:{ width:175, height:80 } });
                 } catch(e) {
                     ws.mergeCells('A1:D3');
-                    var logoCell = ws.getCell('A1');
-                    logoCell.value     = 'ARAMARK';
-                    logoCell.font      = { name:'Calibri', bold:true, size:20, color:{ argb: WHITE } };
-                    logoCell.fill      = { type:'pattern', pattern:'solid', fgColor:{ argb: ARAMARK_RED } };
-                    logoCell.alignment = { horizontal:'center', vertical:'middle' };
+                    var logoCellX = ws.getCell('A1');
+                    logoCellX.value     = 'ARAMARK';
+                    logoCellX.font      = { name:'Calibri', bold:true, size:22, color:{ argb: WHITE } };
+                    logoCellX.fill      = { type:'pattern', pattern:'solid', fgColor:{ argb: ARAMARK_RED } };
+                    logoCellX.alignment = { horizontal:'center', vertical:'middle' };
                 }
 
-                ws.getRow(4).height = 30;
-                ws.mergeCells('A4:C4');
-                var angloLabel = ws.getCell('A4');
-                angloLabel.value     = 'Administrador de Contrato Anglo:';
-                angloLabel.font      = { name:'Calibri', bold:true, size:12, color:{ argb: WHITE } };
-                angloLabel.fill      = { type:'pattern', pattern:'solid', fgColor:{ argb: ARAMARK_DARK } };
-                angloLabel.alignment = { horizontal:'left', vertical:'middle' };
-                angloLabel.border    = ALL_BORDERS;
+                // Título centrado
+                ws.mergeCells('E1:Q3');
+                var titleCell = ws.getCell('E1');
+                titleCell.value     = 'SOLICITUD DE ALOJAMIENTO\nPC HOTELERÍA  ·  Turno ' + turnoTitle;
+                titleCell.font      = { name:'Calibri', bold:true, size:18, color:{ argb: WHITE } };
+                titleCell.fill      = { type:'pattern', pattern:'solid', fgColor:{ argb: ARAMARK_RED } };
+                titleCell.alignment = { horizontal:'center', vertical:'middle', wrapText:true };
 
-                ws.mergeCells('D4:Q4');
-                var angloValue = ws.getCell('D4');
-                angloValue.value     = '';
-                angloValue.font      = { name:'Calibri', size:12, italic:true, color:{ argb:'FF999999' } };
-                angloValue.fill      = { type:'pattern', pattern:'solid', fgColor:{ argb:'FFFFFAF0' } };
-                angloValue.alignment = { horizontal:'left', vertical:'middle' };
-                angloValue.border    = { top:{ style:'medium', color:{argb:ARAMARK_DARK} }, left:{ style:'medium', color:{argb:ARAMARK_DARK} }, bottom:{ style:'medium', color:{argb:ARAMARK_DARK} }, right:{ style:'medium', color:{argb:ARAMARK_DARK} } };
-                angloValue.note = { texts:[{ font:{ size:10 }, text:'Ingrese aquí el nombre del Administrador de Contrato Anglo' }] };
+                // ─── FILA 4: ADMINISTRADOR ANGLO ─────────────────────────────────
+                ws.getRow(4).height = 28;
+                for (var c4 = 1; c4 <= NCOLS; c4++) {
+                    ws.getRow(4).getCell(c4).fill = { type:'pattern', pattern:'solid', fgColor:{ argb: ARAMARK_DARK } };
+                    ws.getRow(4).getCell(c4).border = ALL_BORDERS;
+                }
+                ws.mergeCells('A4:D4');
+                var angloLb = ws.getCell('A4');
+                angloLb.value     = '👔 Administrador de Contrato Anglo:';
+                angloLb.font      = { name:'Calibri', bold:true, size:11, color:{ argb: WHITE } };
+                angloLb.alignment = { horizontal:'left', vertical:'middle' };
 
-                ws.getRow(5).height = 22;
-                colNames.forEach(function(col, i) {
-                    styleHeader(ws.getRow(5).getCell(i + 1));
-                    ws.getRow(5).getCell(i + 1).value = col;
+                ws.mergeCells('E4:Q4');
+                var angloVal = ws.getCell('E4');
+                angloVal.value     = window.angloAdmin || '';
+                angloVal.font      = { name:'Calibri', size:12, italic:!window.angloAdmin, color:{ argb: window.angloAdmin ? '00000000' : 'FF999999' } };
+                angloVal.fill      = { type:'pattern', pattern:'solid', fgColor:{ argb:'FFFFFAF0' } };
+                angloVal.alignment = { horizontal:'left', vertical:'middle' };
+                angloVal.border    = { top:{ style:'medium', color:{argb:ARAMARK_DARK} }, bottom:{ style:'medium', color:{argb:ARAMARK_DARK} } };
+                if (!window.angloAdmin) angloVal.value = 'Ingrese aquí el nombre del Administrador de Contrato AngloAmerican';
+
+                // ─── FILA 5: CABECERAS ────────────────────────────────────────────
+                ws.getRow(5).height = 30;
+                var headers = [
+                    'FECHA','EMPRESA','N° CONTRATO','GERENCIA','RAZÓN SOCIAL',
+                    'NOMBRE COMPLETO HUÉSPED','RUT','CONTACTO','HAB.',
+                    'TURNO','SISTEMA','TIPO','ESTADO',
+                    'FECHA INICIO','FECHA TÉRMINO','SEXO','OBSERVACIÓN'
+                ];
+                headers.forEach(function(h, i) {
+                    var cell = ws.getRow(5).getCell(i + 1);
+                    cell.value = h;
+                    styleHeader(cell);
                 });
 
-                ws.getRow(6).height = 20;
-                var sample = ['2026-04-04','Aramark','12345','Minería','Aramark Servicios Mineros S.A.','Juan Perez','12345678-9','987654321','','7x7','Sistema A','Dia','Pendiente','2026-04-10','2026-04-17','M','Ninguna'];
-                sample.forEach(function(val, i) {
-                    var cell = ws.getRow(6).getCell(i + 1);
-                    styleData(cell);
-                    cell.value = val;
-                });
+                // ─── FILAS 6+: 30 FILAS EDITABLES ────────────────────────────────
+                var FILAS = 30;
+                var shiftOpts_A = '"7x7,8x6,14x14,Otro"';
+                var shiftOpts_B = '"4x3,Otro"';
+                var shiftOpts   = isA ? shiftOpts_A : shiftOpts_B;
 
+                for (var row = 6; row <= 5 + FILAS; row++) {
+                    ws.getRow(row).height = 20;
+
+                    // Col A: Fecha (pre-rellenada con hoy)
+                    var cellA = ws.getRow(row).getCell(1);
+                    cellA.value  = today;
+                    cellA.numFmt = 'yyyy-mm-dd';
+                    styleData(cellA);
+                    cellA.font = { name:'Calibri', size:10, color:{ argb: GRAY_TEXT } };
+
+                    // Col B: Empresa (pre-rellenada)
+                    var cellB = ws.getRow(row).getCell(2);
+                    if (companyVal) cellB.value = companyVal;
+                    styleData(cellB);
+
+                    // Col C: Contrato (pre-rellenado)
+                    var cellC = ws.getRow(row).getCell(3);
+                    if (contractVal) cellC.value = contractVal;
+                    styleData(cellC);
+
+                    // Col D: Gerencia (pre-rellenada)
+                    var cellD = ws.getRow(row).getCell(4);
+                    if (gerenciaVal) cellD.value = gerenciaVal;
+                    styleData(cellD);
+
+                    // Col E: Razón Social
+                    styleData(ws.getRow(row).getCell(5));
+
+                    // Col F: Nombre huésped
+                    var cellF = ws.getRow(row).getCell(6);
+                    styleData(cellF);
+                    cellF.fill = { type:'pattern', pattern:'solid', fgColor:{ argb:'FFE6F7FF' } }; // azul claro
+
+                    // Col G: RUT
+                    var cellG = ws.getRow(row).getCell(7);
+                    styleData(cellG);
+                    cellG.fill = { type:'pattern', pattern:'solid', fgColor:{ argb:'FFE6F7FF' } };
+                    cellG.note = { texts:[{ text:'Formato: 12345678-9', font:{ size:9 } }] };
+
+                    // Col H: Contacto
+                    styleData(ws.getRow(row).getCell(8));
+
+                    // Col I: Habitación (dejar vacío — asigna el sistema)
+                    var cellI = ws.getRow(row).getCell(9);
+                    styleData(cellI);
+                    cellI.fill = { type:'pattern', pattern:'solid', fgColor:{ argb:'FFF5F5F5' } };
+                    cellI.note = { texts:[{ text:'Opcional — dejar vacío para auto-asignación', font:{ size:9 } }] };
+
+                    // Col J: Nombre Turno (dropdown)
+                    var cellJ = ws.getRow(row).getCell(10);
+                    styleData(cellJ);
+                    if (isA) cellJ.value = '7x7';
+                    else     cellJ.value = '4x3';
+                    ws.getRow(row).getCell(10).dataValidation = {
+                        type: 'list', allowBlank: true, showDropDown: false,
+                        formulae: [shiftOpts],
+                        showErrorMessage: true, errorTitle: 'Turno inválido', error: 'Seleccione de la lista'
+                    };
+
+                    // Col K: Sistema Turno (dropdown)
+                    var cellK = ws.getRow(row).getCell(11);
+                    styleData(cellK);
+                    ws.getRow(row).getCell(11).dataValidation = {
+                        type: 'list', allowBlank: true, showDropDown: false,
+                        formulae: ['"Sistema A,Sistema B,Sistema C,Otro"'],
+                        showErrorMessage: false
+                    };
+
+                    // Col L: Tipo Turno (dropdown)
+                    var cellL = ws.getRow(row).getCell(12);
+                    styleData(cellL);
+                    cellL.value = 'Dia';
+                    ws.getRow(row).getCell(12).dataValidation = {
+                        type: 'list', allowBlank: true, showDropDown: false,
+                        formulae: ['"Dia,Noche,Mixto"'],
+                        showErrorMessage: true, errorTitle: 'Tipo inválido', error: 'Seleccione: Dia, Noche o Mixto'
+                    };
+
+                    // Col M: Estado (dropdown)
+                    var cellM = ws.getRow(row).getCell(13);
+                    styleData(cellM);
+                    cellM.value = 'Pendiente';
+                    ws.getRow(row).getCell(13).dataValidation = {
+                        type: 'list', allowBlank: true, showDropDown: false,
+                        formulae: ['"Pendiente,Confirmado,Cancelado"'],
+                        showErrorMessage: true, errorTitle: 'Estado inválido', error: 'Seleccione de la lista'
+                    };
+
+                    // Col N: Fecha Inicio
+                    var cellN = ws.getRow(row).getCell(14);
+                    styleData(cellN);
+                    cellN.numFmt = 'yyyy-mm-dd';
+                    cellN.fill = { type:'pattern', pattern:'solid', fgColor:{ argb:'FFF0FFF4' } };
+
+                    // Col O: Fecha Término
+                    var cellO = ws.getRow(row).getCell(15);
+                    styleData(cellO);
+                    cellO.numFmt = 'yyyy-mm-dd';
+                    cellO.fill = { type:'pattern', pattern:'solid', fgColor:{ argb:'FFFFF5F5' } };
+
+                    // Col P: Sexo (dropdown)
+                    var cellP = ws.getRow(row).getCell(16);
+                    styleData(cellP);
+                    ws.getRow(row).getCell(16).dataValidation = {
+                        type: 'list', allowBlank: true, showDropDown: false,
+                        formulae: ['"M,F"'],
+                        showErrorMessage: true, errorTitle: 'Sexo inválido', error: 'Ingrese M (Masculino) o F (Femenino)'
+                    };
+
+                    // Col Q: Observación
+                    styleData(ws.getRow(row).getCell(17));
+                }
+
+                // ─── LEYENDA de colores (fila final) ─────────────────────────────
+                var legendRow = 5 + FILAS + 2;
+                ws.getRow(legendRow).height = 16;
+                ws.mergeCells('A' + legendRow + ':D' + legendRow);
+                ws.getCell('A' + legendRow).value = '🔵 Azul = Datos obligatorios del trabajador   🟢 Verde = Fecha inicio   🔴 Rojo = Fecha término';
+                ws.getCell('A' + legendRow).font  = { name:'Calibri', size:8, italic:true, color:{ argb:'FF718096' } };
+
+                // ─── GENERAR Y DESCARGAR ──────────────────────────────────────────
                 var xlsBuffer = await wb.xlsx.writeBuffer();
                 var blob      = new Blob([xlsBuffer], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
                 var suffix    = turnoTitle.replace(/[^a-zA-Z0-9x]/gi,'_');
-                var fname     = 'formato_solicitud_turno_' + suffix + '_' + new Date().toISOString().split('T')[0] + '.xlsx';
+                var fname     = 'plantilla_solicitud_' + suffix + '_' + today + '.xlsx';
 
                 if (window.showSaveFilePicker) {
                     try {
@@ -645,6 +794,7 @@
             }
         };
     </script>
+
 
     <!-- handleFileUpload y submitRequest (necesitan db.js) -->
     <script type="module">

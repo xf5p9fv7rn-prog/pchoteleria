@@ -762,45 +762,41 @@
             document.getElementById('t-departure').textContent    = foundBed.departureDate? toChileanDate(foundBed.departureDate): 'Por definir';
             document.getElementById('t-id').textContent           = Math.floor(100000 + Math.random() * 900000);
 
-            // ── Determinar estado ────────────────────────────────────
-            const isPresent  = !!foundBed.present;
-            const isCheckout = !!foundBed.checkoutPending;
+            // ── Determinar estado y mostrar sección correcta ──────────
+            const isAuthorized  = !!foundBed.checkinAuthorized;
+            const isPresent     = !!foundBed.present;
+            const isCheckout    = !!foundBed.checkoutPending;
 
-            document.getElementById('checkin-section').style.display        = (!isPresent && !isCheckout) ? 'block' : 'none';
-            document.getElementById('success-section').style.display        = (isPresent && !isCheckout)  ? 'block' : 'none';
-            document.getElementById('checkout-done-section').style.display  = isCheckout                  ? 'block' : 'none';
+            // Reset todas las secciones
+            document.getElementById('not-authorized-section').style.display  = 'none';
+            document.getElementById('checkin-section').style.display          = 'none';
+            document.getElementById('success-section').style.display          = 'none';
+            document.getElementById('checkout-done-section').style.display    = 'none';
 
-            if (isPresent && !isCheckout && foundBed.lastCheckIn) {
-                const d = new Date(foundBed.lastCheckIn);
-                document.getElementById('t-time').textContent = isNaN(d) ? '--:--' : d.toLocaleTimeString('es-CL', { hour:'2-digit', minute:'2-digit' });
-            }
-
-            // ── Mostrar ticket ────────────────────────────────────────
-            setProgress(100, '✅ ¡Habitación encontrada!');
-            await new Promise(r => setTimeout(r, 400)); // pequeña pausa visual
-            setProgress(0);
-            // Determinar qué sección del ticket mostrar
-            const foundBedFinal = window._currentBedData;
-            const isAuthorized  = foundBedFinal?.checkinAuthorized === true;
-            const isPresent     = foundBedFinal?.present === true;
-
-            document.getElementById('not-authorized-section').style.display = 'none';
-            document.getElementById('checkin-section').style.display        = 'none';
-            document.getElementById('success-section').style.display        = 'none';
-            document.getElementById('checkout-done-section').style.display  = 'none';
-
-            if (isPresent || foundBedFinal?.checkoutPending) {
+            if (isCheckout) {
+                // Ya confirmó salida
+                document.getElementById('checkout-done-section').style.display = 'block';
+            } else if (isPresent) {
+                // Ya hizo check-in → mostrar éxito + opción de salida
                 document.getElementById('success-section').style.display = 'block';
-                const ci = foundBedFinal?.lastCheckIn;
-                document.getElementById('t-time').textContent = ci
-                    ? new Date(ci).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' })
-                    : 'ya registrado';
+                if (foundBed.lastCheckIn) {
+                    const d = new Date(foundBed.lastCheckIn);
+                    document.getElementById('t-time').textContent = isNaN(d)
+                        ? 'ya registrado'
+                        : d.toLocaleTimeString('es-CL', { hour:'2-digit', minute:'2-digit' });
+                }
             } else if (isAuthorized) {
+                // Autorizado: puede confirmar llegada
                 document.getElementById('checkin-section').style.display = 'block';
             } else {
+                // Aún no autorizado: ir a recepción
                 document.getElementById('not-authorized-section').style.display = 'block';
             }
 
+            // ── Mostrar vista ticket ──────────────────────────────────
+            setProgress(100, '✅ ¡Habitación encontrada!');
+            await new Promise(r => setTimeout(r, 400));
+            setProgress(0);
             document.getElementById('search-view').style.display = 'none';
             document.getElementById('ticket-view').style.display = 'block';
 

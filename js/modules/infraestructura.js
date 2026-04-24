@@ -90,7 +90,7 @@ export async function renderInfraestructura(container) {
   // Si el usuario navega a otro módulo y vuelve, renderInfraestructura crea modales
   // nuevos con los mismos IDs. Los anteriores quedan "flotando" en document.body
   // → getElementById devuelve el muerto → los botones "cerrar" dejan de funcionar.
-  ['room-detail-modal', 'manual-assign-modal', 'asig-camas-modal'].forEach(id => {
+  ['room-detail-modal', 'manual-assign-modal', 'asig-camas-modal', 'autorizar-empresa-modal'].forEach(id => {
     const old = document.getElementById(id);
     if (old && old.parentNode === document.body) old.remove();
   });
@@ -107,10 +107,16 @@ export async function renderInfraestructura(container) {
         <h2 class="section-title">Infraestructura</h2>
         <p class="section-subtitle">Gestión de edificios, pabellones y habitaciones</p>
       </div>
-      <button class="btn btn-primary" onclick="window.openCheckinEmpresa()"
-        style="background:linear-gradient(135deg,#276749,#38a169);border:none;font-weight:700;font-size:13px;display:flex;align-items:center;gap:6px">
-        ✅ Check-in por Empresa
-      </button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn" onclick="window.openAutorizarEmpresa()"
+          style="background:linear-gradient(135deg,#b7791f,#d69e2e);color:#fff;border:none;font-weight:700;font-size:13px;display:flex;align-items:center;gap:6px">
+          🔓 Autorizar Empresa
+        </button>
+        <button class="btn btn-primary" onclick="window.openCheckinEmpresa()"
+          style="background:linear-gradient(135deg,#276749,#38a169);border:none;font-weight:700;font-size:13px;display:flex;align-items:center;gap:6px">
+          ✅ Check-in por Empresa
+        </button>
+      </div>
     </div>
 
     <div class="tab-bar" id="infra-tabs">
@@ -120,6 +126,52 @@ export async function renderInfraestructura(container) {
     </div>
 
     <div id="infra-content"></div>
+
+    <!-- ═══════════════════════════════════════════════════════════════════
+         MODAL AUTORIZAR POR EMPRESA
+    ═══════════════════════════════════════════════════════════════════ -->
+    <div class="modal-overlay" id="autorizar-empresa-modal">
+      <div class="modal" style="max-width:700px;width:95vw">
+        <div class="modal-header" style="background:linear-gradient(135deg,#744210,#b7791f);color:#fff;border-radius:var(--radius-lg) var(--radius-lg) 0 0">
+          <div class="modal-header-icon" style="background:rgba(251,211,141,0.25);font-size:22px">🔓</div>
+          <div style="flex:1">
+            <h3 style="font-size:16px;font-weight:700;color:#fff">Autorizar Check-in por Empresa</h3>
+            <p style="font-size:12px;color:rgba(255,255,255,0.7)">Habilita a los trabajadores para que confirmen su llegada desde su celular</p>
+          </div>
+          <button class="modal-close btn" onclick="window.closeAutorizarEmpresa()" style="color:#fff">✕</button>
+        </div>
+
+        <!-- Barra filtros -->
+        <div style="padding:12px 16px;background:#fffbeb;border-bottom:1px solid #fcd34d">
+          <div style="display:flex;gap:8px;margin-bottom:8px">
+            <input type="text" id="aut-search" class="form-input" placeholder="🔍 Buscar nombre o RUT..."
+              style="flex:1;height:36px" oninput="window._autFilter()">
+            <select id="aut-company-filter" class="form-select" style="width:200px;height:36px" onchange="window._autFilter()">
+              <option value="">— Todas las empresas —</option>
+            </select>
+          </div>
+          <div id="aut-counter" style="font-size:12px;font-weight:600;color:#92400e"></div>
+        </div>
+
+        <!-- Lista -->
+        <div id="aut-body" style="max-height:55vh;overflow-y:auto;padding:14px 16px"></div>
+
+        <!-- Footer -->
+        <div class="modal-footer" style="justify-content:space-between;flex-wrap:wrap;gap:8px">
+          <div style="font-size:12px;color:#92400e">
+            🔓 Autorizado = el trabajador puede confirmar su llegada desde su celular
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-secondary" onclick="window.closeAutorizarEmpresa()">Cerrar</button>
+            <button class="btn btn-primary" id="aut-confirm-btn"
+              style="background:linear-gradient(135deg,#b7791f,#d69e2e);border:none"
+              onclick="window._autConfirmSelected()">
+              🔓 Autorizar Seleccionados
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <!-- ═══════════════════════════════════════════════════════════════════
          MODAL CHECK-IN POR EMPRESA
@@ -1564,6 +1616,260 @@ function setupInfraHandlers() {
     window._renderGrid?.();
   };
 
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // 🔓 AUTORIZAR CHECK-IN POR EMPRESA
+  // Diferencia clave vs Check-in por Empresa:
+  //   • Check-in por Empresa → el ADMIN confirma la llegada (present = true)
+  //   • Autorizar por Empresa → habilita al TRABAJADOR para hacer su propio
+  //     check-in desde mi-habitacion.html (checkinAuthorized = true)
+  // ══════════════════════════════════════════════════════════════════════════
+
+  let _autAllWorkers = [];
+  let _autSelected   = new Set();
+
+  window.openAutorizarEmpresa = async () => {
+    const modal = document.getElementById('autorizar-empresa-modal');
+    if (!modal) return;
+
+    const rooms = await getAll('rooms').catch(() => []);
+    _autAllWorkers = [];
+    _autSelected   = new Set();
+
+    rooms.forEach(r => {
+      ['day', 'night', 'extra'].forEach(bedKey => {
+        const bed = r.beds?.[bedKey];
+        if (!bed?.occupant) return;
+        _autAllWorkers.push({
+          roomId:            r.id,
+          roomNumber:        r.number,
+          bedKey,
+          occupant:          bed.occupant,
+          rut:               bed.rut || '',
+          company:           (bed.company || '').trim(),
+          shift:             bed.shift || '',
+          management:        bed.management || bed.gerencia || '',
+          present:           !!bed.present,
+          checkinAuthorized: !!bed.checkinAuthorized,
+          checkoutPending:   !!bed.checkoutPending,
+        });
+      });
+    });
+
+    // Rellenar selector de empresas
+    const companies = [...new Set(_autAllWorkers.map(w => w.company).filter(Boolean))].sort();
+    const sel = document.getElementById('aut-company-filter');
+    if (sel) {
+      sel.innerHTML = '<option value="">— Todas las empresas —</option>' +
+        companies.map(c => `<option value="${c}">${c}</option>`).join('');
+    }
+
+    const inp = document.getElementById('aut-search');
+    if (inp) inp.value = '';
+
+    _autRender(_autAllWorkers);
+    modal.classList.add('visible');
+  };
+
+  window.closeAutorizarEmpresa = () => {
+    document.getElementById('autorizar-empresa-modal')?.classList.remove('visible');
+  };
+
+  function _autRender(workers) {
+    const body = document.getElementById('aut-body');
+    if (!body) return;
+
+    const totalSinAut    = _autAllWorkers.filter(w => !w.checkinAuthorized && !w.present).length;
+    const totalAutorizados = _autAllWorkers.filter(w => w.checkinAuthorized && !w.present).length;
+    const totalPresentes  = _autAllWorkers.filter(w => w.present).length;
+    const counter = document.getElementById('aut-counter');
+    if (counter) {
+      counter.innerHTML = `
+        <span style="color:#c53030;font-weight:700">${totalSinAut} sin autorizar</span>
+        &nbsp;·&nbsp;
+        <span style="color:#b7791f;font-weight:700">${totalAutorizados} autorizados</span>
+        &nbsp;·&nbsp;
+        <span style="color:#276749;font-weight:700">${totalPresentes} ya presentes</span>
+        &nbsp;·&nbsp;
+        <span style="color:#2b6cb0;font-weight:700">${_autSelected.size} seleccionados</span>`;
+    }
+
+    if (workers.length === 0) {
+      body.innerHTML = `<div style="text-align:center;padding:48px 16px;color:#94a3b8">
+        <div style="font-size:3rem;margin-bottom:10px">🔓</div>
+        <div style="font-size:15px;font-weight:700">Sin resultados</div>
+      </div>`;
+      return;
+    }
+
+    // Agrupar por empresa
+    const byCompany = {};
+    workers.forEach(w => {
+      const key = w.company || '(Sin empresa)';
+      if (!byCompany[key]) byCompany[key] = [];
+      byCompany[key].push(w);
+    });
+
+    const cap = s => s ? s.trim().replace(/\b\w/g, c => c.toUpperCase()) : '(Sin empresa)';
+
+    let html = '';
+    Object.entries(byCompany).sort(([a],[b]) => a.localeCompare(b)).forEach(([company, ws]) => {
+      const sinAutorizar  = ws.filter(w => !w.checkinAuthorized && !w.present);
+      const yaAutorizados = ws.filter(w => w.checkinAuthorized && !w.present);
+      const presentes     = ws.filter(w => w.present);
+      const safeCompany   = company.replace(/'/g, '\\&apos;');
+
+      html += `
+      <div style="margin-bottom:14px;border:1.5px solid #fcd34d;border-radius:12px;overflow:hidden">
+        <!-- Header empresa -->
+        <div style="background:linear-gradient(90deg,#fffbeb,#fef3c7);padding:10px 14px;
+                    display:flex;align-items:center;gap:10px">
+          <div style="flex:1">
+            <div style="font-size:14px;font-weight:800;color:#1a202c">${cap(company)}</div>
+            <div style="font-size:11px;color:#92400e;margin-top:2px">
+              ${ws.length} trabajadores
+              &nbsp;·&nbsp;<span style="color:#c53030;font-weight:700">${sinAutorizar.length} sin autorizar</span>
+              &nbsp;·&nbsp;<span style="color:#b7791f;font-weight:700">${yaAutorizados.length} 🔓 autorizados</span>
+              &nbsp;·&nbsp;<span style="color:#276749;font-weight:700">${presentes.length} ✅ presentes</span>
+            </div>
+          </div>
+          ${sinAutorizar.length > 0 ? `<button
+            data-company="${safeCompany}"
+            onclick="window._autSelectCompany(this)"
+            style="background:linear-gradient(135deg,#b7791f,#d69e2e);color:#fff;border:none;
+                   border-radius:8px;padding:7px 12px;font-size:12px;font-weight:700;
+                   cursor:pointer;white-space:nowrap;flex-shrink:0">
+            🔓 Autorizar todos (${sinAutorizar.length})
+          </button>` : `<span style="font-size:20px;color:#276749">✅</span>`}
+        </div>
+
+        <!-- Trabajadores -->
+        <div>
+          ${ws.map((w, i) => {
+            const wid        = `${w.roomId}__${w.bedKey}`;
+            const isSelected = _autSelected.has(wid);
+            const canSelect  = !w.checkinAuthorized && !w.present;
+            const bedEmoji   = w.bedKey === 'day' ? '☀️' : w.bedKey === 'night' ? '🌙' : '➕';
+            const bedLabel   = w.bedKey === 'day' ? 'Día' : w.bedKey === 'night' ? 'Noche' : 'Extra';
+            const statusDot  = w.present ? '🟢' : w.checkinAuthorized ? '🔓' : '🔴';
+            const statusTxt  = w.present ? 'Presente' : w.checkinAuthorized ? 'Autorizado' : 'Sin autorizar';
+            const rowBg      = w.present ? '#f0fff4' : w.checkinAuthorized ? '#fffbeb' : isSelected ? '#fef9ec' : (i%2===0 ? '#fff' : '#fdfaf4');
+
+            return `<div style="display:flex;align-items:center;gap:10px;padding:9px 14px;
+                               background:${rowBg};border-top:1px solid #fef3c7;transition:background 0.15s">
+              <!-- Checkbox -->
+              <div style="width:24px;flex-shrink:0;text-align:center">
+                ${canSelect ? `<input type="checkbox" data-wid="${wid}"
+                  ${isSelected ? 'checked' : ''}
+                  onchange="window._autToggle('${wid}', this.checked)"
+                  style="width:17px;height:17px;accent-color:#b7791f;cursor:pointer">` :
+                  `<span style="font-size:15px">${w.present ? '✅' : '🔓'}</span>`}
+              </div>
+              <!-- Nombre + RUT -->
+              <div style="flex:1;min-width:0">
+                <div style="font-size:13px;font-weight:700;color:#1a202c;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+                  ${w.occupant.split('(')[0].trim()}
+                </div>
+                <div style="font-size:10px;color:#718096">
+                  ${w.rut ? 'RUT ' + w.rut : ''}
+                  ${w.management ? ' · ' + w.management : ''}
+                </div>
+              </div>
+              <!-- Hab -->
+              <div style="font-size:12px;font-weight:700;color:#2d3748;white-space:nowrap">Hab.${w.roomNumber}</div>
+              <!-- Cama -->
+              <div style="font-size:11px;color:#718096;white-space:nowrap">${bedEmoji} ${bedLabel}</div>
+              <!-- Estado -->
+              <div style="font-size:11px;font-weight:700;white-space:nowrap">${statusDot} ${statusTxt}</div>
+            </div>`;
+          }).join('')}
+        </div>
+      </div>`;
+    });
+
+    body.innerHTML = html;
+  }
+
+  window._autFilter = () => {
+    const query   = (document.getElementById('aut-search')?.value || '').toLowerCase().trim();
+    const company = document.getElementById('aut-company-filter')?.value || '';
+    const filtered = _autAllWorkers.filter(w => {
+      const matchC = !company || w.company === company;
+      const matchQ = !query ||
+        w.occupant.toLowerCase().includes(query) ||
+        w.rut.toLowerCase().includes(query) ||
+        w.management.toLowerCase().includes(query) ||
+        String(w.roomNumber).includes(query);
+      return matchC && matchQ;
+    });
+    _autRender(filtered);
+  };
+
+  window._autToggle = (wid, checked) => {
+    if (checked) _autSelected.add(wid);
+    else         _autSelected.delete(wid);
+    _autRender(window._autCurrentFiltered || _autAllWorkers);
+  };
+
+  window._autSelectCompany = (btn) => {
+    const company = btn.dataset.company;
+    const wids = _autAllWorkers
+      .filter(w => (w.company || '(Sin empresa)') === company && !w.checkinAuthorized && !w.present)
+      .map(w => `${w.roomId}__${w.bedKey}`);
+    const allSelected = wids.length > 0 && wids.every(id => _autSelected.has(id));
+    if (allSelected) {
+      wids.forEach(id => _autSelected.delete(id));
+    } else {
+      wids.forEach(id => _autSelected.add(id));
+    }
+    window._autFilter();
+  };
+
+  // CONFIRMAR AUTORIZACIÓN de los seleccionados
+  window._autConfirmSelected = async () => {
+    if (_autSelected.size === 0) {
+      showToast('Selecciona al menos un trabajador', 'warn');
+      return;
+    }
+
+    const btn = document.getElementById('aut-confirm-btn');
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Autorizando...'; }
+
+    let authorized = 0;
+    const now   = new Date().toISOString();
+    const rooms = await getAll('rooms').catch(() => []);
+    const roomsById = Object.fromEntries(rooms.map(r => [String(r.id), r]));
+    const toUpdate  = new Set();
+
+    for (const wid of _autSelected) {
+      const [roomId, bedKey] = wid.split('__');
+      const r = roomsById[roomId];
+      if (!r?.beds?.[bedKey]?.occupant) continue;
+
+      // Solo marcamos como AUTORIZADO — el trabajador hará el check-in él mismo
+      r.beds[bedKey].checkinAuthorized = true;
+      r.beds[bedKey].authorizedAt      = now;
+      // NO se toca present ni checkinAt
+      toUpdate.add(roomId);
+      authorized++;
+    }
+
+    for (const roomId of toUpdate) {
+      const r = roomsById[roomId];
+      await put('rooms', r).catch(() => {});
+      _updateRoomInCache?.(r);
+    }
+
+    if (btn) { btn.disabled = false; btn.textContent = '🔓 Autorizar Seleccionados'; }
+
+    showToast(
+      `🔓 ${authorized} trabajador${authorized !== 1 ? 'es' : ''} autorizado${authorized !== 1 ? 's' : ''} — ya pueden confirmar llegada desde su celular`,
+      'success'
+    );
+    _autSelected.clear();
+    await window.openAutorizarEmpresa(); // refrescar modal
+    window._renderGrid?.();
+  };
 
 
   // 🔥 MODAL ASIGNAR MANUAL 🔥

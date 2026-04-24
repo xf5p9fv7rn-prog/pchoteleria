@@ -95,6 +95,12 @@ export async function renderInfraestructura(container) {
     if (old && old.parentNode === document.body) old.remove();
   });
 
+  // 🧹 ANTI-MEMORY-LEAK: Abortar listeners anteriores de infraestructura
+  // Cada vez que se navega a este módulo y de vuelta se acumulan listeners
+  // rooms-updated causando re-renders exponenciales y lag en móvil.
+  if (window._infraAbortController) window._infraAbortController.abort();
+  window._infraAbortController = new AbortController();
+
   container.innerHTML = `
     <div class="section-header">
       <div>
@@ -4365,7 +4371,7 @@ async function renderRoomsList(container) {
   // Render inicial
   _renderGrouped();
 
-  // 🔄 Escuchar evento de actualización de rooms
+  // 🔄 Escuchar evento de actualización de rooms (con signal para auto-limpieza al navegar)
   window.addEventListener('rooms-updated', async () => {
     const freshRooms = await getAll('rooms').catch(() => []);
     window._allRooms = freshRooms;
@@ -4373,5 +4379,5 @@ async function renderRoomsList(container) {
     if (typeof updateGridFilters === 'function' && document.getElementById('room-map-grid')) {
       updateGridFilters();
     }
-  });
+  }, { signal: window._infraAbortController?.signal });
 }

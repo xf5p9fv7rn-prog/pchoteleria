@@ -265,7 +265,7 @@ export async function put(storeName, data) {
                                   'startDate','endDate','totalPeople','shift','gender','specialNeeds',
                                   'status','createdAt','workers','contractNumber','gerencia','notes',
                                   'angloAdmin','receivedDate'],
-                buildings:      ['id','name','code','type','floor','capacity','shifts','notes','floorConfigs'],
+                buildings:      ['id','name','code','type','floor','capacity','shifts','notes','floorConfigs','mainShift'],
                 census:         ['id','roomId','date','state','updatedBy','updatedAt'],
                 gerencia_quotas:['id','company','gerencia','limit','overrideAllowed','createdAt'],
                 users:          ['username','role','name','password','empresa','createdAt']
@@ -288,7 +288,11 @@ export async function put(storeName, data) {
                 }).catch(() => {});
             }
         }
-        await addToSyncQueue({ id: Date.now() + Math.random(), storeName, action: 'UPSERT', payload: data });
+        // 🔒 Sync queue con payload filtrado (evita columnas desconocidas → error 400)
+        const syncPayload = cols
+            ? Object.fromEntries(Object.entries(data).filter(([k]) => cols.includes(k)))
+            : data;
+        await addToSyncQueue({ id: Date.now() + Math.random(), storeName, action: 'UPSERT', payload: syncPayload });
         procesarColaDeSincronizacion();
     }
 }
@@ -303,7 +307,7 @@ export function initRealtimeSync() {
     if (_realtimeInitialized) return;
     _realtimeInitialized = true;
 
-    const TABLES = ['rooms', 'b2b_requests', 'buildings', 'census', 'gerencia_quotas'];
+    const TABLES = ['rooms', 'b2b_requests', 'buildings', 'census', 'gerencia_quotas', 'censo_locks'];
 
     TABLES.forEach(table => {
         supabase
@@ -392,8 +396,9 @@ export function startPeriodicCloudRefresh() {
         if (!navigator.onLine) return;
 
         for (const table of SYNC_TABLES) {
-            delete _memCache[table];
-            _isSyncing[table] = false;
+            // ✅ NO borrar el caché — evita parpadeo/UI en blanco durante descarga
+            // descargarDesdeNubeSilencioso actualiza en-place con merge seguro
+            _isSyncing[table] = false; // solo resetear el flag de "ya estoy syncing"
             const db = await openDB().catch(() => null);
             if (db) await descargarDesdeNubeSilencioso(table, db);
         }

@@ -245,8 +245,23 @@ export async function put(storeName, data) {
         window.dispatchEvent(new CustomEvent('db:changed', { detail: { storeName } }));
     }
     if (['rooms', 'census', 'b2b_requests', 'buildings', 'users', 'gerencia_quotas'].includes(storeName)) {
+        // 🔒 Filtrar solo columnas que existen en Supabase (evita 400 por campos desconocidos)
+        const SUPABASE_COLS = {
+            rooms:          ['id','buildingId','number','floor','bedCount','status','gender',
+                              'reservedCompany','reservedShift','beds','lostBedReason',
+                              'blockReason','blockedAt','blockedBed'],
+            b2b_requests:   ['id','company','contactName','contactEmail','contactPhone',
+                              'startDate','endDate','totalPeople','shift','gender','specialNeeds',
+                              'status','createdAt','workers','contractNumber','gerencia','notes',
+                              'angloAdmin','receivedDate'],
+            buildings:      ['id','name','code','type','floor','capacity','shifts','notes','floorConfigs','mainShift'],
+            census:         ['id','roomId','date','state','updatedBy','updatedAt'],
+            gerencia_quotas:['id','company','gerencia','limit','overrideAllowed','createdAt'],
+            users:          ['username','role','name','password','empresa','createdAt']
+        };
+        const cols = SUPABASE_COLS[storeName];
+
         // 🔒 Proteger temporalmente (5 min) — evita que auto-refresh sobreescriba
-        //    antes de que Supabase confirme el upsert
         if (data.id !== undefined) _markLocallyModified(storeName, data.id);
 
         // ☁️ Push a Supabase — al confirmar, quitar protección
@@ -256,21 +271,6 @@ export async function put(storeName, data) {
                 _recentLocalWrites.set(writeKey, Date.now());
                 setTimeout(() => _recentLocalWrites.delete(writeKey), RT_IGNORE_WINDOW_MS + 1000);
             }
-        // 🔒 Filtrar solo columnas que existen en Supabase (evita 400 por campos desconocidos)
-            const SUPABASE_COLS = {
-                rooms:          ['id','buildingId','number','floor','bedCount','status','gender',
-                                  'reservedCompany','reservedShift','beds','lostBedReason',
-                                  'blockReason','blockedAt','blockedBed'],
-                b2b_requests:   ['id','company','contactName','contactEmail','contactPhone',
-                                  'startDate','endDate','totalPeople','shift','gender','specialNeeds',
-                                  'status','createdAt','workers','contractNumber','gerencia','notes',
-                                  'angloAdmin','receivedDate'],
-                buildings:      ['id','name','code','type','floor','capacity','shifts','notes','floorConfigs','mainShift'],
-                census:         ['id','roomId','date','state','updatedBy','updatedAt'],
-                gerencia_quotas:['id','company','gerencia','limit','overrideAllowed','createdAt'],
-                users:          ['username','role','name','password','empresa','createdAt']
-            };
-            const cols = SUPABASE_COLS[storeName];
             const payload = cols
                 ? Object.fromEntries(Object.entries(data).filter(([k]) => cols.includes(k)))
                 : data;
@@ -279,7 +279,6 @@ export async function put(storeName, data) {
             if (storeName !== 'users') {
                 supabase.from(storeName).upsert(payload).then(({ error }) => {
                     if (error) {
-                        console.warn('[Sync] Upsert error:', error);
                         console.warn('[Sync] Upsert error (se reintentará via sync queue):', error.message);
                     } else {
                         const keyVal = data.id ?? data.username ?? '?';

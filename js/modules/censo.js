@@ -673,6 +673,9 @@ async function guardarCenso(container) {
     // 🔓 Liberar el lock del piso al guardar
     if (floorKey && rut) await releaseFloorLock(floorKey, rut);
 
+    // 🔔 Disparar evento para que MegaCenso actualice en tiempo real (sin refresh)
+    window.dispatchEvent(new CustomEvent('census-updated', { detail: { date: today, floor: floorKey } }));
+
     showToast(`✅ Censo guardado en la nube — ${saved} habitaciones registradas`, 'success');
 }
 
@@ -838,10 +841,19 @@ async function renderMegaCenso(container) {
 
     renderExcelGrid();
 
-    // ── 🔴 TIEMPO REAL: Auto-actualización cuando otra persona guarda su censo ──
-    // Se suscribe a cambios en la tabla 'census' de Supabase.
-    // Cuando una hotelera guarda desde su celular, el admin ve el update en ~segundos.
+    // ── 🔴 TIEMPO REAL: Auto-actualización desde el portal de terreno ──
     _setupCensusRealtime(container);
+
+    // ── ⚡ INMEDIATO: Cuando el mismo dispositivo guarda el censo hotelero ──
+    // el evento 'census-updated' llega antes que el round-trip de Supabase Realtime
+    if (window._megaCensoAbort) window._megaCensoAbort.abort();
+    window._megaCensoAbort = new AbortController();
+    window.addEventListener('census-updated', async () => {
+        if (!document.getElementById('censo-excel-table')) return;
+        allCensusData = await getAll('census').catch(() => []);
+        renderExcelGrid();
+        _showRealtimeBadge('✅ Planilla actualizada al instante');
+    }, { signal: window._megaCensoAbort.signal });
 }
 
 // Referencia al canal Realtime para evitar suscripciones duplicadas
@@ -888,7 +900,7 @@ function _setupCensusRealtime(container) {
                 }
 
                 // Re-renderizar el grid si la vista sigue activa
-                if (document.getElementById('censo-excel-grid')) {
+                if (document.getElementById('censo-excel-table')) {
                     renderExcelGrid();
                     _showRealtimeBadge('✅ Planilla actualizada');
                 } else {

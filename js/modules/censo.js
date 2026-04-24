@@ -837,6 +837,98 @@ async function renderMegaCenso(container) {
     window.renderCensoWrapper = () => renderCenso(container);
 
     renderExcelGrid();
+
+    // ── 🔴 TIEMPO REAL: Auto-actualización cuando otra persona guarda su censo ──
+    // Se suscribe a cambios en la tabla 'census' de Supabase.
+    // Cuando una hotelera guarda desde su celular, el admin ve el update en ~segundos.
+    _setupCensusRealtime(container);
+}
+
+// Referencia al canal Realtime para evitar suscripciones duplicadas
+let _censusRealtimeChannel = null;
+
+function _setupCensusRealtime(container) {
+    // Limpiar canal anterior si existe (evita duplicados al cambiar de mes)
+    if (_censusRealtimeChannel) {
+        supabase.removeChannel(_censusRealtimeChannel);
+        _censusRealtimeChannel = null;
+    }
+
+    _censusRealtimeChannel = supabase
+        .channel('census_live_' + Math.random().toString(36).slice(2, 7))
+        .on('postgres_changes', {
+            event: '*',
+            schema: 'public',
+            table: 'census'
+        }, async (payload) => {
+            // Mostrar indicador flotante de actualización
+            _showRealtimeBadge('🔄 Censo actualizado desde otro dispositivo...');
+
+            // Esperar 800ms para que otros cambios del mismo save lleguen también
+            clearTimeout(_censusRealtimeDebounce);
+            _censusRealtimeDebounce = setTimeout(async () => {
+                // Recargar datos de censo desde Supabase e IndexedDB
+                allCensusData = await getAll('census').catch(() => []);
+                try {
+                    const today = new Date().toLocaleDateString('en-CA');
+                    const { data } = await supabase
+                        .from('census')
+                        .select('*')
+                        .gte('date', gridDays[0] || today)
+                        .lte('date', gridDays[gridDays.length - 1] || today);
+                    if (data?.length > 0) {
+                        // Actualizar IndexedDB local con los datos frescos
+                        for (const rec of data) {
+                            await put('census', rec).catch(() => {});
+                        }
+                        allCensusData = data;
+                    }
+                } catch(e) {
+                    console.warn('[CensoRT] Error al refrescar:', e);
+                }
+
+                // Re-renderizar el grid si la vista sigue activa
+                if (document.getElementById('censo-excel-grid')) {
+                    renderExcelGrid();
+                    _showRealtimeBadge('✅ Planilla actualizada');
+                } else {
+                    // Vista cambió — limpiar suscripción
+                    if (_censusRealtimeChannel) {
+                        supabase.removeChannel(_censusRealtimeChannel);
+                        _censusRealtimeChannel = null;
+                    }
+                }
+            }, 800);
+        })
+        .subscribe((status) => {
+            if (status === 'SUBSCRIBED') {
+                console.log('[CensoRT] ✅ Tiempo real activado — actualizaciones automáticas');
+                _showRealtimeBadge('📡 Tiempo real activo');
+            }
+        });
+}
+
+let _censusRealtimeDebounce = null;
+
+function _showRealtimeBadge(msg) {
+    let badge = document.getElementById('censo-rt-badge');
+    if (!badge) {
+        badge = document.createElement('div');
+        badge.id = 'censo-rt-badge';
+        badge.style.cssText = `
+            position:fixed;bottom:80px;right:16px;z-index:9999;
+            background:#1a202c;color:#fff;border-radius:10px;
+            padding:8px 14px;font-size:12px;font-weight:700;
+            box-shadow:0 4px 16px rgba(0,0,0,0.3);
+            display:flex;align-items:center;gap:6px;
+            transition:opacity 0.3s;
+        `;
+        document.body.appendChild(badge);
+    }
+    badge.textContent = msg;
+    badge.style.opacity = '1';
+    clearTimeout(badge._timeout);
+    badge._timeout = setTimeout(() => { badge.style.opacity = '0'; }, 3000);
 }
 
 function buildRowsFromInfrastructure() {

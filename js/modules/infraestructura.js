@@ -674,20 +674,32 @@ function setupInfraHandlers() {
     };
     if (editId) data.id = parseInt(editId);
 
+    // 1. Guardar en IndexedDB local
     await put('buildings', data);
+
+    // 2. ☁️ Sincronizar edificio con Supabase
+    try {
+      const allBuildings = await getAll('buildings');
+      const savedBuilding = allBuildings.find(b => b.name === name);
+      if (savedBuilding) {
+        const { error: bErr } = await supabase
+          .from('buildings')
+          .upsert({ ...savedBuilding }, { onConflict: 'id' });
+        if (bErr) console.warn('[saveBuilding] Supabase buildings error:', bErr.message);
+      }
+    } catch(e) {
+      console.warn('[saveBuilding] No se pudo sincronizar edificio con Supabase:', e);
+    }
 
     // ── CREAR HABITACIONES AUTOMÁTICAMENTE (solo al crear nuevo) ──────────
     if (!editId && roomsPerFloor > 0) {
-      // Obtener el ID del nuevo building recién guardado
-      const allBuildings = await getAll('buildings');
-      const newB = allBuildings.find(b => b.name === name && !b._processed);
+      const allBuildings2 = await getAll('buildings');
+      const newB = allBuildings2.find(b => b.name === name);
       const buildingId = newB?.id;
 
       if (buildingId) {
         showToast(`⏳ Generando ${numFloors * roomsPerFloor} habitaciones...`, 'info');
 
-        // Generar código de prefijo: primera letra(s) del nombre + número
-        // Ej: "Pabellón A" → "A", "Pabellón 12" → "P12"
         const rawName = name.replace(/pabellón|pabellon|edificio|módulo|modulo/gi, '').trim();
         const prefix  = rawName.replace(/\s+/g, '').substring(0, 3).toUpperCase() || 'P';
 
@@ -707,11 +719,36 @@ function setupInfraHandlers() {
           }
         }
 
-        // Guardar en lotes para no bloquear el hilo
+        // 3a. Guardar en IndexedDB local (lote)
         for (const room of roomsToCreate) {
           await put('rooms', room);
         }
-        showToast(`✅ ${name} creado con ${roomsToCreate.length} habitaciones`, 'success');
+
+        // 3b. ☁️ Sincronizar habitaciones con Supabase (todas juntas)
+        try {
+          const allRooms = await getAll('rooms');
+          const newRooms = allRooms.filter(r =>
+            String(r.buildingId) === String(buildingId) &&
+            roomsToCreate.some(rc => rc.number === r.number)
+          );
+          if (newRooms.length > 0) {
+            // Upsert en lotes de 50 para evitar límites de Supabase
+            const BATCH = 50;
+            for (let i = 0; i < newRooms.length; i += BATCH) {
+              const batch = newRooms.slice(i, i + BATCH);
+              const { error: rErr } = await supabase
+                .from('rooms')
+                .upsert(batch, { onConflict: 'id' });
+              if (rErr) console.warn(`[saveBuilding] Supabase rooms batch ${i} error:`, rErr.message);
+            }
+            console.log(`[saveBuilding] ✅ ${newRooms.length} habitaciones sincronizadas con Supabase`);
+          }
+        } catch(e) {
+          console.warn('[saveBuilding] No se pudo sincronizar habitaciones con Supabase:', e);
+          showToast('⚠️ Habitaciones guardadas localmente (verifica conexión)', 'warn');
+        }
+
+        showToast(`✅ ${name} creado con ${roomsToCreate.length} habitaciones y sincronizado`, 'success');
       } else {
         showToast('Edificio guardado (habitaciones pendientes - reintenta)', 'warn');
       }
@@ -724,6 +761,7 @@ function setupInfraHandlers() {
     window.closeBuildingModal();
     await window.switchInfraTab(activeTab);
   };
+
 
   window.openRoomForm = async (editId = null) => {
     const buildings = await getAll('buildings');

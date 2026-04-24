@@ -780,6 +780,30 @@ async function renderMegaCenso(container) {
         getAll('census').catch(() => []) // Trae lo que las hoteleras marcan en su celular
     ]);
 
+    // ☁️ SIEMPRE cargar censo desde Supabase para el periodo actual
+    // (el admin puede estar en un dispositivo sin datos locales del censo hotelero)
+    try {
+        const dateFrom = gridDays[0] || new Date().toLocaleDateString('en-CA');
+        const dateTo   = gridDays[gridDays.length - 1] || dateFrom;
+        const { data: sbCensus } = await supabase
+            .from('census')
+            .select('*')
+            .gte('date', dateFrom)
+            .lte('date', dateTo);
+        if (sbCensus?.length > 0) {
+            // Merge: datos de Supabase tienen prioridad sobre IDB local
+            const sbMap = new Map(sbCensus.map(r => `${r.roomId}_${r.date}`));
+            const merged = [
+                ...allCensusData.filter(r => !sbMap.has(`${r.roomId}_${r.date}`)),
+                ...sbCensus
+            ];
+            allCensusData = merged;
+            console.log(`[MegaCenso] ☁️ ${sbCensus.length} registros de censo cargados desde Supabase`);
+        }
+    } catch(e) {
+        console.warn('[MegaCenso] No se pudo cargar censo de Supabase:', e);
+    }
+
     container.innerHTML = `
     <div class="section-header" style="flex-wrap: wrap;">
       <div>
@@ -1115,7 +1139,10 @@ function filterExcelGrid() {
         gridDays.forEach(dateStr => {
             const isWeekend = new Date(dateStr + 'T12:00:00').getDay() === 0 || new Date(dateStr + 'T12:00:00').getDay() === 6;
 
-            const hoteleraData = allCensusData.find(c => c.roomId === row.roomId && c.date === dateStr);
+            // 🔍 Buscar dato hotelero — comparar como String para evitar mismatch number/string
+            const hoteleraData = allCensusData.find(c =>
+                String(c.roomId) === String(row.roomId) && c.date === dateStr
+            );
             let autoX = false;
             if (hoteleraData) {
                 const s = hoteleraData.state;

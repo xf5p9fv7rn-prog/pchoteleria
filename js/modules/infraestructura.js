@@ -129,14 +129,16 @@ export async function renderInfraestructura(container) {
           <button class="modal-close btn" onclick="window.closeCheckinEmpresa()" style="color:#fff">✕</button>
         </div>
 
-        <!-- Barra de búsqueda y empresa selector -->
-        <div style="padding:14px 16px;background:#f8fafc;border-bottom:1px solid var(--border);display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-          <input type="text" id="ci-search" class="form-input" placeholder="🔍 Buscar trabajador, RUT..."
-            style="flex:1;min-width:180px;height:36px" oninput="window._ciFilter()">
-          <select id="ci-company-filter" class="form-select" style="min-width:180px;height:36px" onchange="window._ciFilter()">
-            <option value="">— Todas las empresas —</option>
-          </select>
-          <span id="ci-counter" style="font-size:12px;font-weight:700;color:#4a5568;white-space:nowrap"></span>
+        <!-- Barra de búsqueda y filtros -->
+        <div style="padding:12px 16px;background:#f8fafc;border-bottom:1px solid var(--border)">
+          <div style="display:flex;gap:8px;margin-bottom:8px">
+            <input type="text" id="ci-search" class="form-input" placeholder="🔍 Buscar nombre o RUT..."
+              style="flex:1;height:36px" oninput="window._ciFilter()">
+            <select id="ci-company-filter" class="form-select" style="width:200px;height:36px" onchange="window._ciFilter()">
+              <option value="">— Todas las empresas —</option>
+            </select>
+          </div>
+          <div id="ci-counter" style="font-size:12px;font-weight:600;color:#64748b"></div>
         </div>
 
         <!-- Lista de empresas + trabajadores pendientes -->
@@ -1317,21 +1319,27 @@ function setupInfraHandlers() {
     document.getElementById('checkin-empresa-modal')?.classList.remove('visible');
   };
 
-  // Render del cuerpo del modal — agrupa por empresa
+  // Render — agrupa por empresa con diseño limpio
   function _ciRender(workers) {
     const body = document.getElementById('ci-body');
     if (!body) return;
 
-    // Contar pendientes
-    const pending = workers.filter(w => !w.present && !w.checkoutPending);
+    const totalPending  = _ciAllWorkers.filter(w => !w.present && !w.checkoutPending).length;
+    const totalPresent  = _ciAllWorkers.filter(w => w.present).length;
     const counter = document.getElementById('ci-counter');
-    if (counter) counter.textContent = `${pending.length} pendientes · ${workers.filter(w=>w.present).length} presentes`;
+    if (counter) {
+      counter.innerHTML = `
+        <span style="color:#c53030;font-weight:700">${totalPending} pendientes</span>
+        &nbsp;·&nbsp;
+        <span style="color:#276749;font-weight:700">${totalPresent} presentes</span>
+        &nbsp;·&nbsp;
+        <span style="color:#2b6cb0;font-weight:700">${_ciSelected.size} seleccionados</span>`;
+    }
 
     if (workers.length === 0) {
       body.innerHTML = `<div style="text-align:center;padding:48px 16px;color:#94a3b8">
-        <div style="font-size:3rem;margin-bottom:12px">✅</div>
-        <div style="font-size:15px;font-weight:700">Sin trabajadores pendientes</div>
-        <div style="font-size:12px;margin-top:6px">Todos han hecho check-in o no hay asignaciones</div>
+        <div style="font-size:3rem;margin-bottom:10px">✅</div>
+        <div style="font-size:15px;font-weight:700">Sin resultados</div>
       </div>`;
       return;
     }
@@ -1344,71 +1352,81 @@ function setupInfraHandlers() {
       byCompany[key].push(w);
     });
 
-    const normalizeCompany = n => n ? n.trim().replace(/\b\w/g, c => c.toUpperCase()) : '(Sin empresa)';
+    const cap = s => s ? s.trim().replace(/\b\w/g, c => c.toUpperCase()) : '(Sin empresa)';
 
     let html = '';
     Object.entries(byCompany).sort(([a],[b]) => a.localeCompare(b)).forEach(([company, ws]) => {
       const pendingWs = ws.filter(w => !w.present && !w.checkoutPending);
       const presentWs = ws.filter(w => w.present);
-      const allPendingIds = pendingWs.map(w => `${w.roomId}__${w.bedKey}`);
-      const companyKey = encodeURIComponent(company);
+      // KEY FIX: usar data-company en el botón, NO JSON.stringify en onclick
+      const safeCompany = company.replace(/'/g, '\\&apos;');
 
       html += `
-      <div style="margin-bottom:16px;border:1.5px solid #e2e8f0;border-radius:14px;overflow:hidden">
+      <div style="margin-bottom:14px;border:1.5px solid #e2e8f0;border-radius:12px;overflow:hidden">
         <!-- Header empresa -->
-        <div style="background:linear-gradient(135deg,#f7f8ff,#eef0ff);padding:12px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <div style="background:linear-gradient(90deg,#f0f4ff,#e8eeff);padding:10px 14px;
+                    display:flex;align-items:center;gap:10px">
           <div style="flex:1">
-            <div style="font-size:14px;font-weight:800;color:#1a202c">${normalizeCompany(company)}</div>
-            <div style="font-size:11px;color:#64748b;margin-top:2px">
-              ${ws.length} trabajadores · <span style="color:#276749;font-weight:700">${presentWs.length} presentes</span> · <span style="color:#c53030;font-weight:700">${pendingWs.length} pendientes</span>
+            <div style="font-size:14px;font-weight:800;color:#1a202c">${cap(company)}</div>
+            <div style="font-size:11px;color:#64748b;margin-top:1px">
+              ${ws.length} trabajadores
+              &nbsp;·&nbsp;<span style="color:#276749;font-weight:700">${presentWs.length} ✅ presentes</span>
+              &nbsp;·&nbsp;<span style="color:#c53030;font-weight:700">${pendingWs.length} 🔴 pendientes</span>
             </div>
           </div>
-          ${pendingWs.length > 0 ? `
-          <button style="background:linear-gradient(135deg,#276749,#38a169);color:#fff;border:none;border-radius:8px;padding:6px 14px;font-size:12px;font-weight:700;cursor:pointer"
-            onclick="window._ciSelectCompany('${companyKey}', ${JSON.stringify(allPendingIds)})">
-            ☑️ Seleccionar todos
-          </button>` : ''}
+          ${pendingWs.length > 0 ? `<button
+            data-company="${safeCompany}"
+            onclick="window._ciSelectCompany(this)"
+            style="background:linear-gradient(135deg,#2b6cb0,#3182ce);color:#fff;border:none;
+                   border-radius:8px;padding:7px 12px;font-size:12px;font-weight:700;
+                   cursor:pointer;white-space:nowrap;flex-shrink:0">
+            ☑️ Seleccionar todos (${pendingWs.length})
+          </button>` : `<span style="font-size:20px">✅</span>`}
         </div>
 
-        <!-- Tabla de trabajadores -->
-        <table style="width:100%;border-collapse:collapse">
-          <thead>
-            <tr style="background:#f8fafc">
-              <th style="padding:6px 12px;font-size:9px;text-transform:uppercase;color:#718096;text-align:left;width:32px"></th>
-              <th style="padding:6px 12px;font-size:9px;text-transform:uppercase;color:#718096;text-align:left">Trabajador</th>
-              <th style="padding:6px 4px;font-size:9px;text-transform:uppercase;color:#718096;text-align:center;width:70px">Hab.</th>
-              <th style="padding:6px 4px;font-size:9px;text-transform:uppercase;color:#718096;text-align:center;width:60px">Cama</th>
-              <th style="padding:6px 12px;font-size:9px;text-transform:uppercase;color:#718096;text-align:center;width:80px">Estado</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${ws.map((w, i) => {
-              const wid = `${w.roomId}__${w.bedKey}`;
-              const isSelected = _ciSelected.has(wid);
-              const isPending  = !w.present && !w.checkoutPending;
-              const bedLabel   = w.bedKey === 'day' ? '☀️ Día' : w.bedKey === 'night' ? '🌙 Noche' : '➕ Extra';
-              const stateIcon  = w.present ? '🟢 Presente' : w.checkoutPending ? '🟡 Salida' : w.checkinAuthorized ? '🔵 Autorizado' : '🔴 Pendiente';
-              const rowBg      = i % 2 === 0 ? '#fff' : '#fafafa';
+        <!-- Filas de trabajadores -->
+        <div>
+          ${ws.map((w, i) => {
+            const wid        = `${w.roomId}__${w.bedKey}`;
+            const isSelected = _ciSelected.has(wid);
+            const isPending  = !w.present && !w.checkoutPending;
+            const bedEmoji   = w.bedKey === 'day' ? '☀️' : w.bedKey === 'night' ? '🌙' : '➕';
+            const bedLabel   = w.bedKey === 'day' ? 'Día' : w.bedKey === 'night' ? 'Noche' : 'Extra';
+            const statusBg   = w.present ? '#f0fff4' : w.checkoutPending ? '#fffff0' : isSelected ? '#ebf8ff' : (i%2===0 ? '#fff' : '#fafafa');
+            const statusDot  = w.present ? '🟢' : w.checkoutPending ? '🟡' : w.checkinAuthorized ? '🔵' : '🔴';
+            const statusTxt  = w.present ? 'Presente' : w.checkoutPending ? 'Salida' : w.checkinAuthorized ? 'Autorizado' : 'Pendiente';
 
-              return `<tr style="background:${rowBg};border-bottom:1px solid #f1f5f9">
-                <td style="padding:8px 12px">
-                  ${isPending ? `<input type="checkbox" data-wid="${wid}" style="width:16px;height:16px;accent-color:#38a169;cursor:pointer"
-                    ${isSelected ? 'checked' : ''}
-                    onchange="window._ciToggle('${wid}', this.checked)">` : ''}
-                </td>
-                <td style="padding:8px 12px">
-                  <div style="font-size:13px;font-weight:700;color:#1a202c">${w.occupant.split('(')[0].trim()}</div>
-                  <div style="font-size:10px;color:#718096">${w.rut ? 'RUT: ' + w.rut : ''} ${w.management ? '· ' + w.management : ''}</div>
-                </td>
-                <td style="padding:8px 4px;text-align:center;font-size:12px;font-weight:700;color:#2d3748">Hab.${w.roomNumber}</td>
-                <td style="padding:8px 4px;text-align:center;font-size:11px;color:#4a5568">${bedLabel}</td>
-                <td style="padding:8px 12px;text-align:center">
-                  <span style="font-size:10px;font-weight:700;white-space:nowrap">${stateIcon}</span>
-                </td>
-              </tr>`;
-            }).join('')}
-          </tbody>
-        </table>
+            return `<div style="display:flex;align-items:center;gap:10px;padding:9px 14px;
+                               background:${statusBg};border-top:1px solid #f1f5f9;
+                               transition:background 0.15s">
+              <!-- Checkbox -->
+              <div style="width:24px;flex-shrink:0;text-align:center">
+                ${isPending ? `<input type="checkbox" data-wid="${wid}"
+                  ${isSelected ? 'checked' : ''}
+                  onchange="window._ciToggle('${wid}', this.checked)"
+                  style="width:17px;height:17px;accent-color:#3182ce;cursor:pointer">` : ''}
+              </div>
+              <!-- Nombre + RUT -->
+              <div style="flex:1;min-width:0">
+                <div style="font-size:13px;font-weight:700;color:#1a202c;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+                  ${w.occupant.split('(')[0].trim()}
+                </div>
+                <div style="font-size:10px;color:#718096">
+                  ${w.rut ? 'RUT ' + w.rut : ''}
+                  ${w.management ? ' · ' + w.management : ''}
+                </div>
+              </div>
+              <!-- Hab -->
+              <div style="font-size:12px;font-weight:700;color:#2d3748;white-space:nowrap">
+                Hab.${w.roomNumber}
+              </div>
+              <!-- Cama -->
+              <div style="font-size:11px;color:#718096;white-space:nowrap">${bedEmoji} ${bedLabel}</div>
+              <!-- Estado -->
+              <div style="font-size:11px;font-weight:700;white-space:nowrap">${statusDot} ${statusTxt}</div>
+            </div>`;
+          }).join('')}
+        </div>
       </div>`;
     });
 
@@ -1419,15 +1437,14 @@ function setupInfraHandlers() {
   window._ciFilter = () => {
     const query   = (document.getElementById('ci-search')?.value || '').toLowerCase().trim();
     const company = document.getElementById('ci-company-filter')?.value || '';
-
     const filtered = _ciAllWorkers.filter(w => {
-      const matchCompany = !company || w.company === company;
-      const matchQuery   = !query ||
+      const matchC = !company || w.company === company;
+      const matchQ = !query ||
         w.occupant.toLowerCase().includes(query) ||
         w.rut.toLowerCase().includes(query) ||
         w.management.toLowerCase().includes(query) ||
-        w.roomNumber?.toString().includes(query);
-      return matchCompany && matchQuery;
+        String(w.roomNumber).includes(query);
+      return matchC && matchQ;
     });
     _ciRender(filtered);
   };
@@ -1436,25 +1453,24 @@ function setupInfraHandlers() {
   window._ciToggle = (wid, checked) => {
     if (checked) _ciSelected.add(wid);
     else         _ciSelected.delete(wid);
-    // Actualizar counter
-    const counter = document.getElementById('ci-counter');
-    if (counter) {
-      const pending = _ciAllWorkers.filter(w => !w.present && !w.checkoutPending).length;
-      counter.textContent = `${pending} pendientes · ${_ciSelected.size} seleccionados`;
-    }
+    _ciRender(window._ciCurrentFiltered || _ciAllWorkers); // re-render para actualizar el counter
   };
 
-  // Seleccionar TODOS de una empresa
-  window._ciSelectCompany = (encodedCompany, wids) => {
-    const company = decodeURIComponent(encodedCompany);
-    // ¿Ya están todos seleccionados? → deseleccionar
-    const allSelected = wids.every(id => _ciSelected.has(id));
+  // KEY FIX: _ciSelectCompany recibe el botón DOM, no JSON
+  window._ciSelectCompany = (btn) => {
+    const company = btn.dataset.company;
+    // Todos los workers pendientes de esta empresa
+    const wids = _ciAllWorkers
+      .filter(w => (w.company || '(Sin empresa)') === company && !w.present && !w.checkoutPending)
+      .map(w => `${w.roomId}__${w.bedKey}`);
+    // Toggle: si todos están seleccionados, desmarca; si no, marca todos
+    const allSelected = wids.length > 0 && wids.every(id => _ciSelected.has(id));
     if (allSelected) {
       wids.forEach(id => _ciSelected.delete(id));
     } else {
       wids.forEach(id => _ciSelected.add(id));
     }
-    window._ciFilter(); // Re-render con filtro actual
+    window._ciFilter();
   };
 
   // CONFIRMAR CHECK-IN de los seleccionados

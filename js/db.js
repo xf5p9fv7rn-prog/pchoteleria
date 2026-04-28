@@ -770,6 +770,60 @@ export async function freeAllRoomRestrictions() {
 }
 
 // ============================================================================
+// ☁️ FORZAR SINCRONIZACIÓN COMPLETA: IndexedDB → Supabase
+// Sube TODOS los rooms y buildings actuales a la nube en lotes de 50.
+// Usar cuando el Dashboard no muestra datos reales (beds vacíos en Supabase).
+// ============================================================================
+export async function forzarSyncNube(onProgress) {
+    const ROOMS_COLS = ['id','buildingId','number','floor','bedCount','status','gender',
+                        'reservedCompany','reservedShift','beds','lostBedReason',
+                        'blockReason','blockedAt','blockedBed'];
+    const BUILDINGS_COLS = ['id','name','code','type','floor','capacity','shifts','notes','floorConfigs','mainShift'];
+
+    const filterCols = (obj, cols) =>
+        Object.fromEntries(Object.entries(obj).filter(([k]) => cols.includes(k)));
+
+    const [rooms, buildings] = await Promise.all([
+        getAll('rooms'),
+        getAll('buildings')
+    ]);
+
+    const BATCH = 50;
+    let done = 0;
+    const total = rooms.length + buildings.length;
+    const report = (msg) => {
+        onProgress?.(done, total, msg);
+        console.log(`[ForzarSync] ${msg} (${done}/${total})`);
+    };
+
+    report('Iniciando sync de edificios…');
+
+    // 1. Subir buildings
+    for (let i = 0; i < buildings.length; i += BATCH) {
+        const batch = buildings.slice(i, i + BATCH).map(b => filterCols(b, BUILDINGS_COLS));
+        const { error } = await supabase.from('buildings').upsert(batch, { onConflict: 'id' });
+        if (error) console.warn('[ForzarSync] buildings error:', error.message);
+        done += batch.length;
+        report(`Edificios ${Math.min(i + BATCH, buildings.length)}/${buildings.length}`);
+    }
+
+    report('Iniciando sync de habitaciones…');
+
+    // 2. Subir rooms en lotes (el campo beds es JSONB — puede ser grande)
+    for (let i = 0; i < rooms.length; i += BATCH) {
+        const batch = rooms.slice(i, i + BATCH).map(r => filterCols(r, ROOMS_COLS));
+        const { error } = await supabase.from('rooms').upsert(batch, { onConflict: 'id' });
+        if (error) console.warn('[ForzarSync] rooms error:', error.message);
+        done += batch.length;
+        report(`Habitaciones ${Math.min(i + BATCH, rooms.length)}/${rooms.length} subidas`);
+    }
+
+    report('✅ Sync completo');
+    return { rooms: rooms.length, buildings: buildings.length };
+}
+
+
+// ============================================================================
 // 🔥 MOTOR DE ASIGNACIÓN INTELIGENTE PRO (Con Regla de Oro y Anti-Clones)
 // ============================================================================
 

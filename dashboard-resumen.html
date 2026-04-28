@@ -442,7 +442,9 @@
             const tbody = document.getElementById('detailedTableBody');
             tbody.innerHTML = '';
 
-            const nombres = Object.keys(porPabellon).sort();
+            const nombres = Object.keys(porPabellon).sort((a, b) =>
+                a.localeCompare(b, 'es', { numeric: true, sensitivity: 'base' })
+            );
             let tHab = 0, tCam = 0, tDia = 0, tNoche = 0, tDisp = 0, tBloq = 0;
 
             nombres.forEach(nombre => {

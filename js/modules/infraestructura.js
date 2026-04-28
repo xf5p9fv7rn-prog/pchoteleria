@@ -1,4 +1,4 @@
-import { getAll, put, remove, seedDemoData, getById } from '../db.js';
+import { getAll, put, remove, seedDemoData, getById, forzarSyncNube } from '../db.js';
 import { showToast, generateId, toChileanDate, formatDate } from '../utils.js';
 
 // ── State ──────────────────────────────────────────
@@ -101,6 +101,52 @@ export async function renderInfraestructura(container) {
   if (window._infraAbortController) window._infraAbortController.abort();
   window._infraAbortController = new AbortController();
 
+  // ☁️ Forzar Sync: sube todos los datos locales a Supabase
+  window.forzarSyncHandler = async () => {
+    const btn = document.getElementById('sync-nube-btn');
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Subiendo...'; }
+
+    // Crear toast de progreso fijo
+    let progressToast = document.getElementById('sync-progress-toast');
+    if (!progressToast) {
+      progressToast = document.createElement('div');
+      progressToast.id = 'sync-progress-toast';
+      progressToast.style.cssText = `
+        position:fixed;bottom:80px;right:16px;z-index:9999;
+        background:#1a202c;color:#fff;border-radius:12px;
+        padding:14px 18px;font-size:13px;min-width:280px;
+        box-shadow:0 8px 32px rgba(0,0,0,0.35);`;
+      document.body.appendChild(progressToast);
+    }
+
+    try {
+      const result = await forzarSyncNube((done, total, msg) => {
+        const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+        progressToast.innerHTML = `
+          <div style="font-weight:700;margin-bottom:8px">☁️ Sincronizando con Supabase...</div>
+          <div style="background:#2d3748;border-radius:99px;height:8px;overflow:hidden;margin-bottom:8px">
+            <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,#3182ce,#63b3ed);border-radius:99px;transition:width 0.3s ease"></div>
+          </div>
+          <div style="font-size:11px;color:#a0aec0">${msg} — ${pct}%</div>`;
+      });
+
+      progressToast.innerHTML = `
+        <div style="font-weight:700;color:#68d391">✅ ¡Sync completado!</div>
+        <div style="font-size:12px;color:#a0aec0;margin-top:4px">
+          ${result.buildings} edificios · ${result.rooms} habitaciones subidas a la nube
+        </div>
+        <div style="font-size:11px;color:#a0aec0;margin-top:2px">Recarga el Dashboard para ver los datos actualizados</div>`;
+      setTimeout(() => progressToast.remove(), 5000);
+      showToast(`✅ ${result.rooms} habitaciones sincronizadas con Supabase`, 'success');
+    } catch(err) {
+      progressToast.innerHTML = `<div style="color:#fc8181">❌ Error: ${err.message}</div>`;
+      setTimeout(() => progressToast.remove(), 5000);
+      showToast('Error en sync: ' + err.message, 'error');
+    } finally {
+      if (btn) { btn.disabled = false; btn.innerHTML = '☁️ Sync a Nube'; }
+    }
+  };
+
   container.innerHTML = `
     <div class="section-header">
       <div>
@@ -108,6 +154,10 @@ export async function renderInfraestructura(container) {
         <p class="section-subtitle">Gestión de edificios, pabellones y habitaciones</p>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn" id="sync-nube-btn" onclick="window.forzarSyncHandler()"
+          style="background:linear-gradient(135deg,#2c5282,#3182ce);color:#fff;border:none;font-weight:700;font-size:13px;display:flex;align-items:center;gap:6px">
+          ☁️ Sync a Nube
+        </button>
         <button class="btn" onclick="window.openAutorizarEmpresa()"
           style="background:linear-gradient(135deg,#b7791f,#d69e2e);color:#fff;border:none;font-weight:700;font-size:13px;display:flex;align-items:center;gap:6px">
           🔓 Autorizar Empresa

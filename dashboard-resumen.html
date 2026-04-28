@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Resumen Ejecutivo</title>
+
+    <!-- Hereda tokens de diseño del programa principal -->
+    <link rel="stylesheet" href="css/main.css">
+    <link rel="stylesheet" href="css/premium.css?v=5">
+
+    <style>
+        body {
+            font-family: 'Inter', system-ui, sans-serif;
+            background: var(--bg-page);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+
+        .header {
+            background: var(--grad-dark);
+            color: #fff;
+            padding: 24px 40px;
+            box-shadow: var(--shadow-md);
+        }
+        .header h1 {
+            font-size: 26px;
+            font-weight: 600;
+            margin-bottom: 16px;
+            letter-spacing: -0.3px;
+        }
+        .header .subtitle {
+            font-size: 13px;
+            opacity: 0.7;
+            margin-bottom: 18px;
+        }
+        .controls { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            font-family: inherit;
+            transition: all var(--anim);
+        }
+        .btn-primary { background: var(--grad-red); color: #fff; box-shadow: var(--shadow-red); }
+        .btn-primary:hover:not(:disabled) { transform: translateY(-1px); filter: brightness(1.05); }
+        .btn-secondary { background: rgba(255,255,255,0.12); color: #fff; }
+        .btn-secondary:hover:not(:disabled) { background: rgba(255,255,255,0.2); }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .container { max-width: 1400px; margin: 0 auto; padding: 28px 20px; }
+
+        .status {
+            background: var(--bg-card);
+            padding: 14px 20px;
+            border-radius: var(--radius-md);
+            margin-bottom: 24px;
+            box-shadow: var(--shadow-sm);
+            border-left: 4px solid var(--red-600);
+            font-size: 14px;
+        }
+        .status.success { border-left-color: #10b981; }
+        .status.error { border-left-color: var(--red-500); }
+        .status.warning { border-left-color: #f59e0b; }
+
+        .loading { display: none; text-align: center; padding: 40px; }
+        .spinner {
+            border: 3px solid var(--border);
+            border-top: 3px solid var(--red-600);
+            border-radius: 50%;
+            width: 36px; height: 36px;
+            animation: spin 0.8s linear infinite;
+            margin: 0 auto 16px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .hidden { display: none !important; }
+
+        .report-header {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-left: 4px solid var(--red-600);
+            padding: 16px 20px;
+            border-radius: var(--radius-md);
+            margin-bottom: 24px;
+            font-weight: 600;
+            font-size: 15px;
+            color: var(--text-primary);
+            box-shadow: var(--shadow-sm);
+        }
+
+        .compact-view {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 20px;
+        }
+
+        .executive-table {
+            background: var(--bg-card);
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-md);
+            overflow: hidden;
+            position: relative;
+        }
+        .executive-table.in-development::after {
+            content: "EN DESARROLLO";
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%) rotate(-15deg);
+            font-size: 32px;
+            font-weight: 800;
+            color: rgba(192, 57, 43, 0.18);
+            letter-spacing: 4px;
+            pointer-events: none;
+        }
+        .executive-table table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .executive-table th {
+            background: var(--grad-dark);
+            color: #fff;
+            padding: 14px 16px;
+            text-align: left;
+            font-weight: 600;
+            font-size: 14px;
+        }
+        .executive-table td {
+            padding: 10px 16px;
+            border-bottom: 1px solid var(--border);
+            font-size: 13px;
+        }
+        .executive-table tr:nth-child(even) { background: #fafbfc; }
+        .executive-table tr:hover { background: var(--red-50); }
+
+        .metric-label { font-weight: 500; color: var(--text-primary); }
+        .metric-value { font-weight: 700; color: var(--red-700); text-align: right; }
+        .metric-value.alert { color: var(--red-500); }
+        .section-divider {
+            background: var(--bg-sidebar) !important;
+            color: #fff !important;
+            font-weight: 600;
+            text-align: center;
+            font-size: 11px;
+            letter-spacing: 1px;
+            padding: 8px !important;
+        }
+        .sub-metric { padding-left: 28px !important; font-size: 12px; color: var(--text-secondary); }
+
+        .section-header {
+            background: var(--grad-dark);
+            color: #fff;
+            padding: 16px 24px;
+            border-radius: var(--radius-md);
+            margin-top: 32px;
+            margin-bottom: 18px;
+            font-weight: 600;
+            font-size: 16px;
+            box-shadow: var(--shadow-md);
+        }
+
+        .detailed-table {
+            background: var(--bg-card);
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-md);
+            overflow: hidden;
+            overflow-x: auto;
+        }
+        .detailed-table table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 900px; }
+        .detailed-table th {
+            background: var(--grad-dark);
+            color: #fff;
+            padding: 12px 10px;
+            text-align: center;
+            font-weight: 600;
+            font-size: 12px;
+            white-space: nowrap;
+        }
+        .detailed-table td {
+            padding: 10px 10px;
+            border-bottom: 1px solid var(--border);
+            font-size: 13px;
+            text-align: center;
+            white-space: nowrap;
+        }
+        .detailed-table tr:nth-child(even) { background: #fafbfc; }
+        .detailed-table tr:hover { background: var(--red-50); }
+        .pabellon-name { font-weight: 600; color: var(--red-700); }
+        .total-row {
+            background: linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%) !important;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+        .total-row td { border-top: 2px solid var(--red-600); padding: 14px 10px; }
+        .occupancy-percentage { font-weight: 700; color: var(--red-600); }
+
+        @media (max-width: 768px) {
+            .header { padding: 18px 20px; }
+            .header h1 { font-size: 20px; }
+            .container { padding: 18px 14px; }
+            .controls { flex-direction: column; align-items: stretch; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Dashboard — Resumen Ejecutivo</h1>
+        <div class="subtitle">Estado en vivo desde Supabase · Solo COPC</div>
+        <div class="controls">
+            <button class="btn btn-primary" id="refreshBtn" onclick="loadAndRender()">🔄 Actualizar datos</button>
+            <a href="index.html" class="btn btn-secondary">← Volver</a>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="status" id="status">
+            <strong>Estado:</strong> <span id="statusText">Listo. Pulsa "Actualizar datos" para cargar.</span>
+        </div>
+
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p>Consultando Supabase…</p>
+        </div>
+
+        <div id="reportContent" class="hidden">
+            <div class="report-header" id="reportHeader">
+                <span id="reportTitle">Resumen en vivo · <span id="snapshotTime"></span></span>
+            </div>
+
+            <div class="compact-view">
+                <div class="executive-table">
+                    <table>
+                        <thead><tr><th colspan="2">📊 RESUMEN EJECUTIVO COPC</th></tr></thead>
+                        <tbody>
+                            <tr class="section-divider"><td colspan="2">INVENTARIO</td></tr>
+                            <tr><td class="metric-label">Total Habitaciones</td><td class="metric-value" id="totalHabitacionesCOPC">0</td></tr>
+                            <tr><td class="metric-label">Total Camas</td><td class="metric-value" id="totalCamasCOPC">0</td></tr>
+                            <tr><td class="metric-label sub-metric">Habitaciones 1 cama</td><td class="metric-value" id="totalCamas1COPC">0</td></tr>
+                            <tr><td class="metric-label sub-metric">Habitaciones 2+ camas</td><td class="metric-value" id="totalCamas2COPC">0</td></tr>
+
+                            <tr class="section-divider"><td colspan="2">OCUPACIÓN</td></tr>
+                            <tr><td class="metric-label">Camas Ocupadas</td><td class="metric-value" id="totalOcupadasCOPC">0</td></tr>
+                            <tr><td class="metric-label sub-metric">% Ocupación</td><td class="metric-value" id="porcentajeOcupadasCOPC">0%</td></tr>
+
+                            <tr class="section-divider"><td colspan="2">DISPONIBILIDAD</td></tr>
+                            <tr><td class="metric-label">Camas Disponibles</td><td class="metric-value" id="totalDisponiblesCOPC">0</td></tr>
+                            <tr><td class="metric-label sub-metric">% Disponibilidad</td><td class="metric-value" id="porcentajeDisponiblesCOPC">0%</td></tr>
+
+                            <tr class="section-divider"><td colspan="2">FUERA DE SERVICIO</td></tr>
+                            <tr><td class="metric-label">Total Fuera de Servicio</td><td class="metric-value alert" id="totalFueraServicioCOPC">0</td></tr>
+                            <tr><td class="metric-label sub-metric">% Fuera de Servicio</td><td class="metric-value" id="porcentajeFueraServicioCOPC">0%</td></tr>
+                            <tr><td class="metric-label sub-metric">Bloqueadas</td><td class="metric-value" id="bloqueadasFueraCOPC">0</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- R-220 dejado en desarrollo, oculto por ahora.
+                     Para reactivar: quitar la clase "hidden" y llenar los IDs *R220. -->
+                <div class="executive-table in-development hidden" id="r220Card">
+                    <table>
+                        <thead><tr><th colspan="2">📊 RESUMEN EJECUTIVO R-220</th></tr></thead>
+                        <tbody>
+                            <tr><td colspan="2" style="padding:30px;text-align:center;color:var(--text-muted)">Pendiente de implementación.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="section-header">📋 Detalle por Pabellón</div>
+            <div class="detailed-table">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Pabellón</th>
+                            <th>Habitaciones</th>
+                            <th>Camas</th>
+                            <th>Ocup. Día</th>
+                            <th>Ocup. Noche</th>
+                            <th>Disponibles</th>
+                            <th>Bloqueadas</th>
+                            <th>% Ocupación</th>
+                        </tr>
+                    </thead>
+                    <tbody id="detailedTableBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { supabase } from './js/supabaseClient.js';
+
+        // ════════════════════════════════════════════════════════════════════
+        //  CONFIG — pabellones a excluir del dashboard (ej. R-220 en desarrollo)
+        // ════════════════════════════════════════════════════════════════════
+        const PABELLONES_EXCLUIDOS = ['R-220']; // se compara contra buildings.code y buildings.name
+
+        // ════════════════════════════════════════════════════════════════════
+        //  UI helpers
+        // ════════════════════════════════════════════════════════════════════
+        function showMessage(msg, type = 'info') {
+            const el = document.getElementById('status');
+            el.classList.remove('success', 'error', 'warning');
+            if (type !== 'info') el.classList.add(type);
+            document.getElementById('statusText').textContent = msg;
+        }
+        function setLoading(on) {
+            document.getElementById('loading').style.display = on ? 'block' : 'none';
+            document.getElementById('refreshBtn').disabled = on;
+        }
+
+        // ════════════════════════════════════════════════════════════════════
+        //  Lógica de cálculo — equivalente al "processData" del Excel
+        //  Cada room aporta a inventario, ocupación, disponibles y bloqueadas
+        //  según rooms.status y rooms.beds.{day,night}.occupant
+        // ════════════════════════════════════════════════════════════════════
+        function clasificarRoom(room) {
+            const camas = parseInt(room.bedCount) || 0;
+            const status = room.status || 'free';
+            const beds = room.beds || {};
+            const dayOcc  = !!(beds.day  && beds.day.occupant);
+            const nightOcc = !!(beds.night && beds.night.occupant);
+
+            // Bloqueada total: todas las camas fuera de servicio
+            if (status === 'blocked') {
+                return { camas, ocupadasDia: 0, ocupadasNoche: 0, disponibles: 0, bloqueadas: camas };
+            }
+
+            // Reservada → cuenta como ocupada (criterio del Excel original)
+            if (status === 'reserved') {
+                return { camas, ocupadasDia: camas, ocupadasNoche: 0, disponibles: 0, bloqueadas: 0 };
+            }
+
+            // bed-blocked: una cama (la de día) bloqueada, el resto según beds
+            const camasBloq = (status === 'bed-blocked') ? 1 : 0;
+            const ocupDia   = dayOcc   ? 1 : 0;
+            const ocupNoche = nightOcc ? 1 : 0;
+            const disponibles = Math.max(0, camas - ocupDia - ocupNoche - camasBloq);
+
+            return {
+                camas,
+                ocupadasDia: ocupDia,
+                ocupadasNoche: ocupNoche,
+                disponibles,
+                bloqueadas: camasBloq
+            };
+        }
+
+        function procesarDatos(buildings, rooms) {
+            // Index buildings por id
+            const buildingById = {};
+            buildings.forEach(b => { buildingById[b.id] = b; });
+
+            // Filtrar rooms cuyo edificio esté excluido
+            const excluidosSet = new Set(PABELLONES_EXCLUIDOS.map(s => s.toUpperCase()));
+            const roomsCOPC = rooms.filter(r => {
+                const b = buildingById[r.buildingId];
+                if (!b) return false;
+                const code = (b.code || '').toUpperCase();
+                const name = (b.name || '').toUpperCase();
+                return !excluidosSet.has(code) && !excluidosSet.has(name);
+            });
+
+            // Agregados COPC
+            let totalHabitaciones = 0, totalCamas = 0;
+            let totalCamas1 = 0, totalCamas2Mas = 0;
+            let totalOcupadas = 0, totalDisponibles = 0, totalBloqueadas = 0;
+
+            // Agregados por pabellón
+            const porPabellon = {};
+
+            roomsCOPC.forEach(r => {
+                const b = buildingById[r.buildingId];
+                const pabellonNombre = b.code || b.name || `#${b.id}`;
+
+                if (!porPabellon[pabellonNombre]) {
+                    porPabellon[pabellonNombre] = {
+                        habitaciones: 0, camas: 0,
+                        ocupDia: 0, ocupNoche: 0,
+                        disponibles: 0, bloqueadas: 0
+                    };
+                }
+
+                const c = clasificarRoom(r);
+                if (c.camas <= 0) return; // habitación sin camas → ignorar
+
+                // Inventario
+                totalHabitaciones++;
+                totalCamas += c.camas;
+                if (c.camas === 1) totalCamas1++;
+                else if (c.camas >= 2) totalCamas2Mas++;
+
+                porPabellon[pabellonNombre].habitaciones++;
+                porPabellon[pabellonNombre].camas      += c.camas;
+
+                // Ocupación / disponibilidad / bloqueo
+                porPabellon[pabellonNombre].ocupDia      += c.ocupadasDia;
+                porPabellon[pabellonNombre].ocupNoche    += c.ocupadasNoche;
+                porPabellon[pabellonNombre].disponibles  += c.disponibles;
+                porPabellon[pabellonNombre].bloqueadas   += c.bloqueadas;
+
+                totalOcupadas    += c.ocupadasDia + c.ocupadasNoche;
+                totalDisponibles += c.disponibles;
+                totalBloqueadas  += c.bloqueadas;
+            });
+
+            return {
+                resumen: {
+                    totalHabitaciones, totalCamas,
+                    totalCamas1, totalCamas2Mas,
+                    totalOcupadas, totalDisponibles, totalBloqueadas
+                },
+                porPabellon
+            };
+        }
+
+        // ════════════════════════════════════════════════════════════════════
+        //  Render
+        // ════════════════════════════════════════════════════════════════════
+        function renderResumenCOPC(r) {
+            const totalCamas = r.totalCamas || 1; // evitar div/0
+            const pctOcup    = ((r.totalOcupadas    / totalCamas) * 100).toFixed(1);
+            const pctDisp    = ((r.totalDisponibles / totalCamas) * 100).toFixed(1);
+            const pctFuera   = ((r.totalBloqueadas  / totalCamas) * 100).toFixed(1);
+
+            const set = (id, val) => document.getElementById(id).textContent = val;
+            set('totalHabitacionesCOPC', r.totalHabitaciones.toLocaleString());
+            set('totalCamasCOPC',        r.totalCamas.toLocaleString());
+            set('totalCamas1COPC',       r.totalCamas1.toLocaleString());
+            set('totalCamas2COPC',       r.totalCamas2Mas.toLocaleString());
+            set('totalOcupadasCOPC',     r.totalOcupadas.toLocaleString());
+            set('porcentajeOcupadasCOPC', pctOcup + '%');
+            set('totalDisponiblesCOPC',  r.totalDisponibles.toLocaleString());
+            set('porcentajeDisponiblesCOPC', pctDisp + '%');
+            set('totalFueraServicioCOPC', r.totalBloqueadas.toLocaleString());
+            set('porcentajeFueraServicioCOPC', pctFuera + '%');
+            set('bloqueadasFueraCOPC',   r.totalBloqueadas.toLocaleString());
+        }
+
+        function renderDetalle(porPabellon) {
+            const tbody = document.getElementById('detailedTableBody');
+            tbody.innerHTML = '';
+
+            const nombres = Object.keys(porPabellon).sort();
+            let tHab = 0, tCam = 0, tDia = 0, tNoche = 0, tDisp = 0, tBloq = 0;
+
+            nombres.forEach(nombre => {
+                const p = porPabellon[nombre];
+                const totalOcup = p.ocupDia + p.ocupNoche;
+                const pct = p.camas > 0 ? ((totalOcup / p.camas) * 100).toFixed(1) : '0.0';
+
+                tHab += p.habitaciones; tCam += p.camas;
+                tDia += p.ocupDia; tNoche += p.ocupNoche;
+                tDisp += p.disponibles; tBloq += p.bloqueadas;
+
+                tbody.insertAdjacentHTML('beforeend', `
+                    <tr>
+                        <td class="pabellon-name">${nombre}</td>
+                        <td>${p.habitaciones}</td>
+                        <td>${p.camas}</td>
+                        <td>${p.ocupDia}</td>
+                        <td>${p.ocupNoche}</td>
+                        <td>${p.disponibles}</td>
+                        <td>${p.bloqueadas}</td>
+                        <td class="occupancy-percentage">${pct}%</td>
+                    </tr>
+                `);
+            });
+
+            const pctTotal = tCam > 0 ? (((tDia + tNoche) / tCam) * 100).toFixed(1) : '0.0';
+            tbody.insertAdjacentHTML('beforeend', `
+                <tr class="total-row">
+                    <td>TOTAL COPC</td>
+                    <td>${tHab}</td>
+                    <td>${tCam}</td>
+                    <td>${tDia}</td>
+                    <td>${tNoche}</td>
+                    <td>${tDisp}</td>
+                    <td>${tBloq}</td>
+                    <td class="occupancy-percentage">${pctTotal}%</td>
+                </tr>
+            `);
+        }
+
+        // ════════════════════════════════════════════════════════════════════
+        //  Carga
+        // ════════════════════════════════════════════════════════════════════
+        async function loadAndRender() {
+            setLoading(true);
+            showMessage('Consultando buildings y rooms…');
+
+            try {
+                const [bRes, rRes] = await Promise.all([
+                    supabase.from('buildings').select('id, code, name, type'),
+                    supabase.from('rooms').select('*')   // ← '*' garantiza que 'beds' JSONB venga incluido
+                ]);
+
+                if (bRes.error) throw bRes.error;
+                if (rRes.error) throw rRes.error;
+
+                const buildings = bRes.data || [];
+                const rooms = rRes.data || [];
+
+                if (buildings.length === 0) {
+                    showMessage('No hay edificios cargados en Supabase.', 'warning');
+                    setLoading(false);
+                    return;
+                }
+
+                // ⚠️ Detectar si muchas habitaciones tienen beds vacío (datos no sincronizados)
+                const sinBeds = rooms.filter(r => !r.beds || Object.keys(r.beds).length === 0).length;
+                const pctSinBeds = rooms.length > 0 ? ((sinBeds / rooms.length) * 100).toFixed(0) : 0;
+                if (sinBeds > rooms.length * 0.5) {
+                    // Más del 50% de habitaciones sin datos de camas → sincronización pendiente
+                    const warn = document.createElement('div');
+                    warn.style = 'background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:13px;color:#92400e;font-weight:600';
+                    warn.innerHTML = `⚠️ <strong>${sinBeds} de ${rooms.length} habitaciones</strong> no tienen datos de ocupantes en Supabase (${pctSinBeds}% vacías). Los datos existen en el dispositivo donde se cargaron pero aún no se sincronizaron a la nube. Desde el sistema admin ve a Infraestructura y edita/guarda un pabellón para forzar la sincronización.`;
+                    document.getElementById('reportContent').before(warn);
+                }
+
+                const { resumen, porPabellon } = procesarDatos(buildings, rooms);
+
+                renderResumenCOPC(resumen);
+                renderDetalle(porPabellon);
+
+                document.getElementById('snapshotTime').textContent =
+                    new Date().toLocaleString('es-CL', { dateStyle: 'medium', timeStyle: 'short' });
+                document.getElementById('reportContent').classList.remove('hidden');
+
+                showMessage(`Datos cargados: ${buildings.length} edificios, ${rooms.length} habitaciones — ${sinBeds} sin sincronizar.`, sinBeds > 0 ? 'warning' : 'success');
+            } catch (err) {
+                console.error(err);
+                showMessage('Error al consultar Supabase: ' + (err.message || err), 'error');
+            } finally {
+                setLoading(false);
+            }
+        }
+
+        // expone para el botón
+        window.loadAndRender = loadAndRender;
+
+        // carga inicial automática
+        loadAndRender();
+    </script>
+</body>
+</html>

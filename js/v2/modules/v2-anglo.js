@@ -3,7 +3,7 @@
  * Búsqueda por RUT → datos trabajador → asignar hab + llave
  * Registro de incidencias: sin llave / bajó anticipado
  */
-import { supabase } from '../v2-service.js';
+import { supabase } from '../../supabaseClient.js';
 
 // Determina color de llave según turno
 function colorLlave(turno = '') {

@@ -126,27 +126,36 @@ export async function renderV2Dashboard(container) {
             <button onclick="window.navigate('v2dashboard')" style="margin-left:auto;background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;color:var(--text-primary)">🔄 Actualizar</button>
           </div>
 
-          <!-- KPIs fila 1: inventario y ocupación -->
-          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin-bottom:12px">
+          <!-- ═══ SECCIÓN 1: INVENTARIO GENERAL ═══ -->
+          <div style="font-size:11px;font-weight:800;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">📊 Inventario General</div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:20px">
             ${kpi('🛏️','Total Camas',totalCamas,'#6366f1')}
             ${kpi('✅','Disponibles',totalDisp,'#10b981')}
             ${kpi('🔴','Ocupadas',totalOcup,'#ef4444')}
-            ${kpi('📊','% Ocupación',pctGlobal+'%',pctGlobal>80?'#ef4444':pctGlobal>50?'#f59e0b':'#10b981')}
-            ${kpi('🟡','Hab. Mantención',habMant,'#f59e0b')}
+            ${kpi('📊','Ocupación',pctGlobal+'%',pctGlobal>80?'#ef4444':pctGlobal>50?'#f59e0b':'#10b981')}
+            ${habMant>0?kpi('🟡','En Mantención',habMant,'#f59e0b'):''}
             ${totalBodega>0?kpi('📦','Bodegas',totalBodega,'#64748b'):''}
             ${totalReserva>0?kpi('📌','En Reserva',totalReserva,'#7c3aed'):''}
-            ${camas4x3>0?kpi('🔄','Turno 4×3',camas4x3,'#0891b2'):''}
           </div>
 
-          <!-- KPIs fila 2: noche y Anglo (cama 1=día, cama 2=noche) -->
-          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin-bottom:16px">
-            ${kpi('🌙','Total Noche ESE,S',totalNoche,'#4338ca')}
-            ${kpi('🌙✅','Disp. Noche ESE,S',dispNoche,'#6366f1')}
-            ${totalAngloNoche>0?kpi('⛏️🌙','Anglo Noche',totalAngloNoche,'#b45309'):''}
-            ${dispAngloNoche>0||totalAngloNoche>0?kpi('⛏️🌙✅','Disp. Anglo Noche',dispAngloNoche,'#92400e'):''}
-            ${totalAngloDia>0?kpi('⛏️☀️','Anglo Día',totalAngloDia,'#d97706'):''}
-            ${dispAngloDia>0||totalAngloDia>0?kpi('⛏️☀️✅','Disp. Anglo Día',dispAngloDia,'#f59e0b'):''}
-          </div>
+          <!-- ═══ SECCIÓN 2: SECTOR ANGLO ═══ -->
+          ${(totalAngloNoche>0||totalAngloDia>0)?`
+          <div style="font-size:11px;font-weight:800;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">⛏️ Sector Anglo</div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:20px">
+            ${kpi('☀️','Anglo Día',totalAngloDia,'#d97706')}
+            ${kpi('✅','Disp. Día',dispAngloDia,'#f59e0b')}
+            ${kpi('🌙','Anglo Noche',totalAngloNoche,'#4338ca')}
+            ${kpi('✅','Disp. Noche',dispAngloNoche,'#6366f1')}
+          </div>`:''}
+
+          <!-- ═══ SECCIÓN 3: TIPOS ESPECIALES ═══ -->
+          ${(totalNoche>0||camas4x3>0)?`
+          <div style="font-size:11px;font-weight:800;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">🌙 Turno Noche / Especial</div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:20px">
+            ${totalNoche>0?kpi('🌙','Total Noche',totalNoche,'#4338ca'):''}
+            ${totalNoche>0?kpi('✅','Disp. Noche',dispNoche,'#6366f1'):''}
+            ${camas4x3>0?kpi('🔄','Turno 4×3',camas4x3,'#0891b2'):''}
+          </div>`:''}
 
           <!-- Alerta camas perdidas -->
           ${camasPerd>0?`

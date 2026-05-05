@@ -206,7 +206,7 @@
 <body>
     <div class="header">
         <h1>Dashboard — Resumen Ejecutivo</h1>
-        <div class="subtitle">Estado en vivo desde Supabase · Solo COPC</div>
+        <div class="subtitle">Estado en vivo desde Supabase · COPC + R-220</div>
         <div class="controls">
             <button class="btn btn-primary" id="refreshBtn" onclick="loadAndRender()">🔄 Actualizar datos</button>
             <a href="index.html" class="btn btn-secondary">← Volver</a>
@@ -231,37 +231,64 @@
             <div class="compact-view">
                 <div class="executive-table">
                     <table>
-                        <thead><tr><th colspan="2">📊 RESUMEN EJECUTIVO COPC</th></tr></thead>
+                        <thead><tr><th colspan="2">🏢 RESUMEN EJECUTIVO COPC</th></tr></thead>
                         <tbody>
                             <tr class="section-divider"><td colspan="2">INVENTARIO</td></tr>
-                            <tr><td class="metric-label">Total Habitaciones</td><td class="metric-value" id="totalHabitacionesCOPC">0</td></tr>
-                            <tr><td class="metric-label">Total Camas</td><td class="metric-value" id="totalCamasCOPC">0</td></tr>
-                            <tr><td class="metric-label sub-metric">Habitaciones 1 cama</td><td class="metric-value" id="totalCamas1COPC">0</td></tr>
-                            <tr><td class="metric-label sub-metric">Habitaciones 2+ camas</td><td class="metric-value" id="totalCamas2COPC">0</td></tr>
-
+                            <tr><td class="metric-label">Total Habitaciones</td><td class="metric-value" id="totalHabitacionesCOPC">—</td></tr>
+                            <tr><td class="metric-label">Total Camas</td><td class="metric-value" id="totalCamasCOPC">—</td></tr>
+                            <tr><td class="metric-label sub-metric">Hab. 1 cama</td><td class="metric-value" id="totalCamas1COPC">—</td></tr>
+                            <tr><td class="metric-label sub-metric">Hab. 2+ camas</td><td class="metric-value" id="totalCamas2COPC">—</td></tr>
                             <tr class="section-divider"><td colspan="2">OCUPACIÓN</td></tr>
-                            <tr><td class="metric-label">Camas Ocupadas</td><td class="metric-value" id="totalOcupadasCOPC">0</td></tr>
-                            <tr><td class="metric-label sub-metric">% Ocupación</td><td class="metric-value" id="porcentajeOcupadasCOPC">0%</td></tr>
-
+                            <tr><td class="metric-label">Camas Ocupadas</td><td class="metric-value" id="totalOcupadasCOPC">—</td></tr>
+                            <tr><td class="metric-label sub-metric">% Ocupación</td><td class="metric-value" id="porcentajeOcupadasCOPC">—</td></tr>
                             <tr class="section-divider"><td colspan="2">DISPONIBILIDAD</td></tr>
-                            <tr><td class="metric-label">Camas Disponibles</td><td class="metric-value" id="totalDisponiblesCOPC">0</td></tr>
-                            <tr><td class="metric-label sub-metric">% Disponibilidad</td><td class="metric-value" id="porcentajeDisponiblesCOPC">0%</td></tr>
-
+                            <tr><td class="metric-label">Camas Disponibles</td><td class="metric-value" id="totalDisponiblesCOPC">—</td></tr>
+                            <tr><td class="metric-label sub-metric">% Disponibilidad</td><td class="metric-value" id="porcentajeDisponiblesCOPC">—</td></tr>
                             <tr class="section-divider"><td colspan="2">FUERA DE SERVICIO</td></tr>
-                            <tr><td class="metric-label">Total Fuera de Servicio</td><td class="metric-value alert" id="totalFueraServicioCOPC">0</td></tr>
-                            <tr><td class="metric-label sub-metric">% Fuera de Servicio</td><td class="metric-value" id="porcentajeFueraServicioCOPC">0%</td></tr>
-                            <tr><td class="metric-label sub-metric">Bloqueadas</td><td class="metric-value" id="bloqueadasFueraCOPC">0</td></tr>
+                            <tr><td class="metric-label">Fuera de Servicio</td><td class="metric-value alert" id="totalFueraServicioCOPC">—</td></tr>
+                            <tr><td class="metric-label sub-metric">% Fuera de Servicio</td><td class="metric-value" id="porcentajeFueraServicioCOPC">—</td></tr>
                         </tbody>
                     </table>
                 </div>
 
-                <!-- R-220 dejado en desarrollo, oculto por ahora.
-                     Para reactivar: quitar la clase "hidden" y llenar los IDs *R220. -->
-                <div class="executive-table in-development hidden" id="r220Card">
+                <div class="executive-table" id="r220Card">
                     <table>
-                        <thead><tr><th colspan="2">📊 RESUMEN EJECUTIVO R-220</th></tr></thead>
+                        <thead><tr><th colspan="2">🏗️ RESUMEN EJECUTIVO R-220</th></tr></thead>
                         <tbody>
-                            <tr><td colspan="2" style="padding:30px;text-align:center;color:var(--text-muted)">Pendiente de implementación.</td></tr>
+                            <tr class="section-divider"><td colspan="2">INVENTARIO</td></tr>
+                            <tr><td class="metric-label">Total Habitaciones</td><td class="metric-value" id="totalHabitacionesR220">—</td></tr>
+                            <tr><td class="metric-label">Total Camas</td><td class="metric-value" id="totalCamasR220">—</td></tr>
+                            <tr><td class="metric-label sub-metric">Hab. 1 cama</td><td class="metric-value" id="totalCamas1R220">—</td></tr>
+                            <tr><td class="metric-label sub-metric">Hab. 2+ camas</td><td class="metric-value" id="totalCamas2R220">—</td></tr>
+                            <tr class="section-divider"><td colspan="2">OCUPACIÓN</td></tr>
+                            <tr><td class="metric-label">Camas Ocupadas</td><td class="metric-value" id="totalOcupadasR220">—</td></tr>
+                            <tr><td class="metric-label sub-metric">% Ocupación</td><td class="metric-value" id="porcentajeOcupadasR220">—</td></tr>
+                            <tr class="section-divider"><td colspan="2">DISPONIBILIDAD</td></tr>
+                            <tr><td class="metric-label">Camas Disponibles</td><td class="metric-value" id="totalDisponiblesR220">—</td></tr>
+                            <tr><td class="metric-label sub-metric">% Disponibilidad</td><td class="metric-value" id="porcentajeDisponiblesR220">—</td></tr>
+                            <tr class="section-divider"><td colspan="2">FUERA DE SERVICIO</td></tr>
+                            <tr><td class="metric-label">Fuera de Servicio</td><td class="metric-value alert" id="totalFueraServicioR220">—</td></tr>
+                            <tr><td class="metric-label sub-metric">% Fuera de Servicio</td><td class="metric-value" id="porcentajeFueraServicioR220">—</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="executive-table" style="border:2px solid #6366f1">
+                    <table>
+                        <thead><tr><th colspan="2" style="background:linear-gradient(135deg,#4338ca,#6366f1)">📊 RESUMEN COMBINADO COPC + R-220</th></tr></thead>
+                        <tbody>
+                            <tr class="section-divider"><td colspan="2">INVENTARIO TOTAL</td></tr>
+                            <tr><td class="metric-label">Total Habitaciones</td><td class="metric-value" id="totalHabitacionesCOMB">—</td></tr>
+                            <tr><td class="metric-label">Total Camas</td><td class="metric-value" id="totalCamasCOMB">—</td></tr>
+                            <tr class="section-divider"><td colspan="2">OCUPACIÓN</td></tr>
+                            <tr><td class="metric-label">Camas Ocupadas</td><td class="metric-value" id="totalOcupadasCOMB">—</td></tr>
+                            <tr><td class="metric-label sub-metric">% Ocupación</td><td class="metric-value" id="porcentajeOcupadasCOMB">—</td></tr>
+                            <tr class="section-divider"><td colspan="2">DISPONIBILIDAD</td></tr>
+                            <tr><td class="metric-label">Camas Disponibles</td><td class="metric-value" id="totalDisponiblesCOMB">—</td></tr>
+                            <tr><td class="metric-label sub-metric">% Disponibilidad</td><td class="metric-value" id="porcentajeDisponiblesCOMB">—</td></tr>
+                            <tr class="section-divider"><td colspan="2">FUERA DE SERVICIO</td></tr>
+                            <tr><td class="metric-label">Fuera de Servicio</td><td class="metric-value alert" id="totalFueraServicioCOMB">—</td></tr>
+                            <tr><td class="metric-label sub-metric">% Fuera de Servicio</td><td class="metric-value" id="porcentajeFueraServicioCOMB">—</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -290,8 +317,6 @@
 
     <script type="module">
         import { supabase } from './js/supabaseClient.js';
-
-        const EXCLUIR = new Set(['R-220']);
 
         function showMessage(msg, type = 'info') {
             const el = document.getElementById('status');
@@ -343,85 +368,109 @@
                     camasByHab[c.habitacion_id].push(c);
                 });
 
-                // Totales globales
-                let tHab=0, tCam=0, tCam1=0, tCam2=0, tOcup=0, tDisp=0, tMant=0;
-                const porPab = {};
+                // Separar COPC vs R-220
+                const mk = () => ({ hab:0,cam:0,cam1:0,cam2:0,ocup:0,disp:0,mant:0,porPab:{} });
+                const copc = mk(), r220 = mk();
 
                 habs.forEach(hab => {
                     const pab  = pabMap[hab.pabellon_id];
                     if (!pab) return;
                     const edif = edifMap[pab.edificio_id] || {};
-                    // Excluir pabellones en desarrollo
-                    if (EXCLUIR.has(pab.nombre) || EXCLUIR.has(edif.nombre)) return;
-
                     const habCamas = camasByHab[hab.id_custom] || [];
                     const nTotal   = habCamas.length;
                     if (nTotal === 0) return;
 
-                    const nOcup  = habCamas.filter(c =>
-                        c.estado === 'Ocupada' || asigSet.has(String(c.id_cama))
-                    ).length;
-                    const nMant  = habCamas.filter(c => c.estado === 'Mantencion' || c.estado === 'Mantención').length;
-                    const nDisp  = Math.max(0, nTotal - nOcup - nMant);
+                    const nOcup = habCamas.filter(c => c.estado==='Ocupada'||asigSet.has(String(c.id_cama))).length;
+                    const nMant = habCamas.filter(c => c.estado==='Mantencion'||c.estado==='Mantención').length;
+                    const nDisp = Math.max(0, nTotal - nOcup - nMant);
 
-                    tHab++; tCam += nTotal;
-                    if (nTotal === 1) tCam1++; else tCam2++;
-                    tOcup += nOcup; tDisp += nDisp; tMant += nMant;
-
-                    const key = pab.nombre;
-                    if (!porPab[key]) porPab[key] = { hab:0, cam:0, ocup:0, disp:0, mant:0 };
-                    porPab[key].hab++;
-                    porPab[key].cam  += nTotal;
-                    porPab[key].ocup += nOcup;
-                    porPab[key].disp += nDisp;
-                    porPab[key].mant += nMant;
+                    const isR220 = edif.nombre==='R-220'||edif.nombre==='R220';
+                    const t = isR220 ? r220 : copc;
+                    t.hab++; t.cam+=nTotal;
+                    if(nTotal===1) t.cam1++; else t.cam2++;
+                    t.ocup+=nOcup; t.disp+=nDisp; t.mant+=nMant;
+                    const key = (isR220?'[R-220] ':'') + pab.nombre;
+                    if(!t.porPab[key]) t.porPab[key]={hab:0,cam:0,ocup:0,disp:0,mant:0,isR220};
+                    t.porPab[key].hab++;  t.porPab[key].cam+=nTotal;
+                    t.porPab[key].ocup+=nOcup; t.porPab[key].disp+=nDisp; t.porPab[key].mant+=nMant;
                 });
+
+                const comb = {
+                    hab: copc.hab+r220.hab, cam: copc.cam+r220.cam,
+                    ocup:copc.ocup+r220.ocup, disp:copc.disp+r220.disp, mant:copc.mant+r220.mant
+                };
 
                 // ── Render resumen ejecutivo ──────────────────────────────────
-                const tc = tCam || 1;
                 const set = (id, v) => { const el=document.getElementById(id); if(el) el.textContent=v; };
-                set('totalHabitacionesCOPC',    tHab.toLocaleString());
-                set('totalCamasCOPC',           tCam.toLocaleString());
-                set('totalCamas1COPC',          tCam1.toLocaleString());
-                set('totalCamas2COPC',          tCam2.toLocaleString());
-                set('totalOcupadasCOPC',        tOcup.toLocaleString());
-                set('porcentajeOcupadasCOPC',   ((tOcup/tc)*100).toFixed(1)+'%');
-                set('totalDisponiblesCOPC',     tDisp.toLocaleString());
-                set('porcentajeDisponiblesCOPC',((tDisp/tc)*100).toFixed(1)+'%');
-                set('totalFueraServicioCOPC',   tMant.toLocaleString());
-                set('porcentajeFueraServicioCOPC',((tMant/tc)*100).toFixed(1)+'%');
-                set('bloqueadasFueraCOPC',      tMant.toLocaleString());
+                const pct = (a,b) => b>0 ? ((a/b)*100).toFixed(1)+'%' : '0.0%';
 
-                // ── Render detalle por pabellón ───────────────────────────────
+                // COPC
+                set('totalHabitacionesCOPC',    copc.hab.toLocaleString());
+                set('totalCamasCOPC',           copc.cam.toLocaleString());
+                set('totalCamas1COPC',          copc.cam1.toLocaleString());
+                set('totalCamas2COPC',          copc.cam2.toLocaleString());
+                set('totalOcupadasCOPC',        copc.ocup.toLocaleString());
+                set('porcentajeOcupadasCOPC',   pct(copc.ocup,copc.cam));
+                set('totalDisponiblesCOPC',     copc.disp.toLocaleString());
+                set('porcentajeDisponiblesCOPC',pct(copc.disp,copc.cam));
+                set('totalFueraServicioCOPC',   copc.mant.toLocaleString());
+                set('porcentajeFueraServicioCOPC',pct(copc.mant,copc.cam));
+                // R-220
+                set('totalHabitacionesR220',    r220.hab.toLocaleString());
+                set('totalCamasR220',           r220.cam.toLocaleString());
+                set('totalCamas1R220',          r220.cam1.toLocaleString());
+                set('totalCamas2R220',          r220.cam2.toLocaleString());
+                set('totalOcupadasR220',        r220.ocup.toLocaleString());
+                set('porcentajeOcupadasR220',   pct(r220.ocup,r220.cam));
+                set('totalDisponiblesR220',     r220.disp.toLocaleString());
+                set('porcentajeDisponiblesR220',pct(r220.disp,r220.cam));
+                set('totalFueraServicioR220',   r220.mant.toLocaleString());
+                set('porcentajeFueraServicioR220',pct(r220.mant,r220.cam));
+                // Combinado
+                set('totalHabitacionesCOMB',    comb.hab.toLocaleString());
+                set('totalCamasCOMB',           comb.cam.toLocaleString());
+                set('totalOcupadasCOMB',        comb.ocup.toLocaleString());
+                set('porcentajeOcupadasCOMB',   pct(comb.ocup,comb.cam));
+                set('totalDisponiblesCOMB',     comb.disp.toLocaleString());
+                set('porcentajeDisponiblesCOMB',pct(comb.disp,comb.cam));
+                set('totalFueraServicioCOMB',   comb.mant.toLocaleString());
+                set('porcentajeFueraServicioCOMB',pct(comb.mant,comb.cam));
+
+                // ── Render detalle por pabellón (COPC → R-220 → TOTAL) ───────
                 const tbody = document.getElementById('detailedTableBody');
                 tbody.innerHTML = '';
-                const nombres = Object.keys(porPab).sort((a,b) =>
-                    a.localeCompare(b, 'es', { numeric:true, sensitivity:'base' })
-                );
-                let rHab=0, rCam=0, rOcup=0, rDisp=0, rMant=0;
-                nombres.forEach(n => {
-                    const p = porPab[n];
-                    const pct = p.cam > 0 ? ((p.ocup/p.cam)*100).toFixed(1) : '0.0';
-                    rHab+=p.hab; rCam+=p.cam; rOcup+=p.ocup; rDisp+=p.disp; rMant+=p.mant;
-                    tbody.insertAdjacentHTML('beforeend', `
-                        <tr>
-                            <td class="pabellon-name">${n}</td>
-                            <td>${p.hab}</td>
-                            <td>${p.cam}</td>
-                            <td>${p.ocup}</td>
-                            <td>—</td>
-                            <td>${p.disp}</td>
-                            <td>${p.mant}</td>
-                            <td class="occupancy-percentage">${pct}%</td>
-                        </tr>`);
-                });
-                const pctT = rCam > 0 ? ((rOcup/rCam)*100).toFixed(1) : '0.0';
-                tbody.insertAdjacentHTML('beforeend', `
-                    <tr class="total-row">
-                        <td>TOTAL</td><td>${rHab}</td><td>${rCam}</td>
-                        <td>${rOcup}</td><td>—</td><td>${rDisp}</td>
-                        <td>${rMant}</td><td class="occupancy-percentage">${pctT}%</td>
-                    </tr>`);
+                const renderSection = (label, porPabObj, color) => {
+                    tbody.insertAdjacentHTML('beforeend',
+                        `<tr><td colspan="8" style="background:${color};color:#fff;font-weight:800;font-size:11px;
+                            text-align:center;padding:7px;letter-spacing:1px">${label}</td></tr>`);
+                    const nombres = Object.keys(porPabObj).sort((a,b)=>a.localeCompare(b,'es',{numeric:true,sensitivity:'base'}));
+                    let sHab=0,sCam=0,sOcup=0,sDisp=0,sMant=0;
+                    nombres.forEach(n => {
+                        const p = porPabObj[n];
+                        const pp = p.cam>0?((p.ocup/p.cam)*100).toFixed(1):'0.0';
+                        sHab+=p.hab;sCam+=p.cam;sOcup+=p.ocup;sDisp+=p.disp;sMant+=p.mant;
+                        tbody.insertAdjacentHTML('beforeend',`
+                        <tr><td class="pabellon-name">${n.replace('[R-220] ','')}</td>
+                            <td>${p.hab}</td><td>${p.cam}</td><td>${p.ocup}</td>
+                            <td>—</td><td>${p.disp}</td><td>${p.mant}</td>
+                            <td class="occupancy-percentage">${pp}%</td></tr>`);
+                    });
+                    const sp=sCam>0?((sOcup/sCam)*100).toFixed(1):'0.0';
+                    tbody.insertAdjacentHTML('beforeend',
+                        `<tr class="total-row"><td>Subtotal ${label}</td><td>${sHab}</td><td>${sCam}</td>
+                        <td>${sOcup}</td><td>—</td><td>${sDisp}</td><td>${sMant}</td>
+                        <td class="occupancy-percentage">${sp}%</td></tr>`);
+                    return {sHab,sCam,sOcup,sDisp,sMant};
+                };
+                const sc = renderSection('COPC', copc.porPab, '#1e293b');
+                const sr = renderSection('R-220', r220.porPab, '#4338ca');
+                const gH=sc.sHab+sr.sHab,gC=sc.sCam+sr.sCam,gO=sc.sOcup+sr.sOcup,gD=sc.sDisp+sr.sDisp,gM=sc.sMant+sr.sMant;
+                const gP=gC>0?((gO/gC)*100).toFixed(1):'0.0';
+                tbody.insertAdjacentHTML('beforeend',
+                    `<tr class="total-row" style="border-top:3px solid #6366f1">
+                        <td>TOTAL GENERAL (COPC+R-220)</td><td>${gH}</td><td>${gC}</td>
+                        <td>${gO}</td><td>—</td><td>${gD}</td><td>${gM}</td>
+                        <td class="occupancy-percentage">${gP}%</td></tr>`);
 
                 document.getElementById('snapshotTime').textContent =
                     new Date().toLocaleString('es-CL', { dateStyle:'medium', timeStyle:'short' });

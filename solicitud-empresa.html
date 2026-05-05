@@ -944,11 +944,33 @@
                     styleData(cellF);
                     cellF.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE6F7FF' } }; // azul claro
 
-                    // Col G: RUT
+                    // Col G: RUT — con validación de dígito verificador chileno (MOD-11)
                     var cellG = ws.getRow(row).getCell(7);
                     styleData(cellG);
                     cellG.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE6F7FF' } };
-                    cellG.note = { texts: [{ text: 'Formato: 12345678-9', font: { size: 9 } }] };
+                    cellG.note = { texts: [{ text: 'Formato: 12345678-9 ó 12345678-K\nEl dígito verificador es validado automáticamente.', font: { size: 9 } }] };
+                    // Fórmula MOD-11 para dígito verificador chileno (relativa a cada fila)
+                    // Permite celda vacía. Si se ingresa RUT, valida que el DV sea correcto.
+                    var rutFormula = 'OR(G' + row + '="",'
+                        + 'IFERROR(AND('
+                        +   'FIND("-",G' + row + ')>1,'
+                        +   'ISNUMBER(--LEFT(G' + row + ',FIND("-",G' + row + ')-1)),'
+                        +   'MOD(11-MOD(SUMPRODUCT('
+                        +     'VALUE(MID(TEXT(VALUE(LEFT(G' + row + ',FIND("-",G' + row + ')-1)),"000000000"),{1,2,3,4,5,6,7,8,9},1)),'
+                        +     '{4,3,2,7,6,5,4,3,2}'
+                        +   '),11),11)='
+                        +   'IF(UPPER(RIGHT(G' + row + ',1))="K",10,'
+                        +     'IF(ISNUMBER(--RIGHT(G' + row + ',1)),VALUE(RIGHT(G' + row + ',1)),-1))'
+                        + '),FALSE))';
+                    cellG.dataValidation = {
+                        type: 'custom',
+                        allowBlank: true,
+                        formulae: [rutFormula],
+                        showErrorMessage: true,
+                        errorStyle: 'stop',
+                        errorTitle: '❌ RUT inválido',
+                        error: 'El dígito verificador no es correcto.\nFormato: 12345678-9  ó  12345678-K'
+                    };
 
                     // Col H: Contacto
                     styleData(ws.getRow(row).getCell(8));

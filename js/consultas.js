@@ -524,11 +524,11 @@ function generarResumenGeneral(datos) {
           <div style="font-size:10px;color:#64748b;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-top:2px">${label}</div>
          </div>`;
 
-    let edificiosHTML = '';
+    let copcHTML = '', r220HTML = '', copcCam=0,copcOcu=0,copcLib=0, r220Cam=0,r220Ocu=0,r220Lib=0;
     const edSorted = Object.entries(stats.porEdificio).sort((a, b) => a[0].localeCompare(b[0]));
     edSorted.forEach(([nombre, ed]) => {
         const pctOc = ed.total === 0 ? 0 : Math.round((ed.ocupadas / ed.total) * 100);
-        edificiosHTML += `
+        const row = `
         <tr>
             <td style="font-weight:600;padding:8px 12px;">${nombre}</td>
             <td style="text-align:center;padding:8px 12px;">${ed.total}</td>
@@ -539,7 +539,13 @@ function generarResumenGeneral(datos) {
                 <span style="background:${pctOc > 80 ? '#fee2e2' : pctOc > 50 ? '#fef3c7' : '#dcfce7'};color:${pctOc > 80 ? '#c0392b' : pctOc > 50 ? '#b45309' : '#16a34a'};padding:2px 10px;border-radius:99px;font-size:12px;font-weight:700;">${pctOc}%</span>
             </td>
         </tr>`;
+        if (/r.?220/i.test(nombre)) {
+            r220HTML += row; r220Cam+=ed.camas; r220Ocu+=ed.ocupadas; r220Lib+=ed.libres;
+        } else {
+            copcHTML += row; copcCam+=ed.camas; copcOcu+=ed.ocupadas; copcLib+=ed.libres;
+        }
     });
+    const totCam=copcCam+r220Cam, totOcu=copcOcu+r220Ocu, totLib=copcLib+r220Lib;
 
     let empresasHTML = '';
     empresas.slice(0, 10).forEach(([emp, count]) => {
@@ -630,11 +636,45 @@ function generarResumenGeneral(datos) {
         </div>
 
         <h3 class="section-title">📊 Estado por Edificio</h3>
-        <div class="table-wrap">
+
+        <!-- COPC colapsable -->
+        <details style="margin-bottom:10px">
+          <summary style="cursor:pointer;background:linear-gradient(135deg,#1e293b,#334155);color:#fff;
+            padding:10px 16px;border-radius:10px;font-weight:700;font-size:13px;list-style:none;
+            display:flex;justify-content:space-between;align-items:center">
+            <span>🏢 Campamento COPC &nbsp;<span style="opacity:.7;font-size:11px">${copcCam} camas · ${copcLib} disp. · ${copcCam>0?Math.round(copcOcu/copcCam*100):0}% ocup.</span></span>
+            <span style="font-size:11px;opacity:.6">▼ ver</span>
+          </summary>
+          <div class="table-wrap">
             <table class="informe-table">
-                <thead><tr><th>Edificio</th><th>Total Hab.</th><th>Libres</th><th>Ocupadas</th><th>Camas</th><th>Ocupación</th></tr></thead>
-                <tbody>${edificiosHTML}</tbody>
+              <thead><tr><th>Edificio</th><th>Total Hab.</th><th>Libres</th><th>Ocupadas</th><th>Camas</th><th>Ocupación</th></tr></thead>
+              <tbody>${copcHTML}</tbody>
             </table>
+          </div>
+        </details>
+
+        <!-- R-220 colapsable -->
+        ${r220HTML ? `
+        <details style="margin-bottom:10px">
+          <summary style="cursor:pointer;background:linear-gradient(135deg,#312e81,#4338ca);color:#fff;
+            padding:10px 16px;border-radius:10px;font-weight:700;font-size:13px;list-style:none;
+            display:flex;justify-content:space-between;align-items:center">
+            <span>🏗️ Edificio R-220 &nbsp;<span style="opacity:.7;font-size:11px">${r220Cam} camas · ${r220Lib} disp. · ${r220Cam>0?Math.round(r220Ocu/r220Cam*100):0}% ocup.</span></span>
+            <span style="font-size:11px;opacity:.6">▼ ver</span>
+          </summary>
+          <div class="table-wrap">
+            <table class="informe-table">
+              <thead><tr><th>Edificio</th><th>Total Hab.</th><th>Libres</th><th>Ocupadas</th><th>Camas</th><th>Ocupación</th></tr></thead>
+              <tbody>${r220HTML}</tbody>
+            </table>
+          </div>
+        </details>` : ''}
+
+        <!-- Resumen Combinado -->
+        <div style="background:linear-gradient(135deg,#4338ca,#6366f1);border-radius:10px;padding:12px 18px;
+          display:flex;justify-content:space-between;align-items:center;color:#fff;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+          <span style="font-weight:800;font-size:14px">📊 TOTAL COMBINADO COPC + R-220</span>
+          <span style="font-size:13px;opacity:.9">${totCam} camas &middot; ${totLib} disp. &middot; ${totCam>0?Math.round(totOcu/totCam*100):0}% ocupación</span>
         </div>
 
         ${empresas.length > 0 ? `

@@ -212,13 +212,13 @@ async function _cargarTodos() {
             const {data:habs}=await supabase.from('v2_habitaciones').select('id_custom').ilike('numero_hab',item.hab);
             if (!habs?.length) { err.push(`${item.nombre}: HAB ${item.hab} no encontrada`); continue; }
             const habId=habs[0].id_custom;
-            // Cama según turno
-            const esNoche=item.llave==='rojo';
+            // Camas en orden: el primero que llega a la HAB → cama 1, el segundo → cama 2
+            // Se obtienen ordenadas por id_cama, y se toma la primera DISPONIBLE
             const {data:camas}=await supabase.from('v2_camas').select('id_cama,estado').eq('habitacion_id',habId).order('id_cama');
             if (!camas?.length) { err.push(`${item.nombre}: Sin camas en HAB ${item.hab}`); continue; }
-            const preferida=camas[esNoche?1:0]||camas[0];
-            const camaId=preferida?.estado==='Disponible' ? preferida.id_cama : (camas.find(c=>c.estado==='Disponible')?.id_cama);
-            if (!camaId) { err.push(`${item.nombre}: HAB ${item.hab} sin camas disponibles`); continue; }
+            const camaDisp=camas.find(c=>c.estado==='Disponible');
+            if (!camaDisp) { err.push(`${item.nombre}: HAB ${item.hab} sin camas disponibles`); continue; }
+            const camaId=camaDisp.id_cama;
             // Check-in
             await doCheckin({idCama:camaId,rutHuesped:item.rut,nombreHuesped:item.nombre,empresaId,fechaCheckin:hoy,fechaSalidaProgramada:item.salida||null,esPreAsignacion:false});
             await supabase.from('v2_asignaciones').update({huesped_confirmo:true}).eq('id_cama',camaId).is('fecha_checkout',null);
@@ -239,8 +239,13 @@ async function _cargarTodos() {
 
 // ── REGISTRO ──────────────────────────────────────────────────────────────────
 async function _loadReg() {
-    const {data}=await supabase.from('v2_asignaciones_anglo').select('*,v2_usuarios_anglo(nombre,cargo,turno)').eq('activa',true).order('fecha_asignacion',{ascending:false}).limit(300);
-    _registro=data||[]; _renderReg(_registro);
+    try {
+        const {data}=await supabase.from('v2_asignaciones_anglo').select('*,v2_usuarios_anglo(nombre,cargo,turno)').eq('activa',true).order('fecha_asignacion',{ascending:false}).limit(300);
+        _registro=data||[]; _renderReg(_registro);
+    } catch(e) {
+        const el=document.getElementById('a-lista');
+        if(el) el.innerHTML=`<p style="color:#ef4444;text-align:center;padding:20px">Error cargando registro: ${e.message}</p>`;
+    }
 }
 
 function _renderReg(rows) {
@@ -266,8 +271,13 @@ function _renderReg(rows) {
 
 // ── INCIDENCIAS ───────────────────────────────────────────────────────────────
 async function _loadInc() {
-    const {data}=await supabase.from('v2_incidencias_anglo').select('*,v2_usuarios_anglo(nombre,cargo)').order('created_at',{ascending:false}).limit(300);
-    _incidencias=data||[]; _renderInc(_incidencias);
+    try {
+        const {data}=await supabase.from('v2_incidencias_anglo').select('*,v2_usuarios_anglo(nombre,cargo)').order('created_at',{ascending:false}).limit(300);
+        _incidencias=data||[]; _renderInc(_incidencias);
+    } catch(e) {
+        const el=document.getElementById('a-incid');
+        if(el) el.innerHTML=`<p style="color:#ef4444;text-align:center;padding:20px">Error cargando incidencias: ${e.message}</p>`;
+    }
 }
 
 function _renderInc(rows) {

@@ -93,11 +93,20 @@
             box-shadow: var(--shadow-sm);
         }
 
-        .compact-view {
-            display: grid;
-            grid-template-columns: 1fr;
-            gap: 20px;
+        details > summary {
+            cursor: pointer;
+            list-style: none;
+            padding: 12px 18px;
+            border-radius: var(--radius-md);
+            font-weight: 700;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            user-select: none;
         }
+        details > summary::-webkit-details-marker { display: none; }
+        details[open] > summary { border-radius: var(--radius-md) var(--radius-md) 0 0; margin-bottom: 0; }
 
         .executive-table {
             background: var(--bg-card);
@@ -226,13 +235,16 @@
         <div id="reportContent" class="hidden">
             <div class="report-header" id="reportHeader">
                 <span id="reportTitle">Resumen en vivo · <span id="snapshotTime"></span></span>
-            </div>
+                    <div class="compact-view">
 
-            <div class="compact-view">
-                <div class="executive-table">
-                    <table>
-                        <thead><tr><th colspan="2">🏢 RESUMEN EJECUTIVO COPC</th></tr></thead>
-                        <tbody>
+                <!-- COPC colapsable -->
+                <details>
+                  <summary style="background:linear-gradient(135deg,#1e293b,#334155);color:#fff">
+                    <span>🏢 RESUMEN EJECUTIVO COPC</span>
+                    <span style="font-size:12px;opacity:.7">▼ ver detalle</span>
+                  </summary>
+                  <div class="executive-table">
+                    <table><tbody>
                             <tr class="section-divider"><td colspan="2">INVENTARIO</td></tr>
                             <tr><td class="metric-label">Total Habitaciones</td><td class="metric-value" id="totalHabitacionesCOPC">—</td></tr>
                             <tr><td class="metric-label">Total Camas</td><td class="metric-value" id="totalCamasCOPC">—</td></tr>
@@ -247,14 +259,18 @@
                             <tr class="section-divider"><td colspan="2">FUERA DE SERVICIO</td></tr>
                             <tr><td class="metric-label">Fuera de Servicio</td><td class="metric-value alert" id="totalFueraServicioCOPC">—</td></tr>
                             <tr><td class="metric-label sub-metric">% Fuera de Servicio</td><td class="metric-value" id="porcentajeFueraServicioCOPC">—</td></tr>
-                        </tbody>
-                    </table>
-                </div>
+                    </tbody></table>
+                  </div>
+                </details>
 
-                <div class="executive-table" id="r220Card">
-                    <table>
-                        <thead><tr><th colspan="2">🏗️ RESUMEN EJECUTIVO R-220</th></tr></thead>
-                        <tbody>
+                <!-- R-220 colapsable -->
+                <details>
+                  <summary style="background:linear-gradient(135deg,#312e81,#4338ca);color:#fff">
+                    <span>🏗️ RESUMEN EJECUTIVO R-220</span>
+                    <span style="font-size:12px;opacity:.7">▼ ver detalle</span>
+                  </summary>
+                  <div class="executive-table" id="r220Card">
+                    <table><tbody>
                             <tr class="section-divider"><td colspan="2">INVENTARIO</td></tr>
                             <tr><td class="metric-label">Total Habitaciones</td><td class="metric-value" id="totalHabitacionesR220">—</td></tr>
                             <tr><td class="metric-label">Total Camas</td><td class="metric-value" id="totalCamasR220">—</td></tr>
@@ -269,14 +285,18 @@
                             <tr class="section-divider"><td colspan="2">FUERA DE SERVICIO</td></tr>
                             <tr><td class="metric-label">Fuera de Servicio</td><td class="metric-value alert" id="totalFueraServicioR220">—</td></tr>
                             <tr><td class="metric-label sub-metric">% Fuera de Servicio</td><td class="metric-value" id="porcentajeFueraServicioR220">—</td></tr>
-                        </tbody>
-                    </table>
-                </div>
+                    </tbody></table>
+                  </div>
+                </details>
 
-                <div class="executive-table" style="border:2px solid #6366f1">
-                    <table>
-                        <thead><tr><th colspan="2" style="background:linear-gradient(135deg,#4338ca,#6366f1)">📊 RESUMEN COMBINADO COPC + R-220</th></tr></thead>
-                        <tbody>
+                <!-- Combinado abierto por defecto -->
+                <details open>
+                  <summary style="background:linear-gradient(135deg,#4338ca,#6366f1);color:#fff">
+                    <span>📊 RESUMEN COMBINADO COPC + R-220</span>
+                    <span style="font-size:12px;opacity:.7">▼ ver detalle</span>
+                  </summary>
+                  <div class="executive-table" style="border:2px solid #6366f1">
+                    <table><tbody>
                             <tr class="section-divider"><td colspan="2">INVENTARIO TOTAL</td></tr>
                             <tr><td class="metric-label">Total Habitaciones</td><td class="metric-value" id="totalHabitacionesCOMB">—</td></tr>
                             <tr><td class="metric-label">Total Camas</td><td class="metric-value" id="totalCamasCOMB">—</td></tr>
@@ -289,13 +309,18 @@
                             <tr class="section-divider"><td colspan="2">FUERA DE SERVICIO</td></tr>
                             <tr><td class="metric-label">Fuera de Servicio</td><td class="metric-value alert" id="totalFueraServicioCOMB">—</td></tr>
                             <tr><td class="metric-label sub-metric">% Fuera de Servicio</td><td class="metric-value" id="porcentajeFueraServicioCOMB">—</td></tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
+                    </tbody></table>
+                  </div>
+                </details>
 
-            <div class="section-header">📋 Detalle por Pabellón</div>
-            <div class="detailed-table">
+            <!-- Detalle por Pabellón colapsable -->
+            <details style="margin-top:24px">
+              <summary style="background:linear-gradient(135deg,#0f172a,#1e293b);color:#fff;
+                padding:14px 20px;border-radius:var(--radius-md);font-weight:600;font-size:15px">
+                <span>📋 Detalle por Pabellón (COPC + R-220)</span>
+                <span style="font-size:12px;opacity:.7">▼ expandir</span>
+              </summary>
+              <div class="detailed-table">
                 <table>
                     <thead>
                         <tr>

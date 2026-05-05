@@ -90,6 +90,20 @@ export async function renderV2Dashboard(container) {
         const totalReserva  = reservaSet.size;
         const totalBodega   = bodegaSet.size;
 
+        // Separar edificios COPC vs R-220
+        const reporteCOPC = reporte.filter(r => !String(r.edificio||'').match(/r.?220/i));
+        const reporteR220 = reporte.filter(r =>  String(r.edificio||'').match(/r.?220/i));
+        const subTot = arr => ({
+            cam: arr.reduce((s,r)=>s+(r.total_camas||0),0),
+            ocu: arr.reduce((s,r)=>s+(r.camas_ocupadas||0),0),
+            dis: arr.reduce((s,r)=>s+(r.camas_disponibles||0),0),
+            man: arr.reduce((s,r)=>s+(r.camas_mantencion||0),0),
+        });
+        const stCOPC = subTot(reporteCOPC);
+        const stR220 = subTot(reporteR220);
+        const pctCOPC = stCOPC.cam > 0 ? Math.round(stCOPC.ocu/stCOPC.cam*100) : 0;
+        const pctR220 = stR220.cam > 0 ? Math.round(stR220.ocu/stR220.cam*100) : 0;
+
         container.innerHTML = `
         <div style="padding:20px;max-width:1400px;margin:0 auto">
           <div style="display:flex;align-items:center;gap:12px;margin-bottom:24px;flex-wrap:wrap">
@@ -158,30 +172,62 @@ export async function renderV2Dashboard(container) {
             </div>
           </div>
 
-          <h2 style="font-size:13px;font-weight:700;color:var(--text-muted);margin:0 0 12px;text-transform:uppercase;letter-spacing:0.5px">Por Edificio</h2>
-          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;margin-bottom:24px">
-            ${reporte.map(r => edificioCard(r)).join('')}
-          </div>
+          <!-- Por Edificio: COPC colapsable -->
+          <details open style="margin-bottom:12px">
+            <summary style="cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between;
+              background:linear-gradient(135deg,#1e293b,#334155);color:#fff;padding:12px 18px;
+              border-radius:12px;font-weight:700;font-size:14px;user-select:none">
+              <span>🏢 Campamento COPC &nbsp;<span style="opacity:.7;font-size:12px;font-weight:500">${stCOPC.cam} camas &middot; ${stCOPC.dis} disp. &middot; ${pctCOPC}% ocup.</span></span>
+              <span style="font-size:12px;opacity:.6">▼ ver detalle</span>
+            </summary>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;padding:14px 0 4px">
+              ${reporteCOPC.map(r => edificioCard(r)).join('')}
+            </div>
+          </details>
 
-          <h2 style="font-size:13px;font-weight:700;color:var(--text-muted);margin:0 0 12px;text-transform:uppercase;letter-spacing:0.5px">Últimos Check-ins Activos</h2>
-          <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:16px;overflow:hidden;overflow-x:auto">
-            ${activas.length === 0
-              ? `<div style="padding:40px;text-align:center;color:var(--text-muted)">Sin huéspedes activos · Usa <strong>🛎️ Check-in</strong> para registrar el primer ingreso</div>`
-              : `<table style="width:100%;border-collapse:collapse;min-width:550px">
-                  <thead><tr style="background:var(--bg);border-bottom:1px solid var(--border)">
-                    ${['Huésped','RUT','Cama','Empresa','Check-in'].map(h=>`<th style="padding:11px 14px;text-align:left;font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase">${h}</th>`).join('')}
-                  </tr></thead>
-                  <tbody>
-                    ${activas.map((a,i)=>`<tr style="border-bottom:1px solid var(--border);background:${i%2===0?'transparent':'var(--bg)'}">
-                      <td style="padding:11px 14px;font-weight:600;font-size:13px;color:var(--text-primary)">${a.nombre_huesped}</td>
-                      <td style="padding:11px 14px;font-size:12px;font-family:monospace;color:var(--text-secondary)">${a.rut_huesped}</td>
-                      <td style="padding:11px 14px;font-size:12px;font-family:monospace;color:#6366f1;font-weight:700">${a.id_cama}</td>
-                      <td style="padding:11px 14px;font-size:12px;color:var(--text-secondary)">${a.v2_empresas?.nombre||'—'}</td>
-                      <td style="padding:11px 14px;font-size:12px;color:var(--text-muted)">${a.fecha_checkin}</td>
-                    </tr>`).join('')}
-                  </tbody>
-                </table>`}
-          </div>
+          <!-- Por Edificio: R-220 colapsable -->
+          ${reporteR220.length > 0 ? `
+          <details style="margin-bottom:12px">
+            <summary style="cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between;
+              background:linear-gradient(135deg,#312e81,#4338ca);color:#fff;padding:12px 18px;
+              border-radius:12px;font-weight:700;font-size:14px;user-select:none">
+              <span>🏗️ Edificio R-220 &nbsp;<span style="opacity:.7;font-size:12px;font-weight:500">${stR220.cam} camas &middot; ${stR220.dis} disp. &middot; ${pctR220}% ocup.</span></span>
+              <span style="font-size:12px;opacity:.6">▼ ver detalle</span>
+            </summary>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;padding:14px 0 4px">
+              ${reporteR220.map(r => edificioCard(r)).join('')}
+            </div>
+          </details>` : ''}
+
+          <!-- Últimos Check-ins colapsable -->
+          <details style="margin-bottom:12px">
+            <summary style="cursor:pointer;list-style:none;display:flex;align-items:center;gap:10px;
+              background:var(--bg-card);border:1px solid var(--border);padding:12px 18px;
+              border-radius:12px;font-weight:700;font-size:13px;color:var(--text-primary);user-select:none">
+              🛎️ Últimos Check-ins Activos
+              <span style="background:#6366f1;color:#fff;border-radius:6px;padding:2px 8px;font-size:11px">${activas.length}</span>
+              <span style="margin-left:auto;font-size:11px;color:var(--text-muted)">▼ ver</span>
+            </summary>
+            <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:0 0 12px 12px;overflow:hidden;overflow-x:auto">
+              ${activas.length === 0
+                ? `<div style="padding:30px;text-align:center;color:var(--text-muted)">Sin huéspedes activos</div>`
+                : `<table style="width:100%;border-collapse:collapse;min-width:500px">
+                    <thead><tr style="background:var(--bg);border-bottom:1px solid var(--border)">
+                      ${['Huésped','RUT','Cama','Empresa','Check-in'].map(h=>`<th style="padding:10px 14px;text-align:left;font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase">${h}</th>`).join('')}
+                    </tr></thead>
+                    <tbody>
+                      ${activas.map((a,i)=>`<tr style="border-bottom:1px solid var(--border);background:${i%2===0?'transparent':'var(--bg)'}">
+                        <td style="padding:10px 14px;font-weight:600;font-size:13px">${a.nombre_huesped}</td>
+                        <td style="padding:10px 14px;font-size:12px;font-family:monospace;color:var(--text-secondary)">${a.rut_huesped}</td>
+                        <td style="padding:10px 14px;font-size:12px;font-family:monospace;color:#6366f1;font-weight:700">${a.id_cama}</td>
+                        <td style="padding:10px 14px;font-size:12px;color:var(--text-secondary)">${a.v2_empresas?.nombre||'—'}</td>
+                        <td style="padding:10px 14px;font-size:12px;color:var(--text-muted)">${a.fecha_checkin}</td>
+                      </tr>`).join('')}
+                    </tbody>
+                  </table>`}
+            </div>
+          </details>
+
         </div>`;
     } catch(e) {
         console.error('[v2-dashboard]', e);

@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Asignación Anglo — PC Hotelería</title>
+<style>
+  :root{--bg:#0f172a;--bg-card:#1e293b;--border:#334155;--text:#f1f5f9;--muted:#94a3b8;--accent:#f97316;--green:#22c55e;--red:#ef4444;--blue:#3b82f6}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;min-height:100vh;padding:20px}
+  h1{font-size:22px;font-weight:800;margin-bottom:4px}
+  .subtitle{color:var(--muted);font-size:13px;margin-bottom:24px}
+  .card{background:var(--bg-card);border:1px solid var(--border);border-radius:16px;padding:20px;margin-bottom:16px}
+  label{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:6px}
+  input,select{width:100%;padding:10px 14px;border-radius:10px;border:1.5px solid var(--border);background:var(--bg);color:var(--text);font-size:14px;outline:none;transition:border-color .2s}
+  input:focus,select:focus{border-color:var(--accent)}
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+  .btn{padding:10px 18px;border-radius:10px;border:none;font-weight:700;font-size:13px;cursor:pointer;transition:.15s}
+  .btn-primary{background:var(--accent);color:#fff}
+  .btn-primary:hover{background:#ea6c10}
+  .btn-danger{background:var(--red);color:#fff;font-size:11px;padding:6px 12px}
+  .btn-warning{background:#f59e0b;color:#fff;font-size:11px;padding:6px 12px}
+  .btn-sm{background:var(--border);color:var(--text);font-size:11px;padding:6px 12px}
+  .user-box{background:rgba(249,115,22,.08);border:1.5px solid var(--accent);border-radius:12px;padding:14px;margin-top:12px;display:none}
+  .user-name{font-size:17px;font-weight:800;color:var(--accent)}
+  .user-meta{font-size:12px;color:var(--muted);margin-top:2px}
+  .badge{display:inline-block;border-radius:6px;padding:2px 8px;font-size:11px;font-weight:700}
+  .badge-red{background:rgba(239,68,68,.15);color:var(--red)}
+  .badge-orange{background:rgba(249,115,22,.15);color:var(--accent)}
+  .badge-green{background:rgba(34,197,94,.15);color:var(--green)}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{text-align:left;font-size:10px;color:var(--muted);text-transform:uppercase;padding:8px 10px;border-bottom:1px solid var(--border)}
+  td{padding:10px;border-bottom:1px solid rgba(255,255,255,.04);vertical-align:middle}
+  tr:hover td{background:rgba(255,255,255,.02)}
+  .msg{padding:10px 14px;border-radius:8px;font-size:13px;font-weight:600;margin-top:10px;display:none}
+  .msg-ok{background:rgba(34,197,94,.15);color:var(--green);display:block}
+  .msg-err{background:rgba(239,68,68,.15);color:var(--red);display:block}
+  .tabs{display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap}
+  .tab{padding:8px 18px;border-radius:10px;border:1.5px solid var(--border);background:var(--bg-card);color:var(--muted);font-size:13px;font-weight:700;cursor:pointer;transition:.15s}
+  .tab.active{border-color:var(--accent);color:var(--accent);background:rgba(249,115,22,.08)}
+  .section{display:none}.section.active{display:block}
+  .search-row{display:flex;gap:10px;margin-bottom:16px}
+  .search-row input{flex:1}
+  .incid-row{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.05)}
+  .incid-icon{font-size:18px;width:30px;text-align:center}
+</style>
+</head>
+<body>
+<div style="max-width:960px;margin:0 auto">
+  <h1>🔑 Asignación Anglo</h1>
+  <p class="subtitle">Directorio de trabajadores · Gestión de habitaciones y llaves</p>
+
+  <div class="tabs">
+    <button class="tab active" onclick="showTab('asignar')">➕ Nueva Asignación</button>
+    <button class="tab" onclick="showTab('registro')">📋 Registro Activo</button>
+    <button class="tab" onclick="showTab('incidencias')">⚠️ Incidencias</button>
+  </div>
+
+  <!-- ── TAB 1: Nueva Asignación ── -->
+  <div id="tab-asignar" class="section active">
+    <div class="card">
+      <label>Buscar trabajador por RUT</label>
+      <div style="display:flex;gap:10px">
+        <input id="rut-input" type="text" placeholder="Ej: 12345678" oninput="buscarRut(this.value)" style="flex:1">
+      </div>
+      <div id="user-info" class="user-box">
+        <div class="user-name" id="ui-nombre"></div>
+        <div class="user-meta" id="ui-cargo"></div>
+        <div class="user-meta" id="ui-gerencia"></div>
+        <div class="user-meta" id="ui-turno"></div>
+        <div id="ui-incid" style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap"></div>
+      </div>
+    </div>
+
+    <div class="card" id="form-asig" style="display:none">
+      <div class="row" style="margin-bottom:12px">
+        <div><label>Número de Habitación</label><input id="num-hab" type="text" placeholder="Ej: 4119"></div>
+        <div><label>Fecha de Salida Programada</label><input id="fecha-sal" type="date"></div>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+        <input type="checkbox" id="llave-check" checked style="width:auto">
+        <label style="margin:0;font-size:13px;text-transform:none;letter-spacing:0">🔑 Se entregó llave</label>
+      </div>
+      <button class="btn btn-primary" onclick="registrarAsignacion()">✅ Registrar Asignación</button>
+      <div id="msg-asig" class="msg"></div>
+    </div>
+  </div>
+
+  <!-- ── TAB 2: Registro activo ── -->
+  <div id="tab-registro" class="section">
+    <div class="card">
+      <div class="search-row">
+        <input id="search-reg" type="text" placeholder="Buscar por nombre o RUT…" oninput="filtrarRegistro(this.value)">
+        <button class="btn btn-sm" onclick="cargarRegistro()">🔄 Actualizar</button>
+      </div>
+      <div id="tabla-registro"><p style="color:var(--muted);text-align:center;padding:20px">Cargando…</p></div>
+    </div>
+  </div>
+
+  <!-- ── TAB 3: Incidencias ── -->
+  <div id="tab-incidencias" class="section">
+    <div class="card">
+      <div class="search-row">
+        <input id="search-incid" type="text" placeholder="Buscar trabajador…" oninput="filtrarIncidencias(this.value)">
+        <select id="tipo-incid" style="width:auto;flex:0 0 200px">
+          <option value="">Todos los tipos</option>
+          <option value="sin_llave">🔑 Sin llave</option>
+          <option value="bajo_anticipado">🏃 Bajó anticipado</option>
+        </select>
+        <button class="btn btn-sm" onclick="cargarIncidencias()">🔄 Actualizar</button>
+      </div>
+      <div id="tabla-incid"><p style="color:var(--muted);text-align:center;padding:20px">Cargando…</p></div>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm';
+
+// ── Supabase config ──────────────────────────────────────────────
+const SUPA_URL = 'https://fvtnyxkaxquhmguufbrc.supabase.co';
+const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ2dG55eGtheHF1aG1ndXVmYnJjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDQ3NDc0MjksImV4cCI6MjA2MDMyMzQyOX0.HMk_Wi-0qvnR3_szFBHuI_5s8VB8MPFEX8MF_rDCYlw';
+const sb = createClient(SUPA_URL, SUPA_KEY);
+
+let _rut = null, _registro = [], _incidencias = [];
+
+// ── BÚSQUEDA RUT ─────────────────────────────────────────────────
+let _timer;
+window.buscarRut = (val) => {
+  clearTimeout(_timer);
+  const rut = val.trim().replace(/\D/g,'');
+  if (rut.length < 6) { document.getElementById('user-info').style.display='none'; document.getElementById('form-asig').style.display='none'; return; }
+  _timer = setTimeout(() => _buscar(rut), 350);
+};
+
+async function _buscar(rut) {
+  const { data } = await sb.from('v2_usuarios_anglo').select('*').eq('rut', rut).maybeSingle();
+  const box = document.getElementById('user-info');
+  const form = document.getElementById('form-asig');
+  if (!data) { box.style.display='none'; form.style.display='none'; return; }
+  _rut = data.rut;
+  document.getElementById('ui-nombre').textContent = data.nombre;
+  document.getElementById('ui-cargo').textContent = '💼 ' + (data.cargo || '-');
+  document.getElementById('ui-gerencia').textContent = '🏢 ' + (data.gerencia || '-');
+  document.getElementById('ui-turno').textContent = '🔄 ' + (data.turno || '-');
+  box.style.display = 'block';
+  form.style.display = 'block';
+
+  // Mostrar contadores de incidencias
+  const [{ count: sl }, { count: ba }] = await Promise.all([
+    sb.from('v2_incidencias_anglo').select('*',{count:'exact',head:true}).eq('rut',rut).eq('tipo','sin_llave'),
+    sb.from('v2_incidencias_anglo').select('*',{count:'exact',head:true}).eq('rut',rut).eq('tipo','bajo_anticipado'),
+  ]);
+  const incDiv = document.getElementById('ui-incid');
+  incDiv.innerHTML = '';
+  if (sl > 0) incDiv.innerHTML += `<span class="badge badge-red">🔑 ${sl} sin llave</span>`;
+  if (ba > 0) incDiv.innerHTML += `<span class="badge badge-orange">🏃 ${ba} bajó anticipado</span>`;
+  if (!sl && !ba) incDiv.innerHTML = '<span class="badge badge-green">✅ Sin incidencias</span>';
+}
+
+// ── REGISTRAR ASIGNACIÓN ─────────────────────────────────────────
+window.registrarAsignacion = async () => {
+  if (!_rut) return;
+  const hab = document.getElementById('num-hab').value.trim();
+  const salida = document.getElementById('fecha-sal').value;
+  const llave = document.getElementById('llave-check').checked;
+  const msgEl = document.getElementById('msg-asig');
+  if (!hab) { msgEl.textContent='⚠️ Ingresa número de habitación'; msgEl.className='msg msg-err'; return; }
+
+  // Desactivar asignaciones previas activas
+  await sb.from('v2_asignaciones_anglo').update({activa:false}).eq('rut',_rut).eq('activa',true);
+  const { error } = await sb.from('v2_asignaciones_anglo').insert({
+    rut: _rut, numero_hab: hab,
+    fecha_salida_prog: salida || null,
+    llave_entregada: llave, activa: true
+  });
+  if (error) { msgEl.textContent='❌ '+error.message; msgEl.className='msg msg-err'; return; }
+  msgEl.textContent = '✅ Asignación registrada — HAB ' + hab;
+  msgEl.className = 'msg msg-ok';
+  document.getElementById('num-hab').value = '';
+  document.getElementById('fecha-sal').value = '';
+  setTimeout(() => msgEl.className='msg', 3000);
+};
+
+// ── REGISTRO ACTIVO ──────────────────────────────────────────────
+window.cargarRegistro = async () => {
+  const { data } = await sb.from('v2_asignaciones_anglo')
+    .select('*, v2_usuarios_anglo(nombre,cargo,gerencia)')
+    .eq('activa', true).order('fecha_asignacion', {ascending:false}).limit(200);
+  _registro = data || [];
+  _renderRegistro(_registro);
+};
+
+window.filtrarRegistro = (q) => {
+  const r = _registro.filter(x => {
+    const n = (x.v2_usuarios_anglo?.nombre||'').toLowerCase();
+    return n.includes(q.toLowerCase()) || x.rut.includes(q);
+  });
+  _renderRegistro(r);
+};
+
+function _renderRegistro(rows) {
+  const el = document.getElementById('tabla-registro');
+  if (!rows.length) { el.innerHTML='<p style="color:var(--muted);text-align:center;padding:20px">Sin resultados</p>'; return; }
+  el.innerHTML = `<table>
+    <thead><tr><th>Trabajador</th><th>Cargo</th><th>HAB</th><th>Llave</th><th>Salida prog.</th><th>Acciones</th></tr></thead>
+    <tbody>${rows.map(r => `
+      <tr>
+        <td><div style="font-weight:700">${r.v2_usuarios_anglo?.nombre||r.rut}</div><div style="font-size:11px;color:var(--muted)">${r.rut}</div></td>
+        <td style="font-size:12px;color:var(--muted)">${r.v2_usuarios_anglo?.cargo||'-'}</td>
+        <td><b>${r.numero_hab}</b></td>
+        <td>${r.llave_devuelta ? '<span class="badge badge-green">✅ Devuelta</span>' : r.llave_entregada ? '<span class="badge badge-orange">🔑 Pendiente</span>' : '<span class="badge badge-red">❌ Sin llave</span>'}</td>
+        <td style="font-size:12px">${r.fecha_salida_prog||'-'}</td>
+        <td style="display:flex;gap:6px;flex-wrap:wrap">
+          ${!r.llave_devuelta && r.llave_entregada ? `<button class="btn btn-sm" onclick="marcarDevuelta(${r.id})" style="background:rgba(34,197,94,.15);color:var(--green)">🔑 Devolvió</button>` : ''}
+          <button class="btn btn-danger" onclick="registrarIncidencia('${r.rut}','sin_llave')">❌ Sin llave</button>
+          <button class="btn btn-warning" onclick="registrarIncidencia('${r.rut}','bajo_anticipado')">🏃 Bajó antes</button>
+        </td>
+      </tr>`).join('')}
+    </tbody>
+  </table>`;
+}
+
+window.marcarDevuelta = async (id) => {
+  await sb.from('v2_asignaciones_anglo').update({llave_devuelta:true, fecha_devolucion: new Date().toISOString().split('T')[0]}).eq('id',id);
+  cargarRegistro();
+};
+
+window.registrarIncidencia = async (rut, tipo) => {
+  const obs = tipo === 'sin_llave' ? prompt('Observación (opcional):') : prompt('Ingresa observación y fecha si es distinta a hoy:');
+  const { error } = await sb.from('v2_incidencias_anglo').insert({ rut, tipo, observacion: obs||null });
+  if (!error) { alert(tipo==='sin_llave' ? '🔑 Incidencia "Sin llave" registrada' : '🏃 Baja anticipada registrada'); cargarRegistro(); }
+};
+
+// ── INCIDENCIAS ──────────────────────────────────────────────────
+window.cargarIncidencias = async () => {
+  const { data } = await sb.from('v2_incidencias_anglo')
+    .select('*, v2_usuarios_anglo(nombre,cargo)')
+    .order('created_at',{ascending:false}).limit(300);
+  _incidencias = data || [];
+  _renderIncidencias(_incidencias);
+};
+
+window.filtrarIncidencias = (q) => {
+  const tipo = document.getElementById('tipo-incid').value;
+  const r = _incidencias.filter(x => {
+    const n = (x.v2_usuarios_anglo?.nombre||'').toLowerCase();
+    const matchQ = !q || n.includes(q.toLowerCase()) || x.rut.includes(q);
+    const matchT = !tipo || x.tipo === tipo;
+    return matchQ && matchT;
+  });
+  _renderIncidencias(r);
+};
+document.getElementById('tipo-incid').addEventListener('change', () => filtrarIncidencias(document.getElementById('search-incid').value));
+
+function _renderIncidencias(rows) {
+  // Agrupar por RUT
+  const byRut = {};
+  rows.forEach(r => { if (!byRut[r.rut]) byRut[r.rut] = []; byRut[r.rut].push(r); });
+  const el = document.getElementById('tabla-incid');
+  if (!rows.length) { el.innerHTML='<p style="color:var(--muted);text-align:center;padding:20px">Sin incidencias</p>'; return; }
+  el.innerHTML = Object.entries(byRut).map(([rut, items]) => {
+    const nombre = items[0].v2_usuarios_anglo?.nombre || rut;
+    const cargo = items[0].v2_usuarios_anglo?.cargo || '';
+    const sl = items.filter(i=>i.tipo==='sin_llave').length;
+    const ba = items.filter(i=>i.tipo==='bajo_anticipado').length;
+    return `<div style="border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px">
+        <div>
+          <div style="font-weight:800;font-size:15px">${nombre}</div>
+          <div style="font-size:12px;color:var(--muted)">${cargo} · ${rut}</div>
+        </div>
+        <div style="display:flex;gap:6px">
+          ${sl>0?`<span class="badge badge-red">🔑 ${sl} sin llave</span>`:''}
+          ${ba>0?`<span class="badge badge-orange">🏃 ${ba} bajó antes</span>`:''}
+        </div>
+      </div>
+      ${items.map(i=>`<div class="incid-row">
+        <div class="incid-icon">${i.tipo==='sin_llave'?'🔑':'🏃'}</div>
+        <div style="flex:1">
+          <span style="font-size:12px;font-weight:700">${i.tipo==='sin_llave'?'Sin llave':'Bajó anticipado'}</span>
+          <span style="font-size:11px;color:var(--muted);margin-left:8px">${i.fecha||''}</span>
+          ${i.observacion?`<div style="font-size:11px;color:var(--muted)">${i.observacion}</div>`:''}
+        </div>
+        ${!i.resuelto?`<button class="btn btn-sm" style="font-size:10px;padding:4px 8px" onclick="resolverIncidencia(${i.id})">✓ Resolver</button>`:'<span style="font-size:10px;color:var(--green)">✓ Resuelto</span>'}
+      </div>`).join('')}
+    </div>`;
+  }).join('');
+}
+
+window.resolverIncidencia = async (id) => {
+  await sb.from('v2_incidencias_anglo').update({resuelto:true}).eq('id',id);
+  cargarIncidencias();
+};
+
+// ── TABS ─────────────────────────────────────────────────────────
+window.showTab = (tab) => {
+  document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.getElementById('tab-'+tab).classList.add('active');
+  event.target.classList.add('active');
+  if (tab==='registro') cargarRegistro();
+  if (tab==='incidencias') cargarIncidencias();
+};
+</script>
+</body>
+</html>

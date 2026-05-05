@@ -30,7 +30,6 @@ export async function renderV2Dashboard(container) {
         // Detección rápida de camas perdidas + cálculos de disponibilidad por tipo (paginado)
         let camasPerd = 0, dispNoche = 0, dispAnglo = 0, habMant = 0;
         let dispAngloNoche = 0, dispAngloDia = 0, totalAngloNoche = 0, totalAngloDia = 0;
-        let totalNocheEseS = 0, dispNocheEseS = 0;
         try {
             const _fetchPag = async (tabla, sel, filtro=null) => {
                 let all=[],pg=0;
@@ -80,25 +79,6 @@ export async function renderV2Dashboard(container) {
             totalAngloNoche = angloNocheSet.size;
             totalAngloDia   = angloDiaSet.size;
 
-            // Pabellón 7 = ESE,S — camas noche en P7
-            try {
-                const { data: p7Pabs } = await supabase
-                    .from('v2_pabellones')
-                    .select('id')
-                    .or('nombre.eq.P-7,nombre.eq.P7,nombre.eq.7,nombre.ilike.%pabellón 7%,nombre.ilike.%pabellon 7%');
-                if (p7Pabs?.length) {
-                    const { data: p7HabsData } = await supabase
-                        .from('v2_habitaciones')
-                        .select('id_custom')
-                        .in('pabellon_id', p7Pabs.map(p => p.id));
-                    const p7HabSet  = new Set((p7HabsData || []).map(h => String(h.id_custom)));
-                    const p7CamaSet = new Set(camTodos.filter(c => p7HabSet.has(String(c.habitacion_id))).map(c => String(c.id_cama)));
-                    totalNocheEseS = camTodos.filter(c => p7CamaSet.has(String(c.id_cama)) && nocheSet.has(String(c.id_cama))).length;
-                    dispNocheEseS  = camTodos.filter(c => p7CamaSet.has(String(c.id_cama)) && nocheSet.has(String(c.id_cama)) && esDisp(c)).length;
-                    console.log(`[dashboard] P7 ESE,S noche: total=${totalNocheEseS} disp=${dispNocheEseS}`);
-                }
-            } catch(eP7){ console.warn('[dashboard] P7 ESE,S:', eP7); }
-
             // Habitaciones en mantención (TODAS sus camas en mantención)
             Object.values(porHab).forEach(cs => {
                 const enMant = cs.every(c => c.estado === 'Mantencion' || c.estado === 'Mantención');
@@ -135,10 +115,8 @@ export async function renderV2Dashboard(container) {
 
           <!-- KPIs fila 2: noche y Anglo (cama 1=día, cama 2=noche) -->
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin-bottom:16px">
-            ${kpi('🌙','Total Noche',totalNoche,'#4338ca')}
-            ${kpi('🌙✅','Disp. Noche',dispNoche,'#6366f1')}
-            ${totalNocheEseS>0?kpi('🌙7️⃣','Total Noche ESE,S',totalNocheEseS,'#1d4ed8'):''}
-            ${totalNocheEseS>0?kpi('🌙7️⃣✅','Disp. Noche ESE,S',dispNocheEseS,'#2563eb'):''}
+            ${kpi('🌙','Total Noche ESE,S',totalNoche,'#4338ca')}
+            ${kpi('🌙✅','Disp. Noche ESE,S',dispNoche,'#6366f1')}
             ${totalAngloNoche>0?kpi('⛏️🌙','Anglo Noche',totalAngloNoche,'#b45309'):''}
             ${dispAngloNoche>0||totalAngloNoche>0?kpi('⛏️🌙✅','Disp. Anglo Noche',dispAngloNoche,'#92400e'):''}
             ${totalAngloDia>0?kpi('⛏️☀️','Anglo Día',totalAngloDia,'#d97706'):''}

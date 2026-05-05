@@ -1,4 +1,4 @@
--- Inserción de usuarios Anglo (2261 registros)
+-- Usuarios Anglo (2259 únicos)
 INSERT INTO v2_usuarios_anglo (rut, nombre, area, cargo, gerencia, turno, email) VALUES
   ('11831334','Manuel Ramirez Rojas','ESSENCIAL','EMPLEADO','GERENCIA MINA LB','POR DEFINIR','JACINTO.RUBILAR@ANGLOAMERICAN.COM'),
   ('17393492','Luis Cerda Toro','ESSENCIAL','EMPLEADO','GERENCIA MINA LB','POR DEFINIR','RUBENA.RUBILARF@ANGLOAMERICAN.COM'),
@@ -2008,10 +2008,10 @@ INSERT INTO v2_usuarios_anglo (rut, nombre, area, cargo, gerencia, turno, email)
   ('7681175K','Ricardo Alfonso Roca Silva','GERENTE PERSONAS Y ORGANIZACIÓN LB','GERENTE PERSONAS Y ORGANIZACIÓN LB','GERENCIA DE PERSONAS Y ORGANIZACIÓN LB','LB 5x2 Adm','JENNIFER.FRIAS@ANGLOAMERICAN.COM'),
   ('8124104K','Alvaro Rodrigo Soto Herrera','Supervisor','GERENTE DE SEGURIDAD, SALUD OCUPACIONAL','GERENCIA SEGURIDAD Y SALUD OCUPACIONAL','LB 5x2 Adm','EMELINA.GUERRA@ANGLOAMERICAN.COM'),
   ('8387659K','Alejandro Elias Ibañez Pua','Empleado','MONITOR CAPACITACION LB','GERENCIA MINA LB','LB 4x4 Turno AB (puro) G4','PAULINA.TOBAR@ANGLOAMERICAN.COM'),
-  ('8835088K','Juan Martinez Lizana','Empleado','OPERADOR PPAL. SERVICIOS LB','GERENCIA MINA LB','LB 4x4 Turno AB (puro) G3','NELSON.ARANCIBIA@ANGLOAMERICAN.COM'),
+  ('8835088K','Juan Martinez Lizana','Empleado','OPERADOR PPAL. CARGUIO LB','GERENCIA MINA LB','LB 4x4 Turno AB (puro) G3','NATALIA.MUNOZ@ANGLOAMERICAN.COM'),
   ('9044963K','Nelson Patricio Aedo San Martin','Supervisor','JEFE MANTENCIÓN MOTORES DIESEL LB','GERENCIA MANTENCIÓN MINA LB','LB 5x2 Adm','OMAR.PALLAUTA@ANGLOAMERICAN.COM'),
   ('9050388K','Luis Alberto Salgado Norambuena','Empleado','OPERADOR PPAL. TRANSPORTE LB','GERENCIA MINA LB','LB 4x4 Turno AB (puro) G2','LUIS.CHAVEZ@ANGLOAMERICAN.COM'),
-  ('9618008K','Juan Ronald Hurtado Orellana','Empleado','OPERADOR MAYOR TRANSPORTE LB','GERENCIA MINA LB','LB 4x4 Turno AB (puro) G1','MARGARITA.OSORIO@ANGLOAMERICAN.COM'),
+  ('9618008K','Juan Ronald Hurtado Orellana','Empleado','OPERADOR MAYOR TRANSPORTE LB','GERENCIA MINA LB','LB 4x4 Turno AB (puro) G3','CRISTIAN.CORTES.G@ANGLOAMERICAN.COM'),
   ('9832996K','Juan F. Gonzalez Espinoza','Empleado','COORDINADOR OPERACIONES STP LB','GERENCIA PLANTAS LB','LT 5x2 Adm','GONZALO.VALENZUELA@ANGLOAMERICAN.COM'),
   ('9971395K','Victor Hugo Venegas Norambuena','Empleado','COORDINADOR TEAM SERVICIO LT','GERENCIA PLANTAS LB','LT 5x2 Adm','HECTOR.MAUREIRA@ANGLOAMERICAN.COM'),
   ('10016504K','Oscar Alejandro Saavedra Castillo','Empleado','MANTENEDOR PRINCIPAL MECANICO LB','GERENCIA MANTENCIÓN MINA LB','LB 4x4 Turno AB (puro) G2','ENZO.AREVALO@ANGLOAMERICAN.COM'),
@@ -2178,8 +2178,6 @@ INSERT INTO v2_usuarios_anglo (rut, nombre, area, cargo, gerencia, turno, email)
   ('20085750K','Martin Rodrigo Saavedra Garcia','Empleado','OPERADOR MANTENEDOR PRINCIPAL LB','GERENCIA MANTENCIÓN MINA LB','LB 4x4 Turno A G4','MAURICIO.RODRIGUEZ@ANGLOAMERICAN.COM'),
   ('20604974K','SALAZAR TAPIA JUAN DANIEL','ESSENCIAL','EMPLEADO','GERENCIA MINA LB','POR DEFINIR','STEFANIA.MORILLOS@ANGLOAMERICAN.COM'),
   ('26180171K','Carmen Saydely Torrealba Blanco','Empleado','PLANIFICACIÓN SUPERIOR MECANICO LB','GERENCIA MANTENCIÓN PLANTA LB','LT 5x2 Adm','EDINSON.PEREZ@ANGLOAMERICAN.COM'),
-  ('8835088K','Juan Martinez Lizana','Empleado','OPERADOR PPAL. CARGUIO LB','GERENCIA MINA LB','LB 4x4 Turno AB (puro) G3','NATALIA.MUNOZ@ANGLOAMERICAN.COM'),
-  ('9618008K','Juan Ronald Hurtado Orellana','Empleado','OPERADOR MAYOR TRANSPORTE LB','GERENCIA MINA LB','LB 4x4 Turno AB (puro) G3','CRISTIAN.CORTES.G@ANGLOAMERICAN.COM'),
   ('119900808','Osvaldo Morales Olivares','ESSENCIAL','','','','HANS.GARCIA@ANGLOAMERICAN.COM'),
   ('m00269948','De wet Strydom','Ingeniero principal','','GERENCIA MINA LB','visita especial',''),
   ('161143103','Paula Velasquez','Esachs','','','',''),
@@ -2262,5 +2260,5 @@ INSERT INTO v2_usuarios_anglo (rut, nombre, area, cargo, gerencia, turno, email)
   ('168165528','Danilo Espinoza','','','','',''),
   ('141288865','Rogelio Ronald Gutierrez Figueroa','PROYECTO','SUPERVISOR','PROYECTO','7X7','')
 ON CONFLICT (rut) DO UPDATE SET
-  nombre = EXCLUDED.nombre, area = EXCLUDED.area, cargo = EXCLUDED.cargo,
-  gerencia = EXCLUDED.gerencia, turno = EXCLUDED.turno, email = EXCLUDED.email;
+  nombre=EXCLUDED.nombre, area=EXCLUDED.area, cargo=EXCLUDED.cargo,
+  gerencia=EXCLUDED.gerencia, turno=EXCLUDED.turno, email=EXCLUDED.email;

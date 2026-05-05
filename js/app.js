@@ -1,41 +1,64 @@
 /**
  * PC Hotelería — Main Application Router
- * Integrado con Supabase Auth y Sincronización Offline-First
+ * Sistema V2 — Todas las rutas conectadas a tablas v2_
  */
 
-import { openDB, getAll, getById, put, remove, seedDemoData, cleanupExpiredAssignments, getExpiredBeds, confirmCheckout, ensureDefaultUsers, ensureAramarkReservations, ensureAllRooms, freeAllRoomRestrictions, procesarColaDeSincronizacion, preloadAllData, initRealtimeSync, startPeriodicCloudRefresh, autoPromoteNextOccupants } from './db.js';
+import { openDB, getAll, getById, put, remove, seedDemoData, cleanupExpiredAssignments, getExpiredBeds, confirmCheckout, ensureDefaultUsers, ensureAramarkReservations, ensureAllRooms, freeAllRoomRestrictions, procesarColaDeSincronizacion, preloadAllData, initRealtimeSync, startPeriodicCloudRefresh, autoPromoteNextOccupants, purgeSyncQueue } from './db.js';
 import { showToast, watchOnlineStatus } from './utils.js';
-import { renderDashboard } from './modules/dashboard.js';
-import { renderInfraestructura } from './modules/infraestructura.js?v=5';
-import { renderSolicitudes } from './modules/solicitudes.js?v=4';
-import { renderCenso } from './modules/censo.js';
-import { renderReportes } from './modules/reportes.js';
+import { renderV2Infraestructura } from './v2/modules/v2-infraestructura.js';
+import { renderV2Dashboard } from './v2/modules/v2-dashboard.js';
+import { renderV2Buscador } from './v2/modules/v2-buscador.js';
+import { renderV2Checkin } from './v2/modules/v2-checkin.js';
+import { renderV2Trabajadores } from './v2/modules/v2-trabajadores.js';
+import { renderV2Solicitudes } from './v2/modules/v2-solicitudes.js?v=20260429-5';
+import { renderV2CamasPerdidas } from './v2/modules/v2-camas-perdidas.js';
+import { renderV2Cupos }      from './v2/modules/v2-cupos.js';
+import { renderV2Censo }      from './v2/modules/v2-censo.js';
+import { renderV2Distribucion } from './v2/modules/v2-distribucion.js';
+
+// ── Supervisores autorizados (Cupos por Gerencia + Censo Admin) ──────────────
+const SUPERVISOR_EMAILS = [
+    'garrido-juan2@aramark.cl',
+    'vegao-rodrigo@aramark.cl',
+    'barrera-guissele@aramark.cl',
+    'juan-1154@hotmail.es'  // superadmin también tiene acceso
+];
+function getRole(email) {
+    if (email === 'juan-1154@hotmail.es') return 'superadmin';
+    if (SUPERVISOR_EMAILS.includes(email.toLowerCase())) return 'supervisor';
+    return 'admin';
+}
 import { renderUsuarios } from './modules/usuarios.js';
 import { renderAsistencia } from './modules/asistencia.js';
 import { renderCupos } from './modules/cupos.js';
 import { loginApp, logoutApp, checkSession } from './auth.js';
 
 // Exponer globalmente para uso en Dashboard e Infraestructura (después de todos los imports)
-window.__getExpiredBeds        = getExpiredBeds;
-window.__confirmCheckout       = confirmCheckout;
-window.__autoPromoteRotativo   = autoPromoteNextOccupants;
+window.__getExpiredBeds = getExpiredBeds;
+window.__confirmCheckout = confirmCheckout;
+window.__autoPromoteRotativo = autoPromoteNextOccupants;
 
 // ── Current route ────────────────────────────────────
-let currentRoute = 'dashboard';
-
-
+let currentRoute = 'v2dashboard';
 
 const ROUTES = {
-    dashboard: { label: 'Dashboard', icon: '📊', render: renderDashboard },
-    infraestructura: { label: 'Infraestructura', icon: '🏢', render: renderInfraestructura },
-    solicitudes: { label: 'Reservas de Alojamiento', icon: '📩', render: renderSolicitudes },
-    censo: { label: 'Censo en Terreno', icon: '📋', render: renderCenso },
-    reportes: { label: 'Reportes e Historial', icon: '📈', render: renderReportes },
-    // Superadmin
-    cupos:       { label: 'Cupos por Gerencia',           icon: '🎯', render: renderCupos,       superadminOnly: true },
-    asistencia:  { label: 'Control Asistencia',           icon: '✅', render: renderAsistencia,   superadminOnly: true },
-    users:       { label: 'Gestión de Administradores',   icon: '👥', render: renderUsuarios,     superadminOnly: true },
+    // ── V2 (Sistema Principal) ────────────────────────────────
+    v2dashboard:      { label: 'Dashboard',               icon: '📊', render: renderV2Dashboard },
+    v2infraestructura:{ label: 'Infraestructura',          icon: '🏛️', render: renderV2Infraestructura },
+    v2censo:          { label: 'Censo Administrativo',     icon: '📅', render: renderV2Censo },
+    v2checkin:        { label: 'Check-in / Check-out',     icon: '🛎️', render: renderV2Checkin },
+    v2buscador:       { label: 'Buscar Huésped',           icon: '🔍', render: renderV2Buscador },
+    v2trabajadores:   { label: 'Padrón Trabajadores',      icon: '👥', render: renderV2Trabajadores },
+    v2solicitudes:    { label: 'Solicitudes Pendientes',   icon: '🔔', render: renderV2Solicitudes, badge: true },
+    v2camasperdidas:  { label: 'Camas Perdidas',           icon: '🛏️', render: renderV2CamasPerdidas },
+    v2cupos:          { label: 'Cupos por Gerencia',       icon: '📊', render: renderV2Cupos,        supervisorOnly: true },
+    v2distribucion:   { label: 'Distribución Habitaciones',icon: '🏨', render: renderV2Distribucion, supervisorOnly: true },
+    // ── Superadmin ────────────────────────────────────────────
+    cupos:      { label: 'Cupos por Gerencia',          icon: '🎯', render: renderCupos,      superadminOnly: true, hidden: true },
+    asistencia: { label: 'Control Asistencia',           icon: '✅', render: renderAsistencia, superadminOnly: true, hidden: true },
+    users:      { label: 'Gestión de Administradores', icon: '👥', render: renderUsuarios,  superadminOnly: true },
 };
+
 
 
 async function boot() {
@@ -71,7 +94,7 @@ async function boot() {
         // 🔄 MODO ROTATIVO: promover nextOccupant → occupant cuando la fecha ya llegó
         autoPromoteNextOccupants().then(n => {
             if (n > 0) showToast(`🔄 ${n} trabajador${n !== 1 ? 'es' : ''} del turno entrante promovidos automáticamente`, 'success', 5000);
-        }).catch(() => {});
+        }).catch(() => { });
 
     } catch (e) { console.warn('[Boot] Maintenance failed', e); }
 
@@ -84,7 +107,7 @@ async function boot() {
         window._currentUser = {
             username: userSession.email,
             name: userSession.email.split('@')[0],
-            role: userSession.email === 'juan-1154@hotmail.es' ? 'superadmin' : 'admin'
+            role: getRole(userSession.email)
         };
         initApp();
     }
@@ -151,6 +174,9 @@ async function initApp() {
         initRealtimeSync(); // Re-suscribir si se recupera la conexión
     });
 
+    // 🧹 Purgar cola offline atascada con peticiones legacy (rooms, buildings, etc.)
+    purgeSyncQueue(); // Limpieza de un solo disparo — no bloquea la UI
+
     // 🔄 Auto-refresh periódico — garantiza convergencia aunque Realtime falle
     startPeriodicCloudRefresh();
 
@@ -168,8 +194,8 @@ async function initApp() {
 
         // 🔒 Guard: no re-renderizar si hay un modal abierto (carga masiva, Anglo, etc.)
         const modalOpen = document.getElementById('carga-masiva-modal') ||
-                          document.getElementById('anglo-modal') ||
-                          document.querySelector('.modal-overlay.visible, .side-drawer-overlay.visible');
+            document.getElementById('anglo-modal') ||
+            document.querySelector('.modal-overlay.visible, .side-drawer-overlay.visible');
         if (modalOpen) return;
 
         if (route === 'infraestructura') {
@@ -187,7 +213,7 @@ async function initApp() {
         }
 
         if (route === 'dashboard') {
-            import('./modules/dashboard.js').then(m => m.renderDashboard(content)).catch(() => {});
+            import('./modules/dashboard.js').then(m => m.renderDashboard(content)).catch(() => { });
         }
 
         if (route === 'censo') {
@@ -199,7 +225,7 @@ async function initApp() {
     window.addEventListener('solicitudes-updated', () => {
         const content = document.getElementById('page-content');
         if (content && window._currentRoute === 'solicitudes') {
-            import('./modules/solicitudes.js?v=4').then(m => m.renderSolicitudes(content)).catch(() => {});
+            import('./modules/solicitudes.js?v=4').then(m => m.renderSolicitudes(content)).catch(() => { });
         }
     });
 
@@ -209,7 +235,7 @@ async function initApp() {
         if (storeName === 'gerencia_quotas' && source !== 'local') {
             if (window._currentRoute === 'cupos') {
                 const content = document.getElementById('page-content');
-                if (content) import('./modules/cupos.js').then(m => m.renderCupos(content)).catch(() => {});
+                if (content) import('./modules/cupos.js').then(m => m.renderCupos(content)).catch(() => { });
             }
         }
     });
@@ -222,6 +248,8 @@ async function initApp() {
 
 
     buildNav();
+    _refreshPendingBadge(); // 🔔 Cargar conteo inicial de pendientes
+    setInterval(_refreshPendingBadge, 60_000); // 🔄 Refrescar cada 60 s
 
     watchOnlineStatus(
         () => {
@@ -295,7 +323,7 @@ function showLoginOverlay() {
                 window._currentUser = {
                     username: result.user.email,
                     name: result.user.email.split('@')[0],
-                    role: result.user.email === 'juan-1154@hotmail.es' ? 'superadmin' : 'admin'
+                    role: getRole(result.user.email)
                 };
 
                 try { await put('logs', { timestamp: new Date().toISOString(), username: userVal, action: 'LOGIN', details: 'Acceso seguro en la nube' }); } catch (err) { }
@@ -326,24 +354,50 @@ function showLoginOverlay() {
     });
 }
 
+// ── Badge: Solicitudes Pendientes ───────────────────────────────────────────
+async function _refreshPendingBadge() {
+    try {
+        const { supabase } = await import('./supabaseClient.js');
+        const { count, error } = await supabase
+            .from('v2_solicitudes_b2b')
+            .select('id', { count: 'exact', head: true })
+            .eq('status', 'pendiente');
+        if (error) return;
+        const badge = document.getElementById('badge-v2solicitudes');
+        if (!badge) return;
+        if (count > 0) {
+            badge.textContent = count > 99 ? '99+' : String(count);
+            badge.style.display = 'inline-block';
+        } else {
+            badge.style.display = 'none';
+        }
+    } catch (_) { /* silencioso */ }
+}
+
 function buildNav() {
     const navEl = document.getElementById('sidebar-nav');
     const bottomNavEl = document.getElementById('bottom-nav');
     if (!navEl) return;
 
     navEl.innerHTML = `
-    <div class="nav-section-label">Principal</div>
-    ${navItemHTML('dashboard', ROUTES.dashboard)}
-    
-    <div class="nav-section-label">Módulos</div>
-    ${Object.entries(ROUTES).filter(([k, r]) => k !== 'dashboard' && !r.superadminOnly).map(([key, r]) => navItemHTML(key, r)).join('')}
-    
+    <div class="nav-section-label">Campamentos Perez V2</div>
+    ${Object.entries(ROUTES).filter(([k, r]) => !r.superadminOnly && !r.supervisorOnly && !r.hidden).map(([key, r]) => navItemHTML(key, r)).join('')}
+
+    ${(['supervisor','superadmin'].includes(window._currentUser?.role)) ? `
+    <div class="nav-section-label">Supervisores</div>
+    ${Object.entries(ROUTES).filter(([k, r]) => r.supervisorOnly && !r.hidden).map(([key, r]) => navItemHTML(key, r)).join('')}
+    ` : ''}
+
     ${window._currentUser?.role === 'superadmin' ? `
     <div class="nav-section-label">Super Visor</div>
-    ${Object.entries(ROUTES).filter(([k, r]) => r.superadminOnly).map(([key, r]) => navItemHTML(key, r)).join('')}
+    ${Object.entries(ROUTES).filter(([k, r]) => r.superadminOnly && !r.hidden).map(([key, r]) => navItemHTML(key, r)).join('')}
     ` : ''}
 
     <div class="nav-section-label">Portales</div>
+    <a href="dashboard-resumen.html" target="_blank" class="nav-item" style="background:linear-gradient(135deg,rgba(99,102,241,0.10),rgba(139,92,246,0.06));border:1px solid rgba(99,102,241,0.22);border-radius:10px;">
+      <span class="nav-icon">📈</span>
+      <span class="nav-label" style="color:#4f46e5;font-weight:700;">Resumen General</span>
+    </a>
     <a href="censo-portal.html" target="_blank" class="nav-item">
       <span class="nav-icon">📋</span>
       <span class="nav-label">Censo Terreno (Portal)</span>
@@ -381,10 +435,14 @@ function buildNav() {
 }
 
 function navItemHTML(key, r) {
+    const badgeHtml = r.badge
+        ? `<span id="badge-${key}" style="margin-left:auto;background:#ef4444;color:#fff;border-radius:99px;font-size:10px;font-weight:800;padding:1px 7px;min-width:18px;text-align:center;display:none;">!</span>`
+        : '';
     return `<div class="nav-item ${key === currentRoute ? 'active' : ''}" 
                id="nav-${key}" onclick="window.navigate('${key}')">
     <span class="nav-icon">${r.icon}</span>
     <span class="nav-label">${r.label}</span>
+    ${badgeHtml}
   </div>`;
 }
 

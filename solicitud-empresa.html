@@ -1,40 +1,69 @@
 <!DOCTYPE html>
 <html lang="es">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Portal de Solicitudes B2B — PC Hotelería</title>
-    <meta name="description" content="Portal oficial de reservas de alojamiento para empresas colaboradoras e industriales de PC Hotelería.">
+    <meta name="description"
+        content="Portal oficial de reservas de alojamiento para empresas colaboradoras e industriales de PC Hotelería.">
     <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap"
+        rel="stylesheet">
+    <!-- Forzar no-caché: este portal SIEMPRE debe cargarse fresco -->
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <!-- Desregistrar Service Worker para que no sirva versión cacheada -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.getRegistrations().then(regs => {
+                regs.forEach(r => r.unregister());
+            });
+        }
+        // Limpiar caché de CacheStorage
+        if ('caches' in window) {
+            caches.keys().then(keys => keys.forEach(k => caches.delete(k)));
+        }
+    </script>
     <!-- SheetJS para LEER archivos subidos -->
     <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+
     <style>
         /* ═══════════════════════════════════════════════════
            PORTAL B2B — DISEÑO PREMIUM
         ═══════════════════════════════════════════════════ */
-        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
 
         :root {
-            --red:        #e53e3e;
-            --red-dark:   #c53030;
-            --red-deep:   #9b2c2c;
-            --red-glow:   rgba(229, 62, 62, 0.18);
-            --white:      #ffffff;
-            --glass-bg:   #ffffff;
+            --red: #e53e3e;
+            --red-dark: #c53030;
+            --red-deep: #9b2c2c;
+            --red-glow: rgba(229, 62, 62, 0.18);
+            --white: #ffffff;
+            --glass-bg: #ffffff;
             --glass-border: #e8ecf0;
-            --input-bg:   #f8fafc;
+            --input-bg: #f8fafc;
             --input-border: #d1d9e0;
             --text-primary: #1a202c;
             --text-secondary: #4a5568;
             --text-muted: #a0aec0;
             --radius: 16px;
             --radius-sm: 10px;
-            --shadow-card: 0 8px 40px rgba(0,0,0,0.10);
-            --shadow-btn: 0 4px 20px rgba(229,62,62,0.4);
+            --shadow-card: 0 8px 40px rgba(0, 0, 0, 0.10);
+            --shadow-btn: 0 4px 20px rgba(229, 62, 62, 0.4);
         }
 
-        html { font-size: 16px; scroll-behavior: smooth; }
+        html {
+            font-size: 16px;
+            scroll-behavior: smooth;
+        }
 
         body {
             font-family: 'Inter', system-ui, sans-serif;
@@ -46,68 +75,111 @@
 
         /* ── Floating background shapes ─────────── */
         .bg-shapes {
-            position: fixed; inset: 0;
-            overflow: hidden; pointer-events: none; z-index: 0;
+            position: fixed;
+            inset: 0;
+            overflow: hidden;
+            pointer-events: none;
+            z-index: 0;
         }
+
         .shape {
-            position: absolute; border-radius: 50%;
+            position: absolute;
+            border-radius: 50%;
             animation: floatShape 14s ease-in-out infinite;
         }
+
         .shape-1 {
-            width: 600px; height: 600px;
-            background: radial-gradient(circle, rgba(229,62,62,0.15), transparent);
-            top: -200px; right: -150px; animation-delay: 0s;
+            width: 600px;
+            height: 600px;
+            background: radial-gradient(circle, rgba(229, 62, 62, 0.15), transparent);
+            top: -200px;
+            right: -150px;
+            animation-delay: 0s;
         }
+
         .shape-2 {
-            width: 450px; height: 450px;
-            background: radial-gradient(circle, rgba(155,44,44,0.12), transparent);
-            bottom: -150px; left: -100px; animation-delay: 5s;
+            width: 450px;
+            height: 450px;
+            background: radial-gradient(circle, rgba(155, 44, 44, 0.12), transparent);
+            bottom: -150px;
+            left: -100px;
+            animation-delay: 5s;
         }
+
         .shape-3 {
-            width: 300px; height: 300px;
-            background: radial-gradient(circle, rgba(200,50,50,0.08), transparent);
-            top: 45%; left: 25%; animation-delay: 9s;
+            width: 300px;
+            height: 300px;
+            background: radial-gradient(circle, rgba(200, 50, 50, 0.08), transparent);
+            top: 45%;
+            left: 25%;
+            animation-delay: 9s;
         }
+
         @keyframes floatShape {
-            0%, 100% { transform: translateY(0) rotate(0deg); }
-            50%       { transform: translateY(-28px) rotate(10deg); }
+
+            0%,
+            100% {
+                transform: translateY(0) rotate(0deg);
+            }
+
+            50% {
+                transform: translateY(-28px) rotate(10deg);
+            }
         }
 
         /* ── Page Layout ─────────────────────────── */
         .page-wrapper {
-            position: relative; z-index: 1;
+            position: relative;
+            z-index: 1;
             min-height: 100vh;
-            display: flex; flex-direction: column;
+            display: flex;
+            flex-direction: column;
             align-items: center;
             padding: 40px 20px 60px;
         }
 
         /* ── Top brand bar ───────────────────────── */
         .brand-bar {
-            display: flex; align-items: center; gap: 16px;
-            margin-bottom: 40px; width: 100%; max-width: 760px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            margin-bottom: 40px;
+            width: 100%;
+            max-width: 760px;
         }
+
         .brand-logo-wrap {
-            background: rgba(255,255,255,0.95);
+            background: rgba(255, 255, 255, 0.95);
             border-radius: 14px;
             padding: 10px 16px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
             flex-shrink: 0;
         }
-        .brand-logo-wrap img { height: 44px; display: block; }
+
+        .brand-logo-wrap img {
+            height: 44px;
+            display: block;
+        }
+
         .brand-info h1 {
-            font-size: 1.7rem; font-weight: 900;
-            color: var(--white); line-height: 1.15;
+            font-size: 1.7rem;
+            font-weight: 900;
+            color: var(--white);
+            line-height: 1.15;
             letter-spacing: -0.02em;
         }
+
         .brand-info p {
-            font-size: 0.88rem; font-weight: 500;
-            color: var(--text-secondary); margin-top: 3px;
+            font-size: 0.88rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+            margin-top: 3px;
         }
 
         /* ── Main card ───────────────────────────── */
         .main-card {
-            width: 100%; max-width: 760px;
+            width: 100%;
+            max-width: 760px;
             background: #ffffff;
             border: 1px solid #e2e8f0;
             border-radius: 24px;
@@ -115,25 +187,40 @@
             box-shadow: var(--shadow-card);
             animation: cardIn 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
         }
+
         @keyframes cardIn {
-            from { opacity: 0; transform: translateY(24px); }
-            to   { opacity: 1; transform: translateY(0); }
+            from {
+                opacity: 0;
+                transform: translateY(24px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
 
         /* ── Section divider ─────────────────────── */
         .section-divider {
-            display: flex; align-items: center; gap: 14px;
+            display: flex;
+            align-items: center;
+            gap: 14px;
             margin: 32px 0 24px;
         }
+
         .section-divider::before,
         .section-divider::after {
-            content: ''; flex: 1;
+            content: '';
+            flex: 1;
             height: 1px;
             background: linear-gradient(to right, transparent, #d1d9e0, transparent);
         }
+
         .section-label {
-            font-size: 0.72rem; font-weight: 700;
-            letter-spacing: 0.12em; text-transform: uppercase;
+            font-size: 0.72rem;
+            font-weight: 700;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
             color: var(--text-muted);
             white-space: nowrap;
         }
@@ -147,15 +234,24 @@
             text-align: center;
             margin-bottom: 32px;
         }
+
         .template-box .t-title {
-            font-size: 0.95rem; font-weight: 700;
-            color: #c53030; margin-bottom: 6px;
+            font-size: 0.95rem;
+            font-weight: 700;
+            color: #c53030;
+            margin-bottom: 6px;
         }
+
         .template-box .t-desc {
-            font-size: 0.8rem; color: var(--text-secondary);
-            line-height: 1.5; margin-bottom: 18px;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            line-height: 1.5;
+            margin-bottom: 18px;
         }
-        .template-box .t-desc strong { color: #e53e3e; }
+
+        .template-box .t-desc strong {
+            color: #e53e3e;
+        }
 
         /* ── Form grid ───────────────────────────── */
         .form-grid-2 {
@@ -163,33 +259,53 @@
             grid-template-columns: 1fr 1fr;
             gap: 16px;
         }
-        @media (max-width: 560px) { .form-grid-2 { grid-template-columns: 1fr; } }
 
-        .form-group { display: flex; flex-direction: column; gap: 7px; }
+        @media (max-width: 560px) {
+            .form-grid-2 {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 7px;
+        }
 
         .form-label {
-            font-size: 0.75rem; font-weight: 700;
-            letter-spacing: 0.06em; text-transform: uppercase;
+            font-size: 0.75rem;
+            font-weight: 700;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
             color: var(--text-secondary);
         }
-        .req { color: var(--red); }
+
+        .req {
+            color: var(--red);
+        }
 
         .form-input {
-            width: 100%; padding: 13px 16px;
+            width: 100%;
+            padding: 13px 16px;
             background: var(--input-bg);
             border: 1.5px solid var(--input-border);
             border-radius: var(--radius-sm);
             font-family: 'Inter', sans-serif;
-            font-size: 0.93rem; font-weight: 500;
+            font-size: 0.93rem;
+            font-weight: 500;
             color: var(--text-primary);
             outline: none;
             transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
         }
-        .form-input::placeholder { color: var(--text-muted); }
+
+        .form-input::placeholder {
+            color: var(--text-muted);
+        }
+
         .form-input:focus {
-            border-color: rgba(229,62,62,0.6);
-            background: rgba(255,255,255,0.10);
-            box-shadow: 0 0 0 4px rgba(229,62,62,0.12);
+            border-color: rgba(229, 62, 62, 0.6);
+            background: rgba(255, 255, 255, 0.10);
+            box-shadow: 0 0 0 4px rgba(229, 62, 62, 0.12);
         }
 
         /* ── Upload area ─────────────────────────── */
@@ -202,67 +318,127 @@
             transition: border-color 0.2s, background 0.2s;
             background: #f8fafc;
         }
+
         .upload-area:hover {
-            border-color: rgba(229,62,62,0.5);
+            border-color: rgba(229, 62, 62, 0.5);
             background: #fff5f5;
         }
-        .upload-icon { font-size: 2.4rem; margin-bottom: 10px; }
-        .upload-title { font-size: 0.95rem; font-weight: 700; margin-bottom: 4px; }
-        .upload-sub { font-size: 0.78rem; color: var(--text-muted); }
+
+        .upload-icon {
+            font-size: 2.4rem;
+            margin-bottom: 10px;
+        }
+
+        .upload-title {
+            font-size: 0.95rem;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+
+        .upload-sub {
+            font-size: 0.78rem;
+            color: var(--text-muted);
+        }
 
         /* ── Buttons ─────────────────────────────── */
         .btn {
-            display: inline-flex; align-items: center; justify-content: center;
-            gap: 8px; padding: 13px 24px;
-            border: none; border-radius: var(--radius-sm);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 13px 24px;
+            border: none;
+            border-radius: var(--radius-sm);
             font-family: 'Inter', sans-serif;
-            font-size: 0.92rem; font-weight: 700;
-            cursor: pointer; transition: all 0.18s; text-decoration: none;
+            font-size: 0.92rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.18s;
+            text-decoration: none;
         }
+
         .btn-outline {
             background: transparent;
-            border: 1.5px solid rgba(229,62,62,0.5);
+            border: 1.5px solid rgba(229, 62, 62, 0.5);
             color: #fc8181;
         }
+
         .btn-outline:hover {
-            background: rgba(229,62,62,0.1);
-            border-color: rgba(229,62,62,0.8);
+            background: rgba(229, 62, 62, 0.1);
+            border-color: rgba(229, 62, 62, 0.8);
         }
+
         .btn-primary {
             background: linear-gradient(135deg, var(--red), var(--red-dark));
             color: white;
             box-shadow: var(--shadow-btn);
         }
+
         .btn-primary:hover {
             transform: translateY(-2px);
-            box-shadow: 0 8px 30px rgba(229,62,62,0.6);
+            box-shadow: 0 8px 30px rgba(229, 62, 62, 0.6);
         }
-        .btn-primary:active { transform: translateY(0); }
-        .btn-primary:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
-        .btn-full { width: 100%; }
-        .btn-lg { padding: 16px 24px; font-size: 1rem; border-radius: 14px; }
-        .btn.loading { opacity: 0.6; pointer-events: none; }
+
+        .btn-primary:active {
+            transform: translateY(0);
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.55;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-full {
+            width: 100%;
+        }
+
+        .btn-lg {
+            padding: 16px 24px;
+            font-size: 1rem;
+            border-radius: 14px;
+        }
+
+        .btn.loading {
+            opacity: 0.6;
+            pointer-events: none;
+        }
 
         /* ── Worker preview ──────────────────────── */
         .preview-header {
-            display: flex; align-items: center; gap: 12px;
-            margin-bottom: 14px; flex-wrap: wrap;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 14px;
+            flex-wrap: wrap;
         }
+
         .preview-title {
-            font-size: 0.85rem; font-weight: 700;
+            font-size: 0.85rem;
+            font-weight: 700;
             color: var(--text-secondary);
-            text-transform: uppercase; letter-spacing: 0.05em;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
         }
+
         .badge-count {
             background: var(--red-dark);
-            color: white; font-size: 0.72rem; font-weight: 800;
-            padding: 3px 10px; border-radius: 99px;
+            color: white;
+            font-size: 0.72rem;
+            font-weight: 800;
+            padding: 3px 10px;
+            border-radius: 99px;
         }
+
         .badge-anglo {
             background: linear-gradient(135deg, #1a365d, #2b6cb0);
-            color: white; font-size: 0.72rem; font-weight: 700;
-            padding: 3px 12px; border-radius: 99px;
+            color: white;
+            font-size: 0.72rem;
+            font-weight: 700;
+            padding: 3px 12px;
+            border-radius: 99px;
         }
+
         .worker-list {
             border-radius: var(--radius);
             overflow: hidden;
@@ -270,28 +446,68 @@
             max-height: 320px;
             overflow-y: auto;
         }
-        .worker-list::-webkit-scrollbar { width: 4px; }
-        .worker-list::-webkit-scrollbar-thumb { background: #cbd5e0; border-radius: 4px; }
+
+        .worker-list::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        .worker-list::-webkit-scrollbar-thumb {
+            background: #cbd5e0;
+            border-radius: 4px;
+        }
+
         .worker-item {
             padding: 12px 16px;
             border-bottom: 1px solid #f0f4f8;
-            display: flex; align-items: center;
+            display: flex;
+            align-items: center;
             justify-content: space-between;
             background: #ffffff;
             transition: background 0.15s;
         }
-        .worker-item:hover { background: #f7fafc; }
-        .worker-item:last-child { border-bottom: none; }
-        .worker-name { font-weight: 700; font-size: 0.88rem; color: #1a202c; }
-        .worker-meta { font-size: 0.75rem; color: var(--text-muted); margin-top: 2px; }
-        .worker-dates { text-align: right; }
-        .worker-arrival { font-size: 0.8rem; font-weight: 600; color: #276749; }
-        .worker-departure { font-size: 0.75rem; color: #c53030; margin-top: 2px; }
+
+        .worker-item:hover {
+            background: #f7fafc;
+        }
+
+        .worker-item:last-child {
+            border-bottom: none;
+        }
+
+        .worker-name {
+            font-weight: 700;
+            font-size: 0.88rem;
+            color: #1a202c;
+        }
+
+        .worker-meta {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+
+        .worker-dates {
+            text-align: right;
+        }
+
+        .worker-arrival {
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: #276749;
+        }
+
+        .worker-departure {
+            font-size: 0.75rem;
+            color: #c53030;
+            margin-top: 2px;
+        }
 
         /* ── Submit status ───────────────────────── */
         #submit-status {
-            text-align: center; font-size: 0.85rem;
-            color: var(--text-secondary); margin-top: 12px;
+            text-align: center;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin-top: 12px;
             font-weight: 600;
         }
 
@@ -302,50 +518,102 @@
             border-radius: var(--radius-sm);
             padding: 14px 16px;
             margin-top: 14px;
-            display: flex; align-items: center; gap: 12px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
         }
+
         .anglo-field label {
-            font-size: 0.78rem; font-weight: 800;
-            color: #6b21a8; white-space: nowrap;
-            text-transform: uppercase; letter-spacing: 0.05em;
+            font-size: 0.78rem;
+            font-weight: 800;
+            color: #6b21a8;
+            white-space: nowrap;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
         }
+
         .anglo-field input {
-            flex: 1; background: white;
+            flex: 1;
+            background: white;
             border: 1.5px solid #ddd6fe;
             border-radius: 8px;
             padding: 9px 14px;
             font-family: 'Inter', sans-serif;
-            font-size: 0.9rem; font-weight: 600;
+            font-size: 0.9rem;
+            font-weight: 600;
             color: #3b0764;
             outline: none;
         }
-        .anglo-field input:focus { border-color: #7c3aed; box-shadow: 0 0 0 3px rgba(124,58,237,0.12); }
-        .anglo-field input::placeholder { color: #c4b5fd; font-weight: 400; }
+
+        .anglo-field input:focus {
+            border-color: #7c3aed;
+            box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.12);
+        }
+
+        .anglo-field input::placeholder {
+            color: #c4b5fd;
+            font-weight: 400;
+        }
 
         /* ── Download buttons ────────────────────── */
         .download-grid {
-            display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
             margin-top: 4px;
         }
-        @media (max-width: 480px) { .download-grid { grid-template-columns: 1fr; } }
-        .btn-download {
-            display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-            padding: 10px 14px; border-radius: 10px;
-            font-family: 'Inter', sans-serif; font-size: 0.85rem; font-weight: 700;
-            cursor: pointer; transition: all 0.18s; border: none; text-decoration: none;
-            flex-direction: column; line-height: 1.3;
+
+        @media (max-width: 480px) {
+            .download-grid {
+                grid-template-columns: 1fr;
+            }
         }
+
+        .btn-download {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            padding: 10px 14px;
+            border-radius: 10px;
+            font-family: 'Inter', sans-serif;
+            font-size: 0.85rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.18s;
+            border: none;
+            text-decoration: none;
+            flex-direction: column;
+            line-height: 1.3;
+        }
+
         .btn-download-a {
             background: linear-gradient(135deg, #e53e3e, #c53030);
-            color: white; box-shadow: 0 3px 12px rgba(229,62,62,0.35);
+            color: white;
+            box-shadow: 0 3px 12px rgba(229, 62, 62, 0.35);
         }
-        .btn-download-a:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(229,62,62,0.45); }
+
+        .btn-download-a:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(229, 62, 62, 0.45);
+        }
+
         .btn-download-b {
             background: linear-gradient(135deg, #3182ce, #2b6cb0);
-            color: white; box-shadow: 0 3px 12px rgba(49,130,206,0.35);
+            color: white;
+            box-shadow: 0 3px 12px rgba(49, 130, 206, 0.35);
         }
-        .btn-download-b:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(49,130,206,0.45); }
-        .btn-download small { font-size: 0.72rem; opacity: 0.85; font-weight: 500; }
+
+        .btn-download-b:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(49, 130, 206, 0.45);
+        }
+
+        .btn-download small {
+            font-size: 0.72rem;
+            opacity: 0.85;
+            font-weight: 500;
+        }
 
         /* ── Footer ──────────────────────────────── */
         .page-footer {
@@ -356,13 +624,23 @@
         }
 
         /* Divider line */
-        .hr { height: 1px; background: #e2e8f0; margin: 28px 0; }
+        .hr {
+            height: 1px;
+            background: #e2e8f0;
+            margin: 28px 0;
+        }
 
         /* Spacing */
-        .mt-4 { margin-top: 16px; }
-        .mt-6 { margin-top: 24px; }
+        .mt-4 {
+            margin-top: 16px;
+        }
+
+        .mt-6 {
+            margin-top: 24px;
+        }
     </style>
 </head>
+
 <body>
     <div class="bg-shapes">
         <div class="shape shape-1"></div>
@@ -394,7 +672,8 @@
                     <strong>Administrador de Contrato Anglo</strong>.
                 </div>
                 <div class="download-grid">
-                    <button class="btn-download btn-download-a" onclick="exportTemplate('7x7, 8x6, 14x14')" id="btn-dl-a">
+                    <button class="btn-download btn-download-a" onclick="exportTemplate('7x7, 8x6, 14x14')"
+                        id="btn-dl-a">
                         📥 Descargar Plantilla
                         <small>Turno 7×7 · 8×6 · 14×14</small>
                     </button>
@@ -418,8 +697,7 @@
 
             <div class="form-group mt-4">
                 <label class="form-label">Número de Contrato</label>
-                <input type="text" class="form-input" id="pub-contract-number"
-                    placeholder="Ej: C-2026-1234">
+                <input type="text" class="form-input" id="pub-contract-number" placeholder="Ej: C-2026-1234">
             </div>
 
             <div class="form-group mt-4">
@@ -442,8 +720,7 @@
             <!-- Campo Administrador de Contrato AngloAmerican -->
             <div class="anglo-field">
                 <label for="pub-anglo-admin">👔 Administrador de Contrato<br>AngloAmerican</label>
-                <input type="text" id="pub-anglo-admin"
-                    placeholder="Nombre completo del Administrador AngloAmerican…"
+                <input type="text" id="pub-anglo-admin" placeholder="Nombre completo del Administrador AngloAmerican…"
                     oninput="window.angloAdmin = this.value.trim()">
             </div>
 
@@ -452,12 +729,13 @@
                 <span class="section-label">Cargar nómina de trabajadores</span>
             </div>
 
-            <input type="file" id="csv-upload" accept=".xlsx,.xls,.csv"
-                style="display:none" onchange="handleFileUpload(event)">
+            <input type="file" id="csv-upload" accept=".xlsx,.xls,.csv" style="display:none"
+                onchange="handleFileUpload(event)">
             <div class="upload-area" onclick="document.getElementById('csv-upload').click()">
                 <div class="upload-icon">⚡</div>
                 <div class="upload-title">Cargar Archivo Excel o CSV</div>
-                <div class="upload-sub">Use la plantilla descargada · El Administrador Anglo se detecta automáticamente</div>
+                <div class="upload-sub">Use la plantilla descargada · El Administrador Anglo se detecta automáticamente
+                </div>
             </div>
 
             <!-- Worker preview -->
@@ -486,36 +764,36 @@
 
     <!-- exportTemplate: carga ExcelJS lazy (solo al hacer clic) -->
     <script>
-        window.workers    = [];
+        window.workers = [];
         window.angloAdmin = '';
 
         // ── Colores y estilos Aramark ──────────────────────────────────────────
-        var ARAMARK_RED  = 'FFEE3124';
+        var ARAMARK_RED = 'FFEE3124';
         var ARAMARK_DARK = 'FFB71C1C';
         var ARAMARK_LITE = 'FFFFF5F5';
-        var WHITE        = 'FFFFFFFF';
-        var GRAY_TEXT    = 'FF424242';
-        var BORDER = { style:'thin', color:{ argb:'FFDDDDDD' } };
-        var ALL_BORDERS  = { top:BORDER, left:BORDER, bottom:BORDER, right:BORDER };
+        var WHITE = 'FFFFFFFF';
+        var GRAY_TEXT = 'FF424242';
+        var BORDER = { style: 'thin', color: { argb: 'FFDDDDDD' } };
+        var ALL_BORDERS = { top: BORDER, left: BORDER, bottom: BORDER, right: BORDER };
 
         function styleHeader(cell) {
-            cell.font      = { name:'Calibri', bold:true, size:11, color:{ argb:WHITE } };
-            cell.fill      = { type:'pattern', pattern:'solid', fgColor:{ argb:ARAMARK_RED } };
-            cell.alignment = { horizontal:'center', vertical:'middle' };
-            cell.border    = ALL_BORDERS;
+            cell.font = { name: 'Calibri', bold: true, size: 11, color: { argb: WHITE } };
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: ARAMARK_RED } };
+            cell.alignment = { horizontal: 'center', vertical: 'middle' };
+            cell.border = ALL_BORDERS;
         }
         function styleData(cell) {
-            cell.font      = { name:'Calibri', size:10, color:{ argb:GRAY_TEXT } };
-            cell.fill      = { type:'pattern', pattern:'solid', fgColor:{ argb:ARAMARK_LITE } };
-            cell.alignment = { horizontal:'center', vertical:'middle' };
-            cell.border    = ALL_BORDERS;
+            cell.font = { name: 'Calibri', size: 10, color: { argb: GRAY_TEXT } };
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: ARAMARK_LITE } };
+            cell.alignment = { horizontal: 'center', vertical: 'middle' };
+            cell.border = ALL_BORDERS;
         }
 
-        window.exportTemplate = async function(turnoTitle) {
+        window.exportTemplate = async function (turnoTitle) {
             turnoTitle = turnoTitle || '7x7, 8x6, 14x14';
-            var isA    = turnoTitle !== '4x3';
-            var btnId  = isA ? 'btn-dl-a' : 'btn-dl-b';
-            var btn    = document.getElementById(btnId);
+            var isA = turnoTitle !== '4x3';
+            var btnId = isA ? 'btn-dl-a' : 'btn-dl-b';
+            var btn = document.getElementById(btnId);
             var origHTML = btn.innerHTML;
             btn.innerHTML = '⏳ Generando...';
             btn.style.opacity = '0.7';
@@ -523,24 +801,24 @@
 
             try {
                 if (typeof ExcelJS === 'undefined') {
-                    await new Promise(function(resolve, reject) {
+                    await new Promise(function (resolve, reject) {
                         var s = document.createElement('script');
                         s.src = 'https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js';
-                        s.onload  = resolve;
+                        s.onload = resolve;
                         s.onerror = reject;
                         document.head.appendChild(s);
                     });
                 }
 
                 // Leer valores del formulario para pre-rellenar
-                var companyVal  = (document.getElementById('pub-company')?.value || '').trim();
+                var companyVal = (document.getElementById('pub-company')?.value || '').trim();
                 var contractVal = (document.getElementById('pub-contract-number')?.value || '').trim();
                 var gerenciaVal = (document.getElementById('pub-gerencia')?.value || '').trim();
-                var today       = new Date().toISOString().split('T')[0];
+                var today = new Date().toISOString().split('T')[0];
 
                 var wb = new ExcelJS.Workbook();
-                wb.creator  = 'PC Hotelería';
-                wb.created  = new Date();
+                wb.creator = 'PC Hotelería';
+                wb.created = new Date();
 
                 var ws = wb.addWorksheet('Nómina Trabajadores', {
                     pageSetup: { paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1 },
@@ -553,12 +831,12 @@
                 //      J=NombreTurno  K=SistemaTurno  L=TipoTurno  M=Estado
                 //      N=FechaInicio  O=FechaTermino  P=Sexo  Q=Observacion
                 ws.columns = [
-                    { key:'A', width:14 }, { key:'B', width:24 }, { key:'C', width:14 },
-                    { key:'D', width:24 }, { key:'E', width:36 }, { key:'F', width:30 },
-                    { key:'G', width:14 }, { key:'H', width:14 }, { key:'I', width:12 },
-                    { key:'J', width:12 }, { key:'K', width:14 }, { key:'L', width:12 },
-                    { key:'M', width:13 }, { key:'N', width:14 }, { key:'O', width:14 },
-                    { key:'P', width:8  }, { key:'Q', width:28 }
+                    { key: 'A', width: 14 }, { key: 'B', width: 24 }, { key: 'C', width: 14 },
+                    { key: 'D', width: 24 }, { key: 'E', width: 36 }, { key: 'F', width: 30 },
+                    { key: 'G', width: 14 }, { key: 'H', width: 14 }, { key: 'I', width: 12 },
+                    { key: 'J', width: 12 }, { key: 'K', width: 14 }, { key: 'L', width: 12 },
+                    { key: 'M', width: 13 }, { key: 'N', width: 14 }, { key: 'O', width: 14 },
+                    { key: 'P', width: 8 }, { key: 'Q', width: 28 }
                 ];
 
                 var NCOLS = 17;
@@ -567,63 +845,63 @@
                 for (var r = 1; r <= 3; r++) {
                     ws.getRow(r).height = r === 2 ? 44 : 22;
                     for (var c = 1; c <= NCOLS; c++) {
-                        ws.getRow(r).getCell(c).fill = { type:'pattern', pattern:'solid', fgColor:{ argb: ARAMARK_RED } };
+                        ws.getRow(r).getCell(c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: ARAMARK_RED } };
                     }
                 }
 
                 // Insertar logo
                 try {
-                    var resp    = await fetch('./aramark.png');
-                    var buffer  = await resp.arrayBuffer();
+                    var resp = await fetch('./aramark.png');
+                    var buffer = await resp.arrayBuffer();
                     var imageId = wb.addImage({ buffer: buffer, extension: 'png' });
-                    ws.addImage(imageId, { tl:{ col:0.1, row:0.1 }, ext:{ width:175, height:80 } });
-                } catch(e) {
+                    ws.addImage(imageId, { tl: { col: 0.1, row: 0.1 }, ext: { width: 175, height: 80 } });
+                } catch (e) {
                     ws.mergeCells('A1:D3');
                     var logoCellX = ws.getCell('A1');
-                    logoCellX.value     = 'ARAMARK';
-                    logoCellX.font      = { name:'Calibri', bold:true, size:22, color:{ argb: WHITE } };
-                    logoCellX.fill      = { type:'pattern', pattern:'solid', fgColor:{ argb: ARAMARK_RED } };
-                    logoCellX.alignment = { horizontal:'center', vertical:'middle' };
+                    logoCellX.value = 'ARAMARK';
+                    logoCellX.font = { name: 'Calibri', bold: true, size: 22, color: { argb: WHITE } };
+                    logoCellX.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: ARAMARK_RED } };
+                    logoCellX.alignment = { horizontal: 'center', vertical: 'middle' };
                 }
 
                 // Título centrado
                 ws.mergeCells('E1:Q3');
                 var titleCell = ws.getCell('E1');
-                titleCell.value     = 'SOLICITUD DE ALOJAMIENTO\nPC HOTELERÍA  ·  Turno ' + turnoTitle;
-                titleCell.font      = { name:'Calibri', bold:true, size:18, color:{ argb: WHITE } };
-                titleCell.fill      = { type:'pattern', pattern:'solid', fgColor:{ argb: ARAMARK_RED } };
-                titleCell.alignment = { horizontal:'center', vertical:'middle', wrapText:true };
+                titleCell.value = 'SOLICITUD DE ALOJAMIENTO\nPC HOTELERÍA  ·  Turno ' + turnoTitle;
+                titleCell.font = { name: 'Calibri', bold: true, size: 18, color: { argb: WHITE } };
+                titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: ARAMARK_RED } };
+                titleCell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
 
                 // ─── FILA 4: ADMINISTRADOR ANGLO ─────────────────────────────────
                 ws.getRow(4).height = 28;
                 for (var c4 = 1; c4 <= NCOLS; c4++) {
-                    ws.getRow(4).getCell(c4).fill = { type:'pattern', pattern:'solid', fgColor:{ argb: ARAMARK_DARK } };
+                    ws.getRow(4).getCell(c4).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: ARAMARK_DARK } };
                     ws.getRow(4).getCell(c4).border = ALL_BORDERS;
                 }
                 ws.mergeCells('A4:D4');
                 var angloLb = ws.getCell('A4');
-                angloLb.value     = '👔 Administrador de Contrato Anglo:';
-                angloLb.font      = { name:'Calibri', bold:true, size:11, color:{ argb: WHITE } };
-                angloLb.alignment = { horizontal:'left', vertical:'middle' };
+                angloLb.value = '👔 Administrador de Contrato Anglo:';
+                angloLb.font = { name: 'Calibri', bold: true, size: 11, color: { argb: WHITE } };
+                angloLb.alignment = { horizontal: 'left', vertical: 'middle' };
 
                 ws.mergeCells('E4:Q4');
                 var angloVal = ws.getCell('E4');
-                angloVal.value     = window.angloAdmin || '';
-                angloVal.font      = { name:'Calibri', size:12, italic:!window.angloAdmin, color:{ argb: window.angloAdmin ? '00000000' : 'FF999999' } };
-                angloVal.fill      = { type:'pattern', pattern:'solid', fgColor:{ argb:'FFFFFAF0' } };
-                angloVal.alignment = { horizontal:'left', vertical:'middle' };
-                angloVal.border    = { top:{ style:'medium', color:{argb:ARAMARK_DARK} }, bottom:{ style:'medium', color:{argb:ARAMARK_DARK} } };
+                angloVal.value = window.angloAdmin || '';
+                angloVal.font = { name: 'Calibri', size: 12, italic: !window.angloAdmin, color: { argb: window.angloAdmin ? '00000000' : 'FF999999' } };
+                angloVal.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFAF0' } };
+                angloVal.alignment = { horizontal: 'left', vertical: 'middle' };
+                angloVal.border = { top: { style: 'medium', color: { argb: ARAMARK_DARK } }, bottom: { style: 'medium', color: { argb: ARAMARK_DARK } } };
                 if (!window.angloAdmin) angloVal.value = 'Ingrese aquí el nombre del Administrador de Contrato AngloAmerican';
 
                 // ─── FILA 5: CABECERAS ────────────────────────────────────────────
                 ws.getRow(5).height = 30;
                 var headers = [
-                    'FECHA','EMPRESA','N° CONTRATO','GERENCIA','RAZÓN SOCIAL',
-                    'NOMBRE COMPLETO HUÉSPED','RUT','CONTACTO','HAB.',
-                    'TURNO','SISTEMA','TIPO','ESTADO',
-                    'FECHA INICIO','FECHA TÉRMINO','SEXO','OBSERVACIÓN'
+                    'FECHA', 'EMPRESA', 'N° CONTRATO', 'GERENCIA', 'RAZÓN SOCIAL',
+                    'NOMBRE COMPLETO HUÉSPED', 'RUT', 'CONTACTO', 'HAB.',
+                    'TURNO', 'SISTEMA', 'TIPO', 'ESTADO',
+                    'FECHA INICIO', 'FECHA TÉRMINO', 'SEXO', 'OBSERVACIÓN'
                 ];
-                headers.forEach(function(h, i) {
+                headers.forEach(function (h, i) {
                     var cell = ws.getRow(5).getCell(i + 1);
                     cell.value = h;
                     styleHeader(cell);
@@ -633,17 +911,17 @@
                 var FILAS = 30;
                 var shiftOpts_A = '"7x7,8x6,14x14,Otro"';
                 var shiftOpts_B = '"4x3,Otro"';
-                var shiftOpts   = isA ? shiftOpts_A : shiftOpts_B;
+                var shiftOpts = isA ? shiftOpts_A : shiftOpts_B;
 
                 for (var row = 6; row <= 5 + FILAS; row++) {
                     ws.getRow(row).height = 20;
 
                     // Col A: Fecha (pre-rellenada con hoy)
                     var cellA = ws.getRow(row).getCell(1);
-                    cellA.value  = today;
+                    cellA.value = today;
                     cellA.numFmt = 'yyyy-mm-dd';
                     styleData(cellA);
-                    cellA.font = { name:'Calibri', size:10, color:{ argb: GRAY_TEXT } };
+                    cellA.font = { name: 'Calibri', size: 10, color: { argb: GRAY_TEXT } };
 
                     // Col B: Empresa (pre-rellenada)
                     var cellB = ws.getRow(row).getCell(2);
@@ -666,13 +944,13 @@
                     // Col F: Nombre huésped
                     var cellF = ws.getRow(row).getCell(6);
                     styleData(cellF);
-                    cellF.fill = { type:'pattern', pattern:'solid', fgColor:{ argb:'FFE6F7FF' } }; // azul claro
+                    cellF.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE6F7FF' } }; // azul claro
 
                     // Col G: RUT
                     var cellG = ws.getRow(row).getCell(7);
                     styleData(cellG);
-                    cellG.fill = { type:'pattern', pattern:'solid', fgColor:{ argb:'FFE6F7FF' } };
-                    cellG.note = { texts:[{ text:'Formato: 12345678-9', font:{ size:9 } }] };
+                    cellG.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE6F7FF' } };
+                    cellG.note = { texts: [{ text: 'Formato: 12345678-9', font: { size: 9 } }] };
 
                     // Col H: Contacto
                     styleData(ws.getRow(row).getCell(8));
@@ -680,14 +958,14 @@
                     // Col I: Habitación (dejar vacío — asigna el sistema)
                     var cellI = ws.getRow(row).getCell(9);
                     styleData(cellI);
-                    cellI.fill = { type:'pattern', pattern:'solid', fgColor:{ argb:'FFF5F5F5' } };
-                    cellI.note = { texts:[{ text:'Opcional — dejar vacío para auto-asignación', font:{ size:9 } }] };
+                    cellI.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF5F5F5' } };
+                    cellI.note = { texts: [{ text: 'Opcional — dejar vacío para auto-asignación', font: { size: 9 } }] };
 
                     // Col J: Nombre Turno (dropdown)
                     var cellJ = ws.getRow(row).getCell(10);
                     styleData(cellJ);
                     if (isA) cellJ.value = '7x7';
-                    else     cellJ.value = '4x3';
+                    else cellJ.value = '4x3';
                     ws.getRow(row).getCell(10).dataValidation = {
                         type: 'list', allowBlank: true, showDropDown: false,
                         formulae: [shiftOpts],
@@ -727,13 +1005,13 @@
                     var cellN = ws.getRow(row).getCell(14);
                     styleData(cellN);
                     cellN.numFmt = 'yyyy-mm-dd';
-                    cellN.fill = { type:'pattern', pattern:'solid', fgColor:{ argb:'FFF0FFF4' } };
+                    cellN.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0FFF4' } };
 
                     // Col O: Fecha Término
                     var cellO = ws.getRow(row).getCell(15);
                     styleData(cellO);
                     cellO.numFmt = 'yyyy-mm-dd';
-                    cellO.fill = { type:'pattern', pattern:'solid', fgColor:{ argb:'FFFFF5F5' } };
+                    cellO.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF5F5' } };
 
                     // Col P: Sexo (dropdown)
                     var cellP = ws.getRow(row).getCell(16);
@@ -753,38 +1031,38 @@
                 ws.getRow(legendRow).height = 16;
                 ws.mergeCells('A' + legendRow + ':D' + legendRow);
                 ws.getCell('A' + legendRow).value = '🔵 Azul = Datos obligatorios del trabajador   🟢 Verde = Fecha inicio   🔴 Rojo = Fecha término';
-                ws.getCell('A' + legendRow).font  = { name:'Calibri', size:8, italic:true, color:{ argb:'FF718096' } };
+                ws.getCell('A' + legendRow).font = { name: 'Calibri', size: 8, italic: true, color: { argb: 'FF718096' } };
 
                 // ─── GENERAR Y DESCARGAR ──────────────────────────────────────────
                 var xlsBuffer = await wb.xlsx.writeBuffer();
-                var blob      = new Blob([xlsBuffer], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-                var suffix    = turnoTitle.replace(/[^a-zA-Z0-9x]/gi,'_');
-                var fname     = 'plantilla_solicitud_' + suffix + '_' + today + '.xlsx';
+                var blob = new Blob([xlsBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+                var suffix = turnoTitle.replace(/[^a-zA-Z0-9x]/gi, '_');
+                var fname = 'plantilla_solicitud_' + suffix + '_' + today + '.xlsx';
 
                 if (window.showSaveFilePicker) {
                     try {
                         var handle = await window.showSaveFilePicker({
                             suggestedName: fname,
-                            types: [{ description:'Excel Workbook', accept:{ 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':['.xlsx'] } }]
+                            types: [{ description: 'Excel Workbook', accept: { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] } }]
                         });
                         var writable = await handle.createWritable();
                         await writable.write(blob);
                         await writable.close();
                         return;
-                    } catch(e) {
+                    } catch (e) {
                         if (e.name === 'AbortError') return;
                     }
                 }
 
                 var url = URL.createObjectURL(blob);
-                var a   = document.createElement('a');
+                var a = document.createElement('a');
                 a.href = url; a.download = fname; a.rel = 'noopener';
                 a.style.display = 'none';
                 document.body.appendChild(a);
-                a.dispatchEvent(new MouseEvent('click', { bubbles:true, cancelable:false, view:window }));
-                setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); }, 2000);
+                a.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: false, view: window }));
+                setTimeout(function () { document.body.removeChild(a); URL.revokeObjectURL(url); }, 2000);
 
-            } catch(err) {
+            } catch (err) {
                 console.error('exportTemplate error:', err);
                 alert('Error al generar la plantilla: ' + err.message);
             } finally {
@@ -795,10 +1073,9 @@
         };
     </script>
 
-
-    <!-- handleFileUpload y submitRequest (necesitan db.js) -->
+    <!-- handleFileUpload y submitRequest -->
     <script type="module">
-        import { put, openDB } from './js/db.js';
+        import { supabase } from './js/supabaseClient.js';
 
         window.handleFileUpload = (e) => {
             const file = e.target.files[0];
@@ -810,9 +1087,9 @@
             const reader = new FileReader();
             reader.onload = (ev) => {
                 try {
-                    const wb       = XLSX.read(new Uint8Array(ev.target.result), { type:'array', cellDates:true });
-                    const ws       = wb.Sheets[wb.SheetNames[0]];
-                    const jsonData = XLSX.utils.sheet_to_json(ws, { header:1 });
+                    const wb = XLSX.read(new Uint8Array(ev.target.result), { type: 'array', cellDates: true });
+                    const ws = wb.Sheets[wb.SheetNames[0]];
+                    const jsonData = XLSX.utils.sheet_to_json(ws, { header: 1 });
 
                     if (!jsonData || jsonData.length < 2) {
                         alert('El archivo parece vacío o sin formato correcto.');
@@ -820,30 +1097,49 @@
                     }
 
                     let angloAdmin = '';
-                    let dataStart  = 1;
+                    let dataStart = 1;
                     for (let i = 0; i < Math.min(5, jsonData.length); i++) {
                         const cell = String(jsonData[i]?.[0] || '').toLowerCase();
                         if (cell.includes('administrador') || cell.includes('anglo')) {
                             angloAdmin = String(jsonData[i][1] || '').trim();
-                            dataStart  = i + 2;
+                            dataStart = i + 2;
                             break;
                         }
                     }
                     window.angloAdmin = angloAdmin;
 
+                    const _normGender = g => { if (!g) return null; const u = String(g).toUpperCase().trim(); return (u === 'F' || u === 'FEMENINO' || u === 'FEM') ? 'F' : (u === 'M' || u === 'MASCULINO' || u === 'MAS') ? 'M' : null; };
+                    const _normRut = r => r ? String(r).replace(/\./g, '').trim().toUpperCase() : null;
+
                     const workers = jsonData.slice(dataStart + 1).map(row => {
-                        if (!row || row.length < 10) return null;
+                        if (!row || row.length < 6) return null;
                         const nombre = String(row[5] || '').trim();
-                        if (!nombre || nombre === 'NombreHuesped') return null;
+                        if (!nombre || nombre === 'NombreHuesped' || nombre === 'NOMBRE COMPLETO HUÉSPED') return null;
+                        // hab_solicitada es OPCIONAL — null si está vacía
+                        const rawHab = String(row[8] || '').trim();
+                        const habSolicitada = rawHab && rawHab !== '0' ? rawHab : null;
                         return {
-                            date: row[0], company: row[1], contract: row[2], management: row[3],
-                            legalName: row[4], name: nombre, rut: row[6], contact: row[7],
-                            assignedRoom: row[8], shiftName: row[9], shiftSystem: row[10],
-                            shiftType: row[11], status: row[12],
-                            arrivalDate: fmt(row[13]), departureDate: fmt(row[14]),
-                            sex: row[15], observation: row[16] || ''
+                            date: row[0],
+                            company: row[1],
+                            contract: row[2],
+                            management: row[3],
+                            legalName: row[4],
+                            name: nombre,
+                            rut: _normRut(row[6]),
+                            contact: row[7],
+                            assignedRoom: habSolicitada,   // null si vacío → auto-asignación
+                            hab_solicitada: habSolicitada,   // alias para el motor V2
+                            shiftName: row[9],
+                            shiftSystem: row[10],
+                            shiftType: row[11],
+                            status: row[12],
+                            arrivalDate: fmt(row[13]),
+                            departureDate: fmt(row[14]),
+                            sex: _normGender(row[15]),  // normalizado M/F/null
+                            gender: _normGender(row[15]),  // alias para el motor
+                            observation: row[16] || ''
                         };
-                    }).filter(x => x !== null);
+                    }).filter(x => x !== null && x.name);
 
                     if (workers.length === 0) {
                         alert('No se encontraron trabajadores válidos en el archivo.');
@@ -851,7 +1147,7 @@
                     }
                     window.workers = workers;
                     renderPreview();
-                } catch(err) {
+                } catch (err) {
                     console.error(err);
                     alert('Error al leer el archivo: ' + err.message);
                 }
@@ -860,15 +1156,32 @@
         };
 
         function fmt(val) {
-            if (!val) return '';
-            if (val instanceof Date) return val.toISOString().split('T')[0];
-            return String(val).trim();
+            if (!val) return null;
+            // Si ya es objeto Date de ExcelJS/XLSX
+            if (val instanceof Date) {
+                return isNaN(val.getTime()) ? null : val.toISOString().split('T')[0];
+            }
+            const s = String(val).trim();
+            if (!s) return null;
+            // Aceptar solo patrones numéricos de fecha: YYYY-MM-DD o DD/MM/YYYY etc.
+            if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.substring(0, 10);
+            if (/^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}$/.test(s)) {
+                const d = new Date(s);
+                return isNaN(d.getTime()) ? null : d.toISOString().split('T')[0];
+            }
+            // Número serial de Excel (días desde 1900)
+            if (/^\d{5}$/.test(s)) {
+                const d = new Date((parseInt(s) - 25569) * 86400000);
+                return isNaN(d.getTime()) ? null : d.toISOString().split('T')[0];
+            }
+            // Cualquier otra cosa (ej: "Martes", "Lunes", texto) → null
+            return null;
         }
 
         function renderPreview() {
             const badge = document.getElementById('anglo-admin-badge');
             if (window.angloAdmin) {
-                badge.textContent   = '🏭 Admin Anglo: ' + window.angloAdmin;
+                badge.textContent = '🏭 Admin Anglo: ' + window.angloAdmin;
                 badge.style.display = 'inline';
             } else {
                 badge.style.display = 'none';
@@ -877,25 +1190,30 @@
                 <div class="worker-item">
                     <div>
                         <div class="worker-name">${w.name}</div>
-                        <div class="worker-meta">${w.rut||'-'} · ${w.legalName||''}</div>
+                        <div class="worker-meta">${w.rut || '-'} · ${w.legalName || ''}</div>
                     </div>
                     <div class="worker-dates">
-                        <div class="worker-arrival">📅 ${w.arrivalDate||'-'}</div>
-                        <div class="worker-departure">↩ ${w.departureDate||'-'}</div>
+                        <div class="worker-arrival">📅 ${w.arrivalDate || '-'}</div>
+                        <div class="worker-departure">↩ ${w.departureDate || '-'}</div>
                     </div>
                 </div>
             `).join('');
-            document.getElementById('count').textContent              = window.workers.length;
-            document.getElementById('worker-preview').style.display   = 'block';
-            document.getElementById('submit-btn').disabled            = false;
+            document.getElementById('count').textContent = window.workers.length;
+            document.getElementById('worker-preview').style.display = 'block';
+            document.getElementById('submit-btn').disabled = false;
         }
 
         window.submitRequest = async () => {
-            // Si el usuario escribió el Admin Anglo manualmente, usarlo (prioridad sobre Excel)
             const manualAnglo = document.getElementById('pub-anglo-admin')?.value.trim();
             if (manualAnglo) window.angloAdmin = manualAnglo;
-            const company = document.getElementById('pub-company').value.trim();
-            if (!company) {
+
+            const companyName = document.getElementById('pub-company').value.trim();
+            const contractNumber = document.getElementById('pub-contract-number')?.value.trim() || '';
+            const gerencia = document.getElementById('pub-gerencia')?.value.trim() || '';
+            const contactName = document.getElementById('pub-contact')?.value.trim() || '';
+            const contactEmail = document.getElementById('pub-email')?.value.trim() || '';
+
+            if (!companyName) {
                 alert('⚠️ Por favor ingrese el nombre de la empresa.');
                 document.getElementById('pub-company').focus();
                 return;
@@ -904,39 +1222,91 @@
                 alert('⚠️ No hay trabajadores cargados.\n\nDescargue la plantilla, complétela y cárguela aquí.');
                 return;
             }
-            const btn       = document.getElementById('submit-btn');
+
+            const btn = document.getElementById('submit-btn');
             const statusDiv = document.getElementById('submit-status');
-            btn.disabled    = true;
+            btn.disabled = true;
             btn.textContent = '⏳ Enviando solicitud...';
             statusDiv.style.display = 'block';
-            statusDiv.textContent   = 'Guardando solicitud...';
+            statusDiv.style.color = '';
+            statusDiv.textContent = 'Preparando datos…';
+
             try {
-                await put('b2b_requests', {
-                    id:             Date.now(),
-                    company,
-                    contractNumber: document.getElementById('pub-contract-number').value.trim(),
-                    gerencia:       document.getElementById('pub-gerencia').value.trim(),
-                    angloAdmin:     window.angloAdmin,
-                    contactName:    document.getElementById('pub-contact').value.trim(),
-                    contactEmail:   document.getElementById('pub-email').value.trim(),
-                    receivedDate:   new Date().toISOString().split('T')[0],
-                    status:         'accepted',
-                    workers:        window.workers
-                });
+                statusDiv.textContent = 'Preparando filas…';
+
+                const _ng = g => {
+                    if (!g) return null;
+                    const u = String(g).toUpperCase().trim();
+                    return (u === 'F' || u === 'FEMENINO' || u === 'FEM') ? 'F'
+                        : (u === 'M' || u === 'MASCULINO' || u === 'MAS') ? 'M' : null;
+                };
+                const _rut = r => r ? String(r).replace(/\./g, '').trim().toUpperCase() : null;
+                const _hab = h => {
+                    const v = String(h || '').trim();
+                    return (v && v !== '0' && v !== 'null') ? v : null;
+                };
+
+                // Construir array: empresa y gerencia vienen del Excel por fila
+                // Si el Excel trae empresa en col B → se usa esa (multi-empresa)
+                // Si no trae → fallback al campo del formulario (single-empresa)
+                const filas = window.workers
+                    .filter(w => w.name || w.nombre)
+                    .map(w => ({
+                        rut_trabajador:   _rut(w.rut),
+                        nombre_trabajador: String(w.name || w.nombre || '').trim(),
+                        empresa:          String(w.company || companyName || '').trim(),
+                        gerencia:         String(w.management || gerencia || '').trim() || null,
+                        fecha_llegada:    w.arrivalDate  || null,
+                        fecha_salida:     w.departureDate || null,
+                        genero:           _ng(w.sex || w.gender || w.genero),
+                        hab_solicitada:   _hab(w.assignedRoom || w.hab_solicitada),
+                        n_contrato:       String(w.contract || contractNumber || '').trim() || null
+                    }));
+
+                if (filas.length === 0) {
+                    throw new Error('No hay trabajadores válidos para enviar.');
+                }
+
+                statusDiv.textContent = `Guardando ${filas.length} filas en Supabase…`;
+
+                const { error } = await supabase
+                    .from('v2_solicitudes_b2b')
+                    .insert(filas);
+
+                if (error) throw new Error('Error al guardar: ' + error.message);
+
                 statusDiv.style.color = '#68d391';
-                statusDiv.textContent = '✅ ¡Solicitud enviada con éxito!';
+                statusDiv.textContent = `✅ ${filas.length} trabajadores enviados correctamente`;
+
                 setTimeout(() => {
-                    alert('✅ Solicitud de ' + company + ' enviada.\n\n👤 ' + window.workers.length + ' trabajadores registrados.');
+                    alert(
+                        `✅ ¡Solicitud enviada!\n\n` +
+                        `Empresa: ${companyName}\n` +
+                        `Trabajadores: ${filas.length}\n` +
+                        (contractNumber ? `Contrato: ${contractNumber}\n` : '') +
+                        `\nEl administrador revisará y aprobará la solicitud.`
+                    );
                     window.location.reload();
-                }, 600);
-            } catch(err) {
+                }, 800);
+
+            } catch (err) {
                 console.error(err);
-                btn.disabled    = false;
+                btn.disabled = false;
                 btn.textContent = '🚀 Enviar Solicitud de Alojamiento';
                 statusDiv.style.color = '#fc8181';
-                statusDiv.textContent = '🚨 Error al enviar. Intente nuevamente.';
+                statusDiv.textContent = '🚨 Error: ' + err.message;
             }
         };
+
+
+        // Utilidad: valor más frecuente en un array
+        function _moda(arr) {
+            if (!arr.length) return null;
+            const freq = {};
+            arr.forEach(v => freq[v] = (freq[v] || 0) + 1);
+            return Object.entries(freq).sort((a, b) => b[1] - a[1])[0][0];
+        }
     </script>
 </body>
+
 </html>

@@ -1,0 +1,45 @@
+-- ═══════════════════════════════════════════════════════════════
+--  Poblar v2_gerencias y v2_empresas
+--  Ejecutar en Supabase → SQL Editor
+-- ═══════════════════════════════════════════════════════════════
+
+-- 1. GERENCIAS
+INSERT INTO v2_gerencias (id, nombre) VALUES
+  ('11111111-0000-0000-0000-000000000001', 'Gerencia Mina'),
+  ('11111111-0000-0000-0000-000000000002', 'Gerencia Planta'),
+  ('11111111-0000-0000-0000-000000000003', 'Gerencia Mantención'),
+  ('11111111-0000-0000-0000-000000000004', 'Gerencia Proyectos'),
+  ('11111111-0000-0000-0000-000000000005', 'Gerencia RRHH'),
+  ('11111111-0000-0000-0000-000000000006', 'Gerencia Administración'),
+  ('11111111-0000-0000-0000-000000000099', 'Sin Gerencia')
+ON CONFLICT (id) DO UPDATE SET nombre = EXCLUDED.nombre;
+
+-- 2. EMPRESAS (ajusta los nombres según tu listado real)
+INSERT INTO v2_empresas (id, nombre, turno, gerencia_id) VALUES
+  -- ARAMARK (proveedor principal)
+  ('22222222-0000-0000-0000-000000000001', 'ARAMARK',   'Día',   '11111111-0000-0000-0000-000000000001'),
+  ('22222222-0000-0000-0000-000000000002', 'ARAMARK',   'Noche', '11111111-0000-0000-0000-000000000002'),
+  -- BESALCO
+  ('22222222-0000-0000-0000-000000000003', 'BESALCO',   'Día',   '11111111-0000-0000-0000-000000000001'),
+  ('22222222-0000-0000-0000-000000000004', 'BESALCO',   'Noche', '11111111-0000-0000-0000-000000000003'),
+  -- ORBIT
+  ('22222222-0000-0000-0000-000000000005', 'ORBIT',     'Día',   '11111111-0000-0000-0000-000000000002'),
+  ('22222222-0000-0000-0000-000000000006', 'ORBIT',     'Noche', '11111111-0000-0000-0000-000000000004'),
+  -- RELIX
+  ('22222222-0000-0000-0000-000000000007', 'RELIX',     'Día',   '11111111-0000-0000-0000-000000000001'),
+  ('22222222-0000-0000-0000-000000000008', 'RELIX',     'Noche', '11111111-0000-0000-0000-000000000003'),
+  -- PERSONAL ANGLOAMERICAN (propias gerencias)
+  ('22222222-0000-0000-0000-000000000009', 'ANGLO AMERICAN', 'Día',   '11111111-0000-0000-0000-000000000001'),
+  ('22222222-0000-0000-0000-000000000010', 'ANGLO AMERICAN', 'Noche', '11111111-0000-0000-0000-000000000002'),
+  -- RESERVA / BLOQUEADA (comodines)
+  ('22222222-0000-0000-0000-000000000099', 'RESERVADA', NULL,    '11111111-0000-0000-0000-000000000099')
+ON CONFLICT (id) DO UPDATE SET
+  nombre     = EXCLUDED.nombre,
+  turno      = EXCLUDED.turno,
+  gerencia_id = EXCLUDED.gerencia_id;
+
+-- Verificar
+SELECT e.nombre, e.turno, g.nombre AS gerencia
+FROM v2_empresas e
+JOIN v2_gerencias g ON g.id = e.gerencia_id
+ORDER BY e.nombre, e.turno;

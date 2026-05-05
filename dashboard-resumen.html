@@ -291,17 +291,11 @@
     <script type="module">
         import { supabase } from './js/supabaseClient.js';
 
-        // ════════════════════════════════════════════════════════════════════
-        //  CONFIG — pabellones a excluir del dashboard (ej. R-220 en desarrollo)
-        // ════════════════════════════════════════════════════════════════════
-        const PABELLONES_EXCLUIDOS = ['R-220']; // se compara contra buildings.code y buildings.name
+        const EXCLUIR = new Set(['R-220']);
 
-        // ════════════════════════════════════════════════════════════════════
-        //  UI helpers
-        // ════════════════════════════════════════════════════════════════════
         function showMessage(msg, type = 'info') {
             const el = document.getElementById('status');
-            el.classList.remove('success', 'error', 'warning');
+            el.classList.remove('success','error','warning');
             if (type !== 'info') el.classList.add(type);
             document.getElementById('statusText').textContent = msg;
         }
@@ -310,239 +304,138 @@
             document.getElementById('refreshBtn').disabled = on;
         }
 
-        // ════════════════════════════════════════════════════════════════════
-        //  Lógica de cálculo — equivalente al "processData" del Excel
-        //  Cada room aporta a inventario, ocupación, disponibles y bloqueadas
-        //  según rooms.status y rooms.beds.{day,night}.occupant
-        // ════════════════════════════════════════════════════════════════════
-        function clasificarRoom(room) {
-            const camas = parseInt(room.bedCount) || 0;
-            const status = room.status || 'free';
-            const beds = room.beds || {};
-            const dayOcc  = !!(beds.day  && beds.day.occupant);
-            const nightOcc = !!(beds.night && beds.night.occupant);
-
-            // Bloqueada total: todas las camas fuera de servicio
-            if (status === 'blocked') {
-                return { camas, ocupadasDia: 0, ocupadasNoche: 0, disponibles: 0, bloqueadas: camas };
+        // ── Helper paginado ───────────────────────────────────────────────────
+        async function fetchAll(table, cols, filterFn) {
+            let all = [], pg = 0;
+            while (true) {
+                let q = supabase.from(table).select(cols).range(pg*900, pg*900+899);
+                if (filterFn) q = filterFn(q);
+                const { data, error } = await q;
+                if (error) throw error;
+                if (data?.length) all = all.concat(data);
+                if (!data || data.length < 900) break;
+                pg++; if (pg > 25) break;
             }
-
-            // Reservada → cuenta como ocupada (criterio del Excel original)
-            if (status === 'reserved') {
-                return { camas, ocupadasDia: camas, ocupadasNoche: 0, disponibles: 0, bloqueadas: 0 };
-            }
-
-            // bed-blocked: una cama (la de día) bloqueada, el resto según beds
-            const camasBloq = (status === 'bed-blocked') ? 1 : 0;
-            const ocupDia   = dayOcc   ? 1 : 0;
-            const ocupNoche = nightOcc ? 1 : 0;
-            const disponibles = Math.max(0, camas - ocupDia - ocupNoche - camasBloq);
-
-            return {
-                camas,
-                ocupadasDia: ocupDia,
-                ocupadasNoche: ocupNoche,
-                disponibles,
-                bloqueadas: camasBloq
-            };
+            return all;
         }
 
-        function procesarDatos(buildings, rooms) {
-            // Index buildings por id
-            const buildingById = {};
-            buildings.forEach(b => { buildingById[b.id] = b; });
-
-            // Filtrar rooms cuyo edificio esté excluido
-            const excluidosSet = new Set(PABELLONES_EXCLUIDOS.map(s => s.toUpperCase()));
-            const roomsCOPC = rooms.filter(r => {
-                const b = buildingById[r.buildingId];
-                if (!b) return false;
-                const code = (b.code || '').toUpperCase();
-                const name = (b.name || '').toUpperCase();
-                return !excluidosSet.has(code) && !excluidosSet.has(name);
-            });
-
-            // Agregados COPC
-            let totalHabitaciones = 0, totalCamas = 0;
-            let totalCamas1 = 0, totalCamas2Mas = 0;
-            let totalOcupadas = 0, totalDisponibles = 0, totalBloqueadas = 0;
-
-            // Agregados por pabellón
-            const porPabellon = {};
-
-            roomsCOPC.forEach(r => {
-                const b = buildingById[r.buildingId];
-                const pabellonNombre = b.code || b.name || `#${b.id}`;
-
-                if (!porPabellon[pabellonNombre]) {
-                    porPabellon[pabellonNombre] = {
-                        habitaciones: 0, camas: 0,
-                        ocupDia: 0, ocupNoche: 0,
-                        disponibles: 0, bloqueadas: 0
-                    };
-                }
-
-                const c = clasificarRoom(r);
-                if (c.camas <= 0) return; // habitación sin camas → ignorar
-
-                // Inventario
-                totalHabitaciones++;
-                totalCamas += c.camas;
-                if (c.camas === 1) totalCamas1++;
-                else if (c.camas >= 2) totalCamas2Mas++;
-
-                porPabellon[pabellonNombre].habitaciones++;
-                porPabellon[pabellonNombre].camas      += c.camas;
-
-                // Ocupación / disponibilidad / bloqueo
-                porPabellon[pabellonNombre].ocupDia      += c.ocupadasDia;
-                porPabellon[pabellonNombre].ocupNoche    += c.ocupadasNoche;
-                porPabellon[pabellonNombre].disponibles  += c.disponibles;
-                porPabellon[pabellonNombre].bloqueadas   += c.bloqueadas;
-
-                totalOcupadas    += c.ocupadasDia + c.ocupadasNoche;
-                totalDisponibles += c.disponibles;
-                totalBloqueadas  += c.bloqueadas;
-            });
-
-            return {
-                resumen: {
-                    totalHabitaciones, totalCamas,
-                    totalCamas1, totalCamas2Mas,
-                    totalOcupadas, totalDisponibles, totalBloqueadas
-                },
-                porPabellon
-            };
-        }
-
-        // ════════════════════════════════════════════════════════════════════
-        //  Render
-        // ════════════════════════════════════════════════════════════════════
-        function renderResumenCOPC(r) {
-            const totalCamas = r.totalCamas || 1; // evitar div/0
-            const pctOcup    = ((r.totalOcupadas    / totalCamas) * 100).toFixed(1);
-            const pctDisp    = ((r.totalDisponibles / totalCamas) * 100).toFixed(1);
-            const pctFuera   = ((r.totalBloqueadas  / totalCamas) * 100).toFixed(1);
-
-            const set = (id, val) => document.getElementById(id).textContent = val;
-            set('totalHabitacionesCOPC', r.totalHabitaciones.toLocaleString());
-            set('totalCamasCOPC',        r.totalCamas.toLocaleString());
-            set('totalCamas1COPC',       r.totalCamas1.toLocaleString());
-            set('totalCamas2COPC',       r.totalCamas2Mas.toLocaleString());
-            set('totalOcupadasCOPC',     r.totalOcupadas.toLocaleString());
-            set('porcentajeOcupadasCOPC', pctOcup + '%');
-            set('totalDisponiblesCOPC',  r.totalDisponibles.toLocaleString());
-            set('porcentajeDisponiblesCOPC', pctDisp + '%');
-            set('totalFueraServicioCOPC', r.totalBloqueadas.toLocaleString());
-            set('porcentajeFueraServicioCOPC', pctFuera + '%');
-            set('bloqueadasFueraCOPC',   r.totalBloqueadas.toLocaleString());
-        }
-
-        function renderDetalle(porPabellon) {
-            const tbody = document.getElementById('detailedTableBody');
-            tbody.innerHTML = '';
-
-            const nombres = Object.keys(porPabellon).sort((a, b) =>
-                a.localeCompare(b, 'es', { numeric: true, sensitivity: 'base' })
-            );
-            let tHab = 0, tCam = 0, tDia = 0, tNoche = 0, tDisp = 0, tBloq = 0;
-
-            nombres.forEach(nombre => {
-                const p = porPabellon[nombre];
-                const totalOcup = p.ocupDia + p.ocupNoche;
-                const pct = p.camas > 0 ? ((totalOcup / p.camas) * 100).toFixed(1) : '0.0';
-
-                tHab += p.habitaciones; tCam += p.camas;
-                tDia += p.ocupDia; tNoche += p.ocupNoche;
-                tDisp += p.disponibles; tBloq += p.bloqueadas;
-
-                tbody.insertAdjacentHTML('beforeend', `
-                    <tr>
-                        <td class="pabellon-name">${nombre}</td>
-                        <td>${p.habitaciones}</td>
-                        <td>${p.camas}</td>
-                        <td>${p.ocupDia}</td>
-                        <td>${p.ocupNoche}</td>
-                        <td>${p.disponibles}</td>
-                        <td>${p.bloqueadas}</td>
-                        <td class="occupancy-percentage">${pct}%</td>
-                    </tr>
-                `);
-            });
-
-            const pctTotal = tCam > 0 ? (((tDia + tNoche) / tCam) * 100).toFixed(1) : '0.0';
-            tbody.insertAdjacentHTML('beforeend', `
-                <tr class="total-row">
-                    <td>TOTAL COPC</td>
-                    <td>${tHab}</td>
-                    <td>${tCam}</td>
-                    <td>${tDia}</td>
-                    <td>${tNoche}</td>
-                    <td>${tDisp}</td>
-                    <td>${tBloq}</td>
-                    <td class="occupancy-percentage">${pctTotal}%</td>
-                </tr>
-            `);
-        }
-
-        // ════════════════════════════════════════════════════════════════════
-        //  Carga
-        // ════════════════════════════════════════════════════════════════════
         async function loadAndRender() {
             setLoading(true);
-            showMessage('Consultando buildings y rooms…');
-
+            showMessage('Consultando tablas v2…');
             try {
-                const [bRes, rRes] = await Promise.all([
-                    supabase.from('buildings').select('id, code, name, type'),
-                    supabase.from('rooms').select('*')   // ← '*' garantiza que 'beds' JSONB venga incluido
+                const [edifs, pabs, habs, camas, asigs] = await Promise.all([
+                    fetchAll('v2_edificios',   'id, nombre'),
+                    fetchAll('v2_pabellones',  'id, nombre, edificio_id'),
+                    fetchAll('v2_habitaciones','id_custom, numero_hab, cantidad_camas, pabellon_id'),
+                    fetchAll('v2_camas',       'id_cama, habitacion_id, estado'),
+                    fetchAll('v2_asignaciones','id_cama', q => q.is('fecha_checkout', null)),
                 ]);
 
-                if (bRes.error) throw bRes.error;
-                if (rRes.error) throw rRes.error;
+                // Índices
+                const edifMap = {}; edifs.forEach(e => edifMap[e.id] = e);
+                const pabMap  = {}; pabs.forEach(p  => pabMap[p.id]  = p);
+                const asigSet = new Set(asigs.map(a => String(a.id_cama)));
 
-                const buildings = bRes.data || [];
-                const rooms = rRes.data || [];
+                // Agrupar camas por habitación
+                const camasByHab = {};
+                camas.forEach(c => {
+                    if (!camasByHab[c.habitacion_id]) camasByHab[c.habitacion_id] = [];
+                    camasByHab[c.habitacion_id].push(c);
+                });
 
-                if (buildings.length === 0) {
-                    showMessage('No hay edificios cargados en Supabase.', 'warning');
-                    setLoading(false);
-                    return;
-                }
+                // Totales globales
+                let tHab=0, tCam=0, tCam1=0, tCam2=0, tOcup=0, tDisp=0, tMant=0;
+                const porPab = {};
 
-                // ⚠️ Detectar si muchas habitaciones tienen beds vacío (datos no sincronizados)
-                const sinBeds = rooms.filter(r => !r.beds || Object.keys(r.beds).length === 0).length;
-                const pctSinBeds = rooms.length > 0 ? ((sinBeds / rooms.length) * 100).toFixed(0) : 0;
-                if (sinBeds > rooms.length * 0.5) {
-                    // Más del 50% de habitaciones sin datos de camas → sincronización pendiente
-                    const warn = document.createElement('div');
-                    warn.style = 'background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:13px;color:#92400e;font-weight:600';
-                    warn.innerHTML = `⚠️ <strong>${sinBeds} de ${rooms.length} habitaciones</strong> no tienen datos de ocupantes en Supabase (${pctSinBeds}% vacías). Los datos existen en el dispositivo donde se cargaron pero aún no se sincronizaron a la nube. Desde el sistema admin ve a Infraestructura y edita/guarda un pabellón para forzar la sincronización.`;
-                    document.getElementById('reportContent').before(warn);
-                }
+                habs.forEach(hab => {
+                    const pab  = pabMap[hab.pabellon_id];
+                    if (!pab) return;
+                    const edif = edifMap[pab.edificio_id] || {};
+                    // Excluir pabellones en desarrollo
+                    if (EXCLUIR.has(pab.nombre) || EXCLUIR.has(edif.nombre)) return;
 
-                const { resumen, porPabellon } = procesarDatos(buildings, rooms);
+                    const habCamas = camasByHab[hab.id_custom] || [];
+                    const nTotal   = habCamas.length;
+                    if (nTotal === 0) return;
 
-                renderResumenCOPC(resumen);
-                renderDetalle(porPabellon);
+                    const nOcup  = habCamas.filter(c =>
+                        c.estado === 'Ocupada' || asigSet.has(String(c.id_cama))
+                    ).length;
+                    const nMant  = habCamas.filter(c => c.estado === 'Mantencion' || c.estado === 'Mantención').length;
+                    const nDisp  = Math.max(0, nTotal - nOcup - nMant);
+
+                    tHab++; tCam += nTotal;
+                    if (nTotal === 1) tCam1++; else tCam2++;
+                    tOcup += nOcup; tDisp += nDisp; tMant += nMant;
+
+                    const key = pab.nombre;
+                    if (!porPab[key]) porPab[key] = { hab:0, cam:0, ocup:0, disp:0, mant:0 };
+                    porPab[key].hab++;
+                    porPab[key].cam  += nTotal;
+                    porPab[key].ocup += nOcup;
+                    porPab[key].disp += nDisp;
+                    porPab[key].mant += nMant;
+                });
+
+                // ── Render resumen ejecutivo ──────────────────────────────────
+                const tc = tCam || 1;
+                const set = (id, v) => { const el=document.getElementById(id); if(el) el.textContent=v; };
+                set('totalHabitacionesCOPC',    tHab.toLocaleString());
+                set('totalCamasCOPC',           tCam.toLocaleString());
+                set('totalCamas1COPC',          tCam1.toLocaleString());
+                set('totalCamas2COPC',          tCam2.toLocaleString());
+                set('totalOcupadasCOPC',        tOcup.toLocaleString());
+                set('porcentajeOcupadasCOPC',   ((tOcup/tc)*100).toFixed(1)+'%');
+                set('totalDisponiblesCOPC',     tDisp.toLocaleString());
+                set('porcentajeDisponiblesCOPC',((tDisp/tc)*100).toFixed(1)+'%');
+                set('totalFueraServicioCOPC',   tMant.toLocaleString());
+                set('porcentajeFueraServicioCOPC',((tMant/tc)*100).toFixed(1)+'%');
+                set('bloqueadasFueraCOPC',      tMant.toLocaleString());
+
+                // ── Render detalle por pabellón ───────────────────────────────
+                const tbody = document.getElementById('detailedTableBody');
+                tbody.innerHTML = '';
+                const nombres = Object.keys(porPab).sort((a,b) =>
+                    a.localeCompare(b, 'es', { numeric:true, sensitivity:'base' })
+                );
+                let rHab=0, rCam=0, rOcup=0, rDisp=0, rMant=0;
+                nombres.forEach(n => {
+                    const p = porPab[n];
+                    const pct = p.cam > 0 ? ((p.ocup/p.cam)*100).toFixed(1) : '0.0';
+                    rHab+=p.hab; rCam+=p.cam; rOcup+=p.ocup; rDisp+=p.disp; rMant+=p.mant;
+                    tbody.insertAdjacentHTML('beforeend', `
+                        <tr>
+                            <td class="pabellon-name">${n}</td>
+                            <td>${p.hab}</td>
+                            <td>${p.cam}</td>
+                            <td>${p.ocup}</td>
+                            <td>—</td>
+                            <td>${p.disp}</td>
+                            <td>${p.mant}</td>
+                            <td class="occupancy-percentage">${pct}%</td>
+                        </tr>`);
+                });
+                const pctT = rCam > 0 ? ((rOcup/rCam)*100).toFixed(1) : '0.0';
+                tbody.insertAdjacentHTML('beforeend', `
+                    <tr class="total-row">
+                        <td>TOTAL</td><td>${rHab}</td><td>${rCam}</td>
+                        <td>${rOcup}</td><td>—</td><td>${rDisp}</td>
+                        <td>${rMant}</td><td class="occupancy-percentage">${pctT}%</td>
+                    </tr>`);
 
                 document.getElementById('snapshotTime').textContent =
-                    new Date().toLocaleString('es-CL', { dateStyle: 'medium', timeStyle: 'short' });
+                    new Date().toLocaleString('es-CL', { dateStyle:'medium', timeStyle:'short' });
                 document.getElementById('reportContent').classList.remove('hidden');
-
-                showMessage(`Datos cargados: ${buildings.length} edificios, ${rooms.length} habitaciones — ${sinBeds} sin sincronizar.`, sinBeds > 0 ? 'warning' : 'success');
-            } catch (err) {
+                showMessage(`${tHab} habitaciones · ${tCam} camas · ${tOcup} ocupadas · ${asigs.length} asignaciones activas`, 'success');
+            } catch(err) {
                 console.error(err);
-                showMessage('Error al consultar Supabase: ' + (err.message || err), 'error');
+                showMessage('Error: ' + (err.message || err), 'error');
             } finally {
                 setLoading(false);
             }
         }
 
-        // expone para el botón
         window.loadAndRender = loadAndRender;
-
-        // carga inicial automática
         loadAndRender();
     </script>
 </body>

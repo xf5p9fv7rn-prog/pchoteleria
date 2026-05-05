@@ -1,98 +1,588 @@
 <!DOCTYPE html>
 <html lang="es">
-
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Censo de Camas | Aramark Portal</title>
-    <link rel="stylesheet" href="css/main.css">
-    <link rel="stylesheet" href="css/censo-pub.css">
-    <link rel="manifest" href="manifest.json">
-    <meta name="theme-color" content="#e53e3e">
-    <style>
-        body {
-            background: #f7fafc;
-            padding: 0;
-            margin: 0;
-            font-family: 'Inter', sans-serif;
-        }
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Censo de Camas · PC Hotelería</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --indigo: #6366f1; --purple: #8b5cf6; --amber: #f59e0b;
+      --green: #10b981;  --red: #ef4444;
+      --gray-50: #f8fafc; --gray-100: #f1f5f9; --gray-200: #e2e8f0;
+      --gray-500: #64748b; --gray-700: #334155; --gray-900: #0f172a;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Inter', sans-serif; background: var(--gray-50); min-height: 100vh; }
 
-        .portal-header {
-            background: var(--grad-red);
-            padding: 20px;
-            color: white;
-            text-align: center;
-            box-shadow: 0 4px 12px rgba(229, 62, 62, 0.2);
-        }
+    /* ── Header ────────────────────────────────────── */
+    .header {
+      background: linear-gradient(135deg, #1e1b4b, #312e81, #4338ca);
+      color: white; padding: 14px 18px; position: sticky; top: 0; z-index: 100;
+      box-shadow: 0 4px 20px rgba(99,102,241,.4);
+    }
+    .header-inner { max-width: 600px; margin: 0 auto; display: flex; align-items: center; gap: 12px; }
+    .h-logo { width: 38px; height: 38px; background: rgba(255,255,255,.15); border-radius: 10px;
+               display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0; }
+    .h-title { font-size: 15px; font-weight: 800; }
+    .h-sub   { font-size: 11px; opacity: .75; margin-top: 1px; }
+    .h-date  { margin-left: auto; text-align: right; }
+    .h-day   { font-size: 22px; font-weight: 900; line-height: 1; }
+    .h-mon   { font-size: 10px; opacity: .75; text-transform: uppercase; }
 
-        .portal-container {
-            max-width: 600px;
-            margin: 0 auto;
-            padding: 16px;
-        }
+    /* ── Main ──────────────────────────────────────── */
+    .main { max-width: 600px; margin: 0 auto; padding: 16px; padding-bottom: 110px; }
 
-        /* Override some main.css styles for portal mode */
-        .section-header {
-            display: none;
-        }
+    /* ── Screens ───────────────────────────────────── */
+    .screen { display: none; animation: fadeIn .25s ease; }
+    .screen.active { display: block; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 
-        .censo-main {
-            margin-top: 0;
-        }
+    /* ── Card ──────────────────────────────────────── */
+    .card { background: white; border-radius: 16px; padding: 20px; margin-bottom: 14px;
+             box-shadow: 0 2px 10px rgba(0,0,0,.07); border: 1px solid var(--gray-200); }
 
-        .censo-login-card {
-            margin-top: 20px;
-        }
-    </style>
+    /* ── Labels / Inputs ───────────────────────────── */
+    .lbl { font-size: 11px; font-weight: 700; color: var(--gray-500); text-transform: uppercase;
+            letter-spacing: .5px; display: block; margin-bottom: 7px; }
+    select, input[type=text] {
+      width: 100%; padding: 12px 14px; border-radius: 11px; border: 1.5px solid var(--gray-200);
+      font-size: 15px; font-family: inherit; color: var(--gray-900); background: white; outline: none;
+      transition: border-color .2s; -webkit-appearance: none;
+    }
+    select:focus, input[type=text]:focus { border-color: var(--indigo); }
+
+    /* ── Buttons ───────────────────────────────────── */
+    .btn { width: 100%; padding: 14px; border-radius: 13px; border: none; font-size: 15px;
+            font-weight: 700; font-family: inherit; cursor: pointer; transition: all .18s; }
+    .btn:active { transform: scale(.98); }
+    .btn-primary { background: linear-gradient(135deg, var(--indigo), var(--purple)); color: white;
+                    box-shadow: 0 4px 14px rgba(99,102,241,.35); }
+    .btn-success { background: linear-gradient(135deg, var(--green), #059669); color: white;
+                    box-shadow: 0 4px 14px rgba(16,185,129,.35); }
+    .btn-amber   { background: linear-gradient(135deg, var(--amber), #d97706); color: white;
+                    box-shadow: 0 4px 14px rgba(245,158,11,.35); }
+    .btn:disabled { background: #cbd5e1; color: #94a3b8; box-shadow: none; cursor: not-allowed; }
+
+    /* ── Section title ─────────────────────────────── */
+    .sec-title { font-size: 13px; font-weight: 700; color: var(--indigo); margin-bottom: 12px;
+                  display: flex; align-items: center; gap: 8px; }
+    .badge { background: var(--indigo); color: white; border-radius: 99px; font-size: 11px;
+              padding: 1px 9px; font-weight: 800; }
+
+    /* ── Room card ─────────────────────────────────── */
+    .room-card { background: white; border-radius: 14px; margin-bottom: 10px; overflow: hidden;
+                  box-shadow: 0 2px 8px rgba(0,0,0,.06); border: 1px solid var(--gray-200);
+                  transition: box-shadow .2s; }
+    .room-card.done { border-color: var(--green); }
+    .room-head {
+      background: linear-gradient(135deg, #4338ca, #7c3aed);
+      color: white; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between;
+    }
+    .room-head .rnum { font-size: 15px; font-weight: 800; }
+    .room-head .rid  { font-size: 11px; opacity: .8; font-family: monospace; }
+    .room-head .tick { font-size: 18px; }
+    .room-body { padding: 12px 16px; }
+
+    /* ── Radio options ─────────────────────────────── */
+    .radio-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+    .radio-opt  { display: flex; align-items: center; gap: 5px; cursor: pointer; }
+    .radio-opt input[type=radio] { display: none; }
+    .radio-pill {
+      padding: 6px 13px; border-radius: 99px; font-size: 12px; font-weight: 700;
+      border: 2px solid var(--gray-200); color: var(--gray-500); background: var(--gray-50);
+      transition: all .15s; cursor: pointer; user-select: none;
+    }
+    .radio-opt input:checked + .radio-pill { border-color: transparent; color: white; }
+    .radio-opt.opt-sin_ocupar  input:checked + .radio-pill { background: var(--gray-500); }
+    .radio-opt.opt-dia         input:checked + .radio-pill { background: #2563eb; }
+    .radio-opt.opt-noche       input:checked + .radio-pill { background: #7c3aed; }
+    .radio-opt.opt-2_dia       input:checked + .radio-pill { background: var(--amber); }
+    .radio-opt.opt-2_noche     input:checked + .radio-pill { background: #dc2626; }
+
+    /* ── Bottom bar ────────────────────────────────── */
+    .bottom-bar {
+      position: fixed; bottom: 0; left: 0; right: 0; background: white;
+      border-top: 1px solid var(--gray-200); padding: 14px 18px;
+      box-shadow: 0 -4px 20px rgba(0,0,0,.08); z-index: 50;
+    }
+    .bottom-inner { max-width: 600px; margin: 0 auto; display: flex; gap: 10px; align-items: center; }
+    .counter-text { font-size: 12px; font-weight: 700; color: var(--gray-500); white-space: nowrap; }
+
+    /* ── Tabs ──────────────────────────────────────── */
+    .tabs { display: flex; gap: 6px; margin-bottom: 16px; }
+    .tab  { flex: 1; padding: 10px; border-radius: 10px; border: 1.5px solid var(--gray-200);
+             background: white; font-size: 12px; font-weight: 700; color: var(--gray-500); cursor: pointer;
+             text-align: center; transition: all .15s; }
+    .tab.active { background: var(--indigo); color: white; border-color: var(--indigo); }
+
+    /* ── Departure card ────────────────────────────── */
+    .dep-row { display: flex; justify-content: space-between; align-items: center;
+                padding: 10px 0; border-bottom: 1px solid var(--gray-100); }
+    .dep-row:last-child { border-bottom: none; }
+    .dep-emp  { font-size: 13px; font-weight: 700; color: var(--gray-900); }
+    .dep-sub  { font-size: 11px; color: var(--gray-500); }
+    .dep-num  { font-size: 22px; font-weight: 900; color: var(--red); }
+    .dep-lbl  { font-size: 10px; color: var(--gray-500); text-align: right; }
+
+    /* ── Toast ─────────────────────────────────────── */
+    #toast { position: fixed; bottom: 90px; left: 50%; transform: translateX(-50%) translateY(20px);
+              background: var(--gray-900); color: white; padding: 11px 22px; border-radius: 99px;
+              font-size: 13px; font-weight: 600; opacity: 0; transition: all .3s; z-index: 9999;
+              white-space: nowrap; pointer-events: none; }
+    #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    /* ── Loading ───────────────────────────────────── */
+    .spin { width: 28px; height: 28px; border: 3px solid var(--gray-200);
+             border-top-color: var(--indigo); border-radius: 50%;
+             animation: spin .7s linear infinite; margin: 30px auto; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
 </head>
-
 <body>
-    <header class="portal-header">
-        <div style="display:flex; align-items:center; justify-content:space-between; max-width:600px; margin:0 auto;">
-            <img src="aramark.png" alt="Aramark"
-                style="height:40px; object-fit:contain; filter:brightness(0) invert(1);">
-            <div style="text-align:center; flex:1;">
-                <h1 style="font-size: 20px; font-weight: 800; margin: 0;">Portal Censo Terreno</h1>
-                <p style="font-size: 12px; opacity: 0.9; margin: 4px 0 0;">Control de Ocupación Real Aramark</p>
+
+<header class="header">
+  <div class="header-inner">
+    <img src="aramark.png" alt="Aramark"
+      style="height:44px;object-fit:contain;filter:brightness(0) invert(1);flex-shrink:0">
+    <div>
+      <div class="h-title">Portal Censo Terreno</div>
+      <div class="h-sub">PC Hotelería · Aramark</div>
+    </div>
+    <div class="h-date" id="hdr-date"></div>
+  </div>
+</header>
+
+<main class="main">
+
+  <!-- ══ SCREEN 1: Identificación con RUT ══ -->
+  <div class="screen active" id="s-ident">
+    <div class="card" style="margin-top:16px">
+      <div style="text-align:center;margin-bottom:20px">
+        <div style="font-size:48px;margin-bottom:8px">🔐</div>
+        <div style="font-size:18px;font-weight:800;color:var(--gray-900)">Identificación</div>
+        <div style="font-size:13px;color:var(--gray-500);margin-top:4px">Ingresa tu RUT para acceder al censo</div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr auto;gap:10px;margin-bottom:14px;align-items:end">
+        <div>
+          <label class="lbl">RUT (sin puntos)</label>
+          <input type="text" id="inp-rut" placeholder="12345678" maxlength="9" autocomplete="off"
+            style="letter-spacing:2px;font-family:monospace;font-size:16px">
+        </div>
+        <div>
+          <label class="lbl">DV</label>
+          <input type="text" id="inp-dv" placeholder="K" maxlength="1" autocomplete="off"
+            style="width:64px;text-align:center;text-transform:uppercase;font-family:monospace;font-size:18px;font-weight:800">
+        </div>
+      </div>
+      <div id="rut-error" style="display:none;background:#fee2e2;color:#b91c1c;border-radius:9px;padding:10px 14px;font-size:13px;font-weight:600;margin-bottom:12px"></div>
+      <button class="btn btn-primary" id="btn-ingresar" onclick="irASeleccion()">Verificar e ingresar →</button>
+    </div>
+  </div>
+
+  <!-- ══ SCREEN 2: Selección Edificio / Pabellón ══ -->
+  <div class="screen" id="s-select">
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+        <div style="font-size:15px;font-weight:800;color:var(--gray-900)">Seleccionar Pabellón</div>
+        <span id="hola-nombre" style="font-size:12px;color:var(--indigo);font-weight:700"></span>
+      </div>
+      <div style="margin-bottom:12px">
+        <label class="lbl">Edificio</label>
+        <select id="sel-edif" onchange="cargarPabellones()">
+          <option value="">— Seleccionar edificio —</option>
+        </select>
+      </div>
+      <div style="margin-bottom:14px">
+        <label class="lbl">Pabellón / Piso</label>
+        <select id="sel-pab" onchange="selPabChanged()">
+          <option value="">— Seleccionar pabellón —</option>
+        </select>
+      </div>
+      <!-- Nivel/Piso del pabellón -->
+      <div id="div-nivel" style="display:none;margin-bottom:14px">
+        <label class="lbl">Nivel / Piso</label>
+        <select id="sel-nivel" style="border-color:var(--indigo)" onchange="cargarHabitaciones()">
+          <option value="">— Todos los pisos —</option>
+        </select>
+      </div>
+      <!-- Botón de recarga manual (secundario, ya es automático) -->
+      <button class="btn" id="btn-cargar" onclick="cargarHabitaciones()"
+        style="background:var(--gray-100);color:var(--gray-700);border:1.5px solid var(--gray-200);font-size:13px">
+        🔄 Actualizar lista
+      </button>
+    </div>
+
+    <!-- Tabs: Censo / Bajadas -->
+    <div class="tabs">
+      <button class="tab active" id="tab-censo"  onclick="showTab('censo')">📋 Censo del Día</button>
+      <button class="tab"        id="tab-bajadas" onclick="showTab('bajadas')">📤 Bajadas por Empresa</button>
+    </div>
+
+    <div id="panel-censo"  class="screen active"></div>
+    <div id="panel-bajadas" class="screen"></div>
+  </div>
+
+</main>
+
+<!-- Bottom save bar (hidden initially) -->
+<div class="bottom-bar" id="bottom-bar" style="display:none">
+  <div class="bottom-inner">
+    <div class="counter-text" id="counter-text">0 / 0</div>
+    <button class="btn btn-success" id="btn-guardar" onclick="guardarCenso()" style="flex:1">
+      💾 Guardar Censo del Piso
+    </button>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script type="module">
+import { supabase } from './js/supabaseClient.js';
+
+// ── State ─────────────────────────────────────────────────────────────
+let _nombre    = '';
+let _edificioId = null;
+let _pabellonId = null;
+let _pabNombre  = '';
+let _habitaciones = [];
+let _censoHoy   = {}; // habitacion_id → estado
+let _activeTab  = 'censo';
+
+// ── Header date ────────────────────────────────────────────────────────
+(function() {
+  const now = new Date();
+  const d   = now.toLocaleDateString('es-CL', { weekday:'short', day:'2-digit', month:'short' });
+  const el  = document.getElementById('hdr-date');
+  el.innerHTML = `<div class="h-day">${now.getDate().toString().padStart(2,'0')}</div>
+                  <div class="h-mon">${now.toLocaleDateString('es-CL',{month:'short',year:'numeric'})}</div>`;
+})();
+
+// ── Screen helpers ─────────────────────────────────────────────────────
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+window.showTab = function(tab) {
+  _activeTab = tab;
+  document.getElementById('tab-censo').classList.toggle('active', tab === 'censo');
+  document.getElementById('tab-bajadas').classList.toggle('active', tab === 'bajadas');
+  document.getElementById('panel-censo').classList.toggle('active', tab === 'censo');
+  document.getElementById('panel-bajadas').classList.toggle('active', tab === 'bajadas');
+  if (tab === 'bajadas') cargarBajadas();
+};
+
+// ── Toast ───────────────────────────────────────────────────────────────
+function toast(msg, dur = 2400) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), dur);
+}
+
+// ── Step 1: Validar RUT chileno ────────────────────────────────────────
+function calcularDV(rut) {
+  let suma = 0, mul = 2, n = parseInt(rut, 10);
+  while (n > 0) { suma += (n % 10) * mul; n = Math.floor(n / 10); mul = mul < 7 ? mul + 1 : 2; }
+  const r = 11 - (suma % 11);
+  return r === 11 ? '0' : r === 10 ? 'K' : String(r);
+}
+
+window.irASeleccion = async function() {
+  const rutRaw = document.getElementById('inp-rut').value.trim().replace(/\./g,'');
+  const dvRaw  = document.getElementById('inp-dv').value.trim().toUpperCase();
+  const errEl  = document.getElementById('rut-error');
+  const btn    = document.getElementById('btn-ingresar');
+  errEl.style.display = 'none';
+
+  if (!rutRaw || !dvRaw) { errEl.textContent = '⚠️ Ingresa RUT y dígito verificador'; errEl.style.display='block'; return; }
+  if (!/^\d{7,9}$/.test(rutRaw)) { errEl.textContent = '⚠️ RUT inválido (solo números, sin puntos)'; errEl.style.display='block'; return; }
+  if (calcularDV(rutRaw) !== dvRaw) { errEl.textContent = '❌ Dígito verificador incorrecto'; errEl.style.display='block'; return; }
+
+  btn.disabled = true; btn.textContent = '⏳ Verificando…';
+  const rutCompleto = rutRaw + '-' + dvRaw;
+
+  // Verificar que el RUT existe en el sistema
+  const { data, error } = await supabase.from('v2_asignaciones')
+    .select('rut_huesped,nombre_huesped').eq('rut_huesped', rutCompleto)
+    .is('fecha_checkout', null).limit(1);
+
+  if (error || !data?.length) {
+    errEl.textContent = '🚫 RUT no encontrado en el sistema. Contacta a recepción.';
+    errEl.style.display = 'block';
+    btn.disabled = false; btn.textContent = 'Verificar e ingresar →';
+    return;
+  }
+
+  _nombre = data[0].nombre_huesped || rutCompleto;
+  document.getElementById('hola-nombre').textContent = '👤 ' + _nombre;
+  btn.disabled = false; btn.textContent = 'Verificar e ingresar →';
+  cargarEdificios();
+  showScreen('s-select');
+};
+
+// ── Step 2a: Load edificios ─────────────────────────────────────────────
+async function cargarEdificios() {
+  const { data } = await supabase.from('v2_edificios').select('id,nombre').order('nombre');
+  const sel = document.getElementById('sel-edif');
+  sel.innerHTML = '<option value="">— Seleccionar edificio —</option>' +
+    (data || []).map(e => `<option value="${e.id}">${e.nombre}</option>`).join('');
+}
+
+// ── Step 2b: Load pabellones ────────────────────────────────────────────
+window.cargarPabellones = async function() {
+  _edificioId = document.getElementById('sel-edif').value;
+  const sel = document.getElementById('sel-pab');
+  sel.innerHTML = '<option value="">— Seleccionar pabellón —</option>';
+  document.getElementById('btn-cargar').disabled = true;
+  if (!_edificioId) return;
+  const { data } = await supabase.from('v2_pabellones')
+    .select('id,nombre').eq('edificio_id', _edificioId).order('nombre');
+  sel.innerHTML = '<option value="">— Seleccionar pabellón —</option>' +
+    (data || []).map(p => `<option value="${p.id}">${p.nombre}</option>`).join('');
+};
+
+window.selPabChanged = async function() {
+  const v = document.getElementById('sel-pab').value;
+  _pabellonId = v || null;
+  _pabNombre  = document.getElementById('sel-pab').selectedOptions[0]?.text || '';
+  const divNivel = document.getElementById('div-nivel');
+  const selNivel = document.getElementById('sel-nivel');
+  if (!v) { divNivel.style.display = 'none'; return; }
+  // Cargar niveles disponibles en este pabellón
+  const { data: niveles } = await supabase.from('v2_habitaciones')
+    .select('nivel').eq('pabellon_id', v).not('nivel','is',null);
+  const unicos = [...new Set((niveles||[]).map(n=>n.nivel).filter(Boolean))].sort();
+  selNivel.innerHTML = '<option value="">— Todos los pisos —</option>' +
+    unicos.map(n => `<option value="${n}">${n}</option>`).join('');
+  divNivel.style.display = unicos.length > 1 ? 'block' : 'none';
+  // ✅ AUTO-CARGA: cargar habitaciones automáticamente
+  await cargarHabitaciones();
+};
+
+window.cargarHabitaciones = async function() {
+  if (!_pabellonId) return;
+  const panel = document.getElementById('panel-censo');
+  panel.innerHTML = '<div class="spin"></div>';
+  document.getElementById('bottom-bar').style.display = 'none';
+
+  const nivelFil = document.getElementById('sel-nivel')?.value || '';
+
+  let habQ = supabase.from('v2_habitaciones')
+    .select('id_custom,numero_hab,nivel,cantidad_camas')
+    .eq('pabellon_id', _pabellonId)
+    .order('numero_hab');
+  if (nivelFil) habQ = habQ.eq('nivel', nivelFil);
+
+  // Cargar hab y censo existente (con catch por si la tabla aún no existe)
+  const [{ data: habs }, censoRes] = await Promise.all([
+    habQ,
+    supabase.from('v2_censo_registros')
+      .select('habitacion_id,estado')
+      .eq('fecha', todayISO())
+      .eq('pabellon_id', _pabellonId)
+  ]);
+
+  _habitaciones = habs || [];
+  _censoHoy = {};
+
+  if (censoRes.error) {
+    // Tabla no existe aún — mostrar aviso pero continuar
+    panel.innerHTML = `
+      <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:12px;padding:14px;margin-bottom:12px;font-size:12px;color:#92400e">
+        <strong>⚠️ Tabla v2_censo_registros no encontrada.</strong><br>
+        Ejecuta el archivo <code>sql/create_censo_registros.sql</code> en Supabase para habilitar el guardado del censo.
+      </div>`;
+  } else {
+    (censoRes.data || []).forEach(r => { _censoHoy[r.habitacion_id] = r.estado; });
+  }
+
+  if (!_habitaciones.length) {
+    panel.innerHTML += `<div class="card" style="text-align:center;color:var(--gray-500)">Sin habitaciones en este piso</div>`;
+    return;
+  }
+
+  renderHabitaciones(panel);
+  document.getElementById('bottom-bar').style.display = 'block';
+  actualizarContador();
+};
+
+// ── Render room cards ───────────────────────────────────────────────────
+const OPCIONES = [
+  { val: 'sin_ocupar', lbl: 'Sin Ocupar' },
+  { val: 'dia',        lbl: 'Día'        },
+  { val: 'noche',      lbl: 'Noche'      },
+  { val: '2_dia',      lbl: '2 Día'      },
+  { val: '2_noche',    lbl: '2 Noche'    },
+];
+
+function renderHabitaciones(panel) {
+  const hoy = todayISO();
+  panel.innerHTML = `
+    <div class="sec-title">
+      🏠 <span>${_pabNombre}</span>
+      <span class="badge">${_habitaciones.length} hab.</span>
+      <span style="font-size:11px;color:var(--gray-500);margin-left:4px;font-weight:400">${hoy}</span>
+    </div>` +
+    _habitaciones.map(h => {
+      const est = _censoHoy[h.id_custom] || '';
+      const done = !!est;
+      const rads = OPCIONES.map(op => `
+        <label class="radio-opt opt-${op.val}">
+          <input type="radio" name="hab_${h.id_custom}" value="${op.val}"
+            ${est === op.val ? 'checked' : ''}
+            onchange="onRadioChange('${h.id_custom}', this.value)">
+          <span class="radio-pill">${op.lbl}</span>
+        </label>`).join('');
+      return `
+        <div class="room-card ${done ? 'done' : ''}" id="rc-${h.id_custom}">
+          <div class="room-head">
+            <div>
+              <div class="rnum">Habitación ${h.numero_hab}</div>
+              <div class="rid">${h.id_custom}${h.nivel ? ' · Nivel ' + h.nivel : ''}</div>
             </div>
-            <img src="anglo.png" alt="Anglo" style="height:61px; object-fit:contain; filter:brightness(0) invert(1);">
-        </div>
-    </header>
+            <div class="tick" id="tick-${h.id_custom}">${done ? '✅' : '⬜'}</div>
+          </div>
+          <div class="room-body">
+            <div class="radio-grid">${rads}</div>
+          </div>
+        </div>`;
+    }).join('');
+}
 
-    <main class="portal-container" id="portal-content">
-        <div style="text-align:center; padding:50px; color:#a0aec0">
-            <div class="pulsar"
-                style="width:20px; height:20px; background:var(--red-600); border-radius:50%; margin:0 auto 15px"></div>
-            Cargando módulo de censo...
-        </div>
-    </main>
+// ── Radio change ────────────────────────────────────────────────────────
+window.onRadioChange = function(habId, estado) {
+  _censoHoy[habId] = estado;
+  const rc = document.getElementById(`rc-${habId}`);
+  const tk = document.getElementById(`tick-${habId}`);
+  rc.classList.add('done');
+  tk.textContent = '✅';
+  actualizarContador();
+};
 
-    <div class="toast-container" id="toast-container"></div>
+function actualizarContador() {
+  const total     = _habitaciones.length;
+  const marcadas  = Object.keys(_censoHoy).filter(k =>
+    _habitaciones.find(h => h.id_custom === k)).length;
+  document.getElementById('counter-text').textContent = `${marcadas} / ${total} marcadas`;
+  document.getElementById('btn-guardar').disabled = marcadas === 0;
+}
 
-    <script src="https://unpkg.com/xlsx/dist/xlsx.full.min.js"></script>
-    <script type="module">
-        import { openDB } from './js/db.js';
-        import { renderCenso } from './js/modules/censo.js';
-        import { watchOnlineStatus, showToast } from './js/utils.js';
+// ── Save censo ─────────────────────────────────────────────────────────
+window.guardarCenso = async function() {
+  const btn = document.getElementById('btn-guardar');
+  btn.disabled = true; btn.textContent = '⏳ Guardando…';
+  const fecha = todayISO();
+  const rows = Object.entries(_censoHoy)
+    .filter(([id]) => _habitaciones.find(h => h.id_custom === id))
+    .map(([habitacion_id, estado]) => ({
+      fecha, habitacion_id, estado,
+      pabellon_id:  _pabellonId,
+      edificio_id:  _edificioId,
+      registrado_por: _nombre
+    }));
 
-        async function initPortal() {
-            await openDB();
-            const content = document.getElementById('portal-content');
-            await renderCenso(content);
+  const { error } = await supabase.from('v2_censo_registros')
+    .upsert(rows, { onConflict: 'fecha,habitacion_id' });
 
-            watchOnlineStatus(
-                () => showToast('Conexión restaurada', 'success'),
-                () => showToast('Modo offline activo', 'warn')
-            );
-        }
+  if (error) {
+    toast('❌ Error: ' + error.message, 4000);
+    btn.disabled = false; btn.textContent = '💾 Guardar Censo del Piso';
+    return;
+  }
+  toast(`✅ ${rows.length} habitaciones guardadas`);
+  btn.textContent = '💾 Guardar Censo del Piso';
+  btn.disabled = false;
+};
 
-        initPortal().catch(err => {
-            console.error(err);
-            document.getElementById('portal-content').innerHTML = `
-                <div class="alert alert-error">Error al cargar el portal. Verifique su conexión.</div>
-            `;
-        });
-    </script>
+// ── Bajadas — próximos 3 días (para que se preparen) ──────────────────
+async function cargarBajadas() {
+  const panel = document.getElementById('panel-bajadas');
+  if (!_pabellonId) {
+    panel.innerHTML = `<div class="card" style="text-align:center;color:var(--gray-500)">Selecciona un pabellón primero</div>`;
+    return;
+  }
+  panel.innerHTML = '<div class="spin"></div>';
+
+  const hoy   = new Date();
+  const desde = todayISO();
+  const hasta = new Date(hoy); hasta.setDate(hoy.getDate() + 3);
+  const hastaISO = hasta.toLocaleDateString('en-CA');
+
+  const { data: proximas } = await supabase
+    .from('v2_asignaciones')
+    .select('nombre_huesped,rut_huesped,fecha_salida_programada,v2_empresas(nombre),v2_camas(v2_habitaciones(pabellon_id,numero_hab,nivel))')
+    .gte('fecha_salida_programada', desde)
+    .lte('fecha_salida_programada', hastaISO)
+    .is('fecha_checkout', null);
+
+  const filtradas = (proximas || []).filter(b =>
+    b.v2_camas?.v2_habitaciones?.pabellon_id === _pabellonId);
+
+  if (!filtradas.length) {
+    panel.innerHTML = `
+      <div class="card" style="text-align:center">
+        <div style="font-size:36px;margin-bottom:8px">📭</div>
+        <div style="font-weight:700;color:var(--gray-700)">Sin bajadas próximas</div>
+        <div style="font-size:12px;color:var(--gray-500);margin-top:4px">No hay salidas programadas en los próximos 3 días para ${_pabNombre}</div>
+      </div>`;
+    return;
+  }
+
+  // Agrupar por fecha → empresa
+  const porFecha = {};
+  filtradas.forEach(b => {
+    const f   = b.fecha_salida_programada;
+    const emp = b.v2_empresas?.nombre || 'Sin empresa';
+    if (!porFecha[f]) porFecha[f] = {};
+    if (!porFecha[f][emp]) porFecha[f][emp] = [];
+    porFecha[f][emp].push(b);
+  });
+
+  const diasLabel = ['Hoy','Mañana','Pasado mañana','En 3 días'];
+
+  panel.innerHTML = `<div class="sec-title">📤 Próximas bajadas · ${_pabNombre} <span class="badge">${filtradas.length}</span></div>` +
+    Object.entries(porFecha).sort().map(([fecha, empresas]) => {
+      const diffMs = new Date(fecha+'T12:00:00') - new Date(desde+'T00:00:00');
+      const diffD  = Math.round(diffMs / 86400000);
+      const etiq   = diasLabel[diffD] || fecha;
+      const fmtFecha = new Date(fecha+'T12:00:00').toLocaleDateString('es-CL',{weekday:'long',day:'numeric',month:'long'});
+      const totalDia = Object.values(empresas).reduce((s,a) => s+a.length, 0);
+      return `
+        <div style="margin-bottom:6px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+            <span style="background:${diffD===0?'#ef4444':diffD===1?'#f59e0b':'#6366f1'};color:white;border-radius:8px;padding:4px 12px;font-size:12px;font-weight:800">${etiq}</span>
+            <span style="font-size:12px;color:var(--gray-500)">${fmtFecha}</span>
+            <span style="margin-left:auto;font-size:13px;font-weight:800;color:#ef4444">${totalDia} camas</span>
+          </div>
+          ${Object.entries(empresas).map(([emp, rows]) => `
+            <div class="card" style="margin-bottom:8px">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start">
+                <div>
+                  <div class="dep-emp">${emp}</div>
+                  <div class="dep-sub">${_pabNombre}</div>
+                </div>
+                <div>
+                  <div class="dep-num">${rows.length}</div>
+                  <div class="dep-lbl">camas</div>
+                </div>
+              </div>
+              <div style="margin-top:8px;border-top:1px solid var(--gray-100);padding-top:8px">
+                ${rows.map(r => `
+                  <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:11px">
+                    <span style="font-weight:600;color:var(--gray-700)">${r.nombre_huesped}</span>
+                    <span style="color:var(--gray-500);font-family:monospace">${r.rut_huesped}</span>
+                  </div>`).join('')}
+              </div>
+            </div>`).join('')}
+        </div>`;
+    }).join('');
+}
+
+// ── Utils ───────────────────────────────────────────────────────────────
+function todayISO() {
+  return new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD
+}
+</script>
 </body>
-
 </html>

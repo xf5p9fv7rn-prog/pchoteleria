@@ -782,7 +782,7 @@
 </div>
 
 <script type="module">
-    import { procesarConsulta, cargarDatos } from './js/consultas.js?v=2';
+    import { procesarConsulta, cargarDatos } from './js/consultas.js?v=3';
 
     const inputEl = document.getElementById('chat-input');
     const sendBtn = document.getElementById('send-btn');
@@ -812,12 +812,13 @@
                 document.querySelector('.welcome-screen')?.appendChild(aviso);
             } else {
                 dbReady = true;
-                statusLabel.textContent = `✅ ${datos.rooms.length} hab. · ${datos.buildings.length} edif.`;
+                const cuposInfo = datos.quotas?.length ? ` · ${datos.quotas.length} contratos` : '';
+                statusLabel.textContent = `✅ ${datos.rooms.length} hab. · ${datos.buildings.length} edif.${cuposInfo}`;
                 statusLabel.style.color = '#16a34a';
                 setTimeout(() => {
                     statusLabel.textContent = 'Sistema listo';
                     statusLabel.style.color = '';
-                }, 3000);
+                }, 4000);
             }
         } catch (e) {
             statusLabel.textContent = '❌ Error conectando DB';

@@ -2,9 +2,10 @@
  * PC Hotelería — Gestión de Cupos por Gerencia
  * Solo accesible para rol: 'superadmin'
  * v2 — Barras de progreso animadas + auto-refresh
+ * MIGRADO A V2: Lee de v2_asignaciones y v2_gerencias.
  */
 
-import { getAll, put, remove } from '../db.js';
+import { put, remove, getAll } from '../db.js';
 import { showToast } from '../utils.js';
 import { supabase } from '../supabaseClient.js';
 
@@ -29,46 +30,64 @@ function _startAutoRefresh() {
 
 // ─── Helpers de datos ─────────────────────────────────────────────────────────
 
-async function getUsageByGerencia(rooms) {
+/**
+ * V2: Calcula ocupación de camas agrupada por empresa||gerencia.
+ * Lee v2_asignaciones con join a v2_empresas y v2_gerencias.
+ */
+async function getUsageByGerencia() {
     const usage = {};
-    rooms.forEach(r => {
-        ['day', 'night', 'extra'].forEach(bk => {
-            const bed = r.beds?.[bk];
-            if (!bed?.occupant) return;
-            const company  = (bed.company  || '').trim().toLowerCase();
-            const gerencia = (bed.management || bed.gerencia || '').trim().toLowerCase();
+    try {
+        const { data, error } = await supabase
+            .from('v2_asignaciones')
+            .select('v2_empresas(nombre), v2_empresas(v2_gerencias(nombre))');
+        if (error) throw error;
+        (data || []).forEach(a => {
+            const company  = (a.v2_empresas?.nombre || '').trim().toLowerCase();
+            const gerencia = (a.v2_empresas?.v2_gerencias?.nombre || '').trim().toLowerCase();
             if (!gerencia) return;
             const key = `${company}||${gerencia}`;
             usage[key] = (usage[key] || 0) + 1;
         });
-    });
+    } catch(e) {
+        console.warn('[Cupos V2] Error calculando ocupación:', e.message);
+    }
     return usage;
 }
 
+/**
+ * V2: Lee los límites de cupos desde v2_gerencias.
+ * Devuelve el mismo shape que el antiguo gerencia_quotas para
+ * que toda la UI renderice sin cambios.
+ */
 async function getAllQuotas() {
     try {
-        // ☁️ Supabase como fuente principal — mismos datos en todos los PCs
-        const { data, error } = await supabase.from('gerencia_quotas').select('*');
-        if (!error && data && data.length >= 0) {
-            // Actualizar caché local también
-            for (const q of data) put('gerencia_quotas', q).catch(() => {});
-            return data;
+        const { data, error } = await supabase
+            .from('v2_gerencias')
+            .select('id, nombre, cupo_maximo, empresa:v2_empresas(nombre)');
+        if (!error && data) {
+            // Mapear al shape antiguo: { id, company, gerencia, limit, overrideAllowed }
+            return data.map(g => ({
+                id:             g.id,
+                company:        g.empresa?.nombre || 'Sin empresa',
+                gerencia:       g.nombre,
+                limit:          g.cupo_maximo ?? null,
+                overrideAllowed: false,
+                updatedAt:      null,
+            }));
         }
     } catch (e) {
-        console.warn('[Cupos] Supabase no disponible, usando IndexedDB local:', e.message);
+        console.warn('[Cupos V2] Supabase no disponible:', e.message);
     }
-    // Fallback: IndexedDB local (modo offline)
-    return getAll('gerencia_quotas').catch(() => []);
+    return [];
 }
 
 // ─── Solo actualizar contadores (sin re-renderizar el HTML completo) ──────────
 async function _refreshDataOnly() {
-    const [rooms, quotas] = await Promise.all([
-        getAll('rooms').catch(() => []),
-        getAllQuotas()
+    // V2: usage viene directamente de v2_asignaciones, no necesitamos rooms locales
+    const [quotas, usage] = await Promise.all([
+        getAllQuotas(),
+        getUsageByGerencia()
     ]);
-    // Invalidar caché de rooms para forzar lectura fresca
-    const usage = await getUsageByGerencia(rooms);
 
     const quotaMap = {};
     quotas.forEach(q => {
@@ -133,24 +152,15 @@ export async function renderCupos(container) {
     _container = container;
     _stopAutoRefresh();
 
-    const [rooms, quotas] = await Promise.all([
-        getAll('rooms').catch(() => []),
-        getAllQuotas()
+    // V2: no usamos rooms locales — la ocupación viene de v2_asignaciones
+    const [quotas, usage] = await Promise.all([
+        getAllQuotas(),
+        getUsageByGerencia()
     ]);
 
-    const usage = await getUsageByGerencia(rooms);
-
-    // Recolectar gerencias únicas (de camas + de cupos definidos)
+    // V2: recolectar gerencias únicas (de asignaciones activas + de cupos definidos)
     const gerenciasSet = new Set();
-    rooms.forEach(r => {
-        ['day', 'night', 'extra'].forEach(bk => {
-            const bed = r.beds?.[bk];
-            if (!bed?.occupant) return;
-            const company  = (bed.company  || '').trim();
-            const gerencia = (bed.management || bed.gerencia || '').trim();
-            if (company && gerencia) gerenciasSet.add(`${company}||${gerencia}`);
-        });
-    });
+    Object.keys(usage).forEach(k => gerenciasSet.add(k));
     quotas.forEach(q => {
         if (q.company && q.gerencia) gerenciasSet.add(`${q.company}||${q.gerencia}`);
     });

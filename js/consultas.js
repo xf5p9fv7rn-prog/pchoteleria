@@ -22,7 +22,8 @@ function openDB() {
             req.onupgradeneeded = (ev) => {
                 const d = ev.target.result;
                 const stores = ['buildings', 'rooms', 'assignments', 'census',
-                                'b2b_requests', 'sync_queue', 'users', 'logs', 'census_records'];
+                                /* b2b_requests ELIMINADA — ver v2_solicitudes_b2b */
+                                'sync_queue', 'users', 'logs', 'census_records'];
                 stores.forEach(s => {
                     if (!d.objectStoreNames.contains(s)) {
                         d.createObjectStore(s, {
@@ -66,78 +67,229 @@ async function getSupabase() {
     return _supabase;
 }
 
-// ── Cargar datos: _memCache (Dashboard) → Supabase → IndexedDB ────────
+// ── Cargar datos V2 con paginación completa ─────────────────────────────────
 async function cargarDatos() {
-    // 🥇 PRIORIDAD 1: Usar el mismo caché en memoria que el Dashboard.
-    //    window._memCache lo gestiona db.js con datos locales protegidos.
-    //    Esto garantiza que Constanza y el Dashboard siempre muestren lo mismo.
-    if (window._memCache) {
-        const rooms     = window._memCache['rooms']          || [];
-        const buildings = window._memCache['buildings']      || [];
-        const requests  = window._memCache['b2b_requests']   || [];
-        const quotas    = window._memCache['gerencia_quotas'] || [];
-        if (rooms.length > 0) {
-            console.log(`[Constanza] ⚡ Cache local: ${rooms.length} hab, ${buildings.length} edif`);
-            return { rooms, buildings, requests, census: [], quotas };
-        }
-    }
-
-    // 🥈 PRIORIDAD 2: Supabase con paginación completa (otros dispositivos)
-    // Supabase devuelve máximo 1000 filas por request — necesitamos paginar
     try {
         const sb = await getSupabase();
-        if (sb) {
-            // ── Helper: descargar todas las páginas de una tabla ────────────
-            async function fetchAll(table) {
-                let all = [];
-                let offset = 0;
-                const PAGE = 500;
-                while (true) {
-                    const { data, error } = await sb
-                        .from(table)
-                        .select('*')
-                        .range(offset, offset + PAGE - 1);
-                    if (error || !data || data.length === 0) break;
-                    all = all.concat(data);
-                    if (data.length < PAGE) break; // última página
-                    offset += PAGE;
-                }
-                return all;
+        if (!sb) throw new Error('No supabase client');
+        console.log('[Constanza] ☁️ Cargando datos desde V2 (paginado)…');
+
+        // Labels para motivos de camas perdidas
+        const MOTIVOS_LABEL = {
+            impar_genero:      'Impar género',
+            impar_empresa:     'Impar empresa',
+            angloamerica:      'Anglo (solo)',
+            motivos_medicos:   'Motivos médicos',
+            motivos_personales:'Motivos personales',
+            turno_noche:       'Turno noche',
+            sin_motivo:        null,
+        };
+
+        // ── Helper paginado ────────────────────────────────────────────────
+        async function fetchAll(table, cols, filterFn) {
+            let all = [], pg = 0;
+            while (true) {
+                let q = sb.from(table).select(cols).range(pg*900, pg*900+899);
+                if (filterFn) q = filterFn(q);
+                const { data, error } = await q;
+                if (error) throw error;
+                if (data?.length) all = all.concat(data);
+                if (!data || data.length < 900) break;
+                pg++; if (pg > 30) break;
             }
+            return all;
+        }
 
-            const [rooms, buildings, requests, quotas] = await Promise.all([
-                fetchAll('rooms'),
-                fetchAll('buildings'),
-                fetchAll('b2b_requests'),
-                fetchAll('gerencia_quotas'),
-            ]);
+        // ── 1. Asignaciones ACTIVAS paginadas ─────────────────────────────
+        const asignaciones = await fetchAll(
+            'v2_asignaciones',
+            `id, rut_huesped, nombre_huesped, fecha_checkin, fecha_checkout, fecha_salida_programada, id_cama,
+             v2_camas(id_cama, numero_cama,
+               v2_habitaciones(id_custom, numero_hab, nivel, cantidad_camas,
+                 v2_pabellones(id, nombre, v2_edificios(nombre)))),
+             v2_empresas(nombre, turno, v2_gerencias(nombre))`,
+            q => q.is('fecha_checkout', null)
+        );
+        console.log(`[Constanza] ✅ ${asignaciones.length} asignaciones activas`);
 
-            if (rooms.length > 0) {
-                console.log(`[Constanza] ☁️ Supabase (paginado): ${rooms.length} hab, ${buildings.length} edif`);
-                return {
-                    rooms,
-                    buildings: buildings || [],
-                    requests:  requests  || [],
-                    census:    [],
-                    quotas:    quotas    || []
+        // ── 2. Construir rooms + buildings desde asignaciones ─────────────
+        const SLOTS = ['day', 'night', 'extra', 'extra2', 'extra3'];
+        const buildingMap = {};
+        const roomMap     = {};
+
+        asignaciones.forEach(a => {
+            const hab = a.v2_camas?.v2_habitaciones;
+            const pab = hab?.v2_pabellones;
+            if (!hab || !pab) return;
+
+            if (!buildingMap[pab.id])
+                buildingMap[pab.id] = { id: pab.id, name: pab.nombre };
+
+            const habKey = hab.numero_hab;
+            if (!roomMap[habKey]) {
+                roomMap[habKey] = {
+                    id: habKey, number: habKey,
+                    buildingId: pab.id,
+                    bedCount:   hab.cantidad_camas || 2,
+                    status:     'occupied',
+                    beds:       {},
+                    nivel:      hab.nivel,
                 };
             }
-        }
-    } catch(e) {
-        console.warn('[Constanza] Supabase no disponible, usando IndexedDB:', e);
-    }
 
-    // 🥉 PRIORIDAD 3: IndexedDB local (offline)
-    console.log('[Constanza] 📦 IndexedDB local');
-    const [rooms, buildings, requests, census, quotas] = await Promise.all([
-        getAll('rooms'),
-        getAll('buildings'),
-        getAll('b2b_requests'),
-        getAll('census_records'),
-        getAll('gerencia_quotas').catch(() => []),
-    ]);
-    return { rooms, buildings, requests, census, quotas };
+            const numCama = parseInt(a.v2_camas?.numero_cama || 1);
+            const slotKey = SLOTS[numCama - 1] || `extra${numCama}`;
+            roomMap[habKey].beds[slotKey] = {
+                occupant:      a.nombre_huesped        || '—',
+                rut:           a.rut_huesped           || '—',
+                company:       a.v2_empresas?.nombre               || '—',
+                gerencia:      a.v2_empresas?.v2_gerencias?.nombre || '—',
+                shift:         a.v2_empresas?.turno                || '—',
+                arrivalDate:   a.fecha_checkin                     || '—',
+                departureDate: a.fecha_salida_programada           || '—',  // fecha PROGRAMADA de salida
+                gender:        '—',
+            };
+        });
+
+        const rooms     = Object.values(roomMap);
+        const buildings = Object.values(buildingMap);
+
+        // ── 3. Universo completo de habitaciones (paginado) ──────────────
+        const todasHabs = await fetchAll(
+            'v2_habitaciones',
+            'id_custom, numero_hab, nivel, cantidad_camas, v2_pabellones(id, nombre)'
+        );
+        todasHabs.forEach(hab => {
+            const pab = hab.v2_pabellones;
+            if (!pab) return;
+            if (!buildingMap[pab.id]) {
+                buildingMap[pab.id] = { id: pab.id, name: pab.nombre };
+                buildings.push(buildingMap[pab.id]);
+            }
+            if (!roomMap[hab.numero_hab]) {
+                const room = {
+                    id: hab.numero_hab, number: hab.numero_hab,
+                    buildingId: pab.id,
+                    bedCount:   hab.cantidad_camas || 2,
+                    status:     'free', beds: {}, nivel: hab.nivel,
+                };
+                roomMap[hab.numero_hab] = room;
+                rooms.push(room);
+            } else {
+                // Actualizar bedCount con valor real
+                roomMap[hab.numero_hab].bedCount = hab.cantidad_camas || roomMap[hab.numero_hab].bedCount;
+            }
+        });
+
+        console.log(`[Constanza] ✅ ${rooms.length} hab · ${buildings.length} pabellones`);
+
+        // ── 4. Cupos gerencia ────────────────────────────────────────────
+        let quotas = [];
+        try {
+            const { data: cuposData } = await sb
+                .from('v2_cupos_gerencias')
+                .select('id, numero_contrato, contrato_sap, empresa, gerencia, nombre_contrato, operacion, cupos_totales, cupos_ocupados')
+                .order('gerencia').order('empresa');
+            quotas = (cuposData || []).map(c => ({
+                company:         c.empresa          || '—',
+                gerencia:        c.gerencia         || '—',
+                limit:           c.cupos_totales    || 0,
+                cupos_ocupados:  c.cupos_ocupados   || 0,
+                cupos_totales:   c.cupos_totales    || 0,
+                numero_contrato: c.numero_contrato  || null,
+                nombre_contrato: c.nombre_contrato  || null,
+                operacion:       c.operacion        || null,
+                id:              c.id,
+            }));
+            console.log(`[Constanza] ✅ ${quotas.length} cupos gerencia`);
+        } catch(eQ) {
+            console.warn('[Constanza] Cupos no disponibles:', eQ.message);
+        }
+
+        // ── 5. Motivos de camas perdidas ─────────────────────────────────
+        try {
+            // id_cama_perdida = ID de la cama LIBRE (sin asignacion activa)
+            // Necesitamos mapear id_cama → numero_hab para TODAS las camas (libres Y ocupadas)
+            const numPorIdCustom = {};
+            todasHabs.forEach(h => { numPorIdCustom[String(h.id_custom)] = h.numero_hab; });
+
+            const todasCamas = await fetchAll('v2_camas', 'id_cama, habitacion_id');
+            const habPorCama = {};
+            todasCamas.forEach(c => {
+                const num = numPorIdCustom[String(c.habitacion_id)];
+                if (num) habPorCama[String(c.id_cama)] = num;
+            });
+
+            const { data: motivosData } = await sb
+                .from('v2_camas_perdidas')
+                .select('id_cama_perdida, motivo, motivo_texto');
+
+            (motivosData || []).forEach(m => {
+                const labelMotivo = m.motivo && m.motivo !== 'sin_motivo'
+                    ? (MOTIVOS_LABEL[m.motivo] || m.motivo_texto || m.motivo)
+                    : null;
+                if (!labelMotivo) return;
+                const numHab = habPorCama[String(m.id_cama_perdida)];
+                if (numHab && roomMap[numHab] && !roomMap[numHab].lostBedReason) {
+                    roomMap[numHab].lostBedReason = labelMotivo;
+                }
+            });
+            console.log(`[Constanza] ✅ ${(motivosData||[]).length} motivos asignados`);
+        } catch(eM) {
+            console.warn('[Constanza] Motivos no disponibles:', eM.message);
+        }
+
+        // ── 6. Stats Anglo/Noche para Constanza resumen ──────────────────
+        let angloStats = null;
+        try {
+            const [distData, camTodos] = await Promise.all([
+                sb.from('v2_distribucion_camas').select('id_cama, tipo'),
+                fetchAll('v2_camas', 'id_cama, estado, numero_cama'),
+            ]);
+            const dist = distData.data || [];
+
+            const nocheSet    = new Set(dist.filter(d => d.tipo === 'noche').map(d => String(d.id_cama)));
+            const angloSet    = new Set(dist.filter(d => d.tipo === 'anglo').map(d => String(d.id_cama)));
+            const reservaSet  = new Set(dist.filter(d => d.tipo === 'reserva').map(d => String(d.id_cama)));
+            const bodegaSet   = new Set(dist.filter(d => d.tipo === 'bodega').map(d => String(d.id_cama)));
+
+            const angloNocheSet = new Set(camTodos.filter(c => angloSet.has(String(c.id_cama)) && Number(c.numero_cama) === 2).map(c => String(c.id_cama)));
+            const angloDiaSet   = new Set(camTodos.filter(c => angloSet.has(String(c.id_cama)) && Number(c.numero_cama) === 1).map(c => String(c.id_cama)));
+
+            const asigSet = new Set(asignaciones.map(a => String(a.id_cama)));
+            const esDisp  = c => c.estado !== 'Ocupada' && c.estado !== 'Mantencion' && c.estado !== 'Mantención' && !asigSet.has(String(c.id_cama));
+
+            // Habitaciones donde todas las camas están en mantención
+            const porHab = {};
+            camTodos.forEach(c => { const h = String(c.habitacion_id); if (!porHab[h]) porHab[h] = []; porHab[h].push(c); });
+            let habMant = 0;
+            Object.values(porHab).forEach(cs => { if (cs.length > 0 && cs.every(c => c.estado === 'Mantencion' || c.estado === 'Mantención')) habMant++; });
+
+            angloStats = {
+                totalNoche:      nocheSet.size,
+                totalAngloNoche: angloNocheSet.size,
+                totalAngloDia:   angloDiaSet.size,
+                totalReserva:    reservaSet.size,
+                totalBodega:     bodegaSet.size,
+                habMant,
+                dispNoche:      camTodos.filter(c => nocheSet.has(String(c.id_cama))    && esDisp(c)).length,
+                dispAngloNoche: camTodos.filter(c => angloNocheSet.has(String(c.id_cama)) && esDisp(c)).length,
+                dispAngloDia:   camTodos.filter(c => angloDiaSet.has(String(c.id_cama))  && esDisp(c)).length,
+            };
+            console.log('[Constanza] ✅ Anglo/Noche stats calculados');
+        } catch(eA) {
+            console.warn('[Constanza] Anglo stats no disponibles:', eA.message);
+        }
+
+        return { rooms, buildings, requests: [], census: [], quotas, angloStats };
+
+    } catch(e) {
+        console.warn('[Constanza] Error:', e.message);
+        return { rooms: [], buildings: [], requests: [], census: [], quotas: [] };
+    }
 }
+
+
 
 
 // ── Helper: Panel Desplegable (accordion nativo) ─────────────────────────────
@@ -201,8 +353,16 @@ function detectarIntencion(pregunta) {
         { id: 'CAMAS_PERDIDAS', palabras: ['camas perdidas', 'cama perdida', 'perdida', 'perdidas', 'desperdicio', 'desperdiciada', 'sola', 'solo en la habitacion', 'habitacion con uno', 'media habitacion', 'medio llena', 'subutilizada', 'subutilizado', 'inefici'] },
         { id: 'HABITACIONES_LIBRES', palabras: ['libre', 'disponible', 'vacia', 'vacias', 'sin ocupar', 'desocupada'] },
         { id: 'HABITACIONES_OCUPADAS', palabras: ['ocupad', 'full', 'completa', 'llena', 'con gente'] },
-        { id: 'CUPOS_GERENCIA', palabras: ['cupo', 'cupos por gerencia', 'limite gerencia', 'disponibles por gerencia', 'camas gerencia', 'cuantas camas tiene', 'cupos disponibles'] },
+        { id: 'CUPOS_GERENCIA', palabras: [
+            'cupo', 'cupos por gerencia', 'limite gerencia', 'disponibles por gerencia',
+            'camas gerencia', 'cuantas camas tiene', 'cupos disponibles', 'cupos libres',
+            'cupos ocupados', 'contrato', 'contratos', 'contratos sap', 'sap',
+            'maestro contrato', 'v2_cupos', 'cupos empresa', 'cupos de la empresa',
+            'cupos de la gerencia', 'cuantos cupos', 'limite de cupos', 'cupos habilitados',
+            'cupos restantes', 'cupos asignados', 'empresa tiene cupos', 'gerencia tiene cupos'
+        ] },
         { id: 'GERENCIAS_DETALLE', palabras: ['gerencia', 'gerencias', 'por gerencia', 'todas las gerencias', 'desglose gerencia', 'empresas por gerencia', 'que gerencias hay', 'ver gerencias'] },
+
         { id: 'TURNO_DIA_NOCHE', palabras: ['camas dia', 'camas de dia', 'camas noche', 'camas de noche', 'turno dia', 'turno noche', 'disponibles de dia', 'disponibles de noche', 'pabellon noche', 'pabellon dia', 'camas por turno', 'turno', 'dia disponible', 'noche disponible'] },
         { id: 'CAMAS_CAPACIDAD', palabras: ['capacidad', 'espacio', 'cuantas camas', 'total camas', 'camas disponibles', 'camas libres'] },
         { id: 'TRABAJADORES_EMPRESA', palabras: ['trabajador', 'personal', 'emplead', 'gente', 'quien esta', 'quien hay', 'cuantos son', 'anglo', 'aramark', 'constructora', 'empresa'] },
@@ -240,23 +400,22 @@ function detectarIntencion(pregunta) {
     return { id: 'RESUMEN_GENERAL', edificioFiltro, empresaFiltro, habNumero: null };
 }
 
-// ── Helpers de cálculo ─────────────────────────────────────────────────
+// ── Helpers de cálculo ─────────────────────────────────────────────────────────────────────
 function calcularEstadisticasHabitaciones(rooms, buildings) {
-    const total = rooms.length;
-    const ocupadas = rooms.filter(r => r.status === 'occupied').length;
-    const libres = rooms.filter(r => r.status === 'free').length;
-    const bloqueadas = rooms.filter(r => r.status === 'blocked').length;
+    const total     = rooms.length;
+    const ocupadas  = rooms.filter(r => r.status === 'occupied').length;
+    const libres    = rooms.filter(r => r.status === 'free').length;
+    const bloqueadas= rooms.filter(r => r.status === 'blocked').length;
 
     let totalCamas = 0, camasOcupadas = 0;
     rooms.forEach(r => {
         const cap = r.bedCount || 2;
         totalCamas += cap;
-        ['day', 'night', 'extra'].slice(0, cap).forEach(k => {
-            if (r.beds?.[k]?.occupant) camasOcupadas++;
-        });
+        // Usar Object.values para ser independiente de la key (C1/C2/day/night)
+        camasOcupadas += Object.values(r.beds || {}).filter(b => b?.occupant).length;
     });
 
-    // 🌙 Hab / Camas de NOCHE: habitaciones en pabellones de turno noche
+    // 🌙 Hab / Camas de NOCHE
     const buildingMap = {};
     buildings.forEach(b => buildingMap[b.id] = b);
     let habNoche = 0, camasNoche = 0, camasNocheOcupadas = 0;
@@ -266,26 +425,20 @@ function calcularEstadisticasHabitaciones(rooms, buildings) {
         const isNoche = shift.includes('noche') || shift.includes('night');
         if (isNoche) {
             habNoche++;
-            const cap = r.bedCount || 2;
-            camasNoche += cap;
-            ['day', 'night', 'extra'].slice(0, cap).forEach(k => {
-                if (r.beds?.[k]?.occupant) camasNocheOcupadas++;
-            });
+            camasNoche += r.bedCount || 2;
+            camasNocheOcupadas += Object.values(r.beds || {}).filter(b => b?.occupant).length;
         }
     });
 
     const porEdificio = {};
     rooms.forEach(r => {
-        const bName = buildingMap[r.buildingId]?.name || `Edificio ${r.buildingId}`;
-        if (!porEdificio[bName]) porEdificio[bName] = { total: 0, ocupadas: 0, libres: 0, camas: 0, camasOcupadas: 0 };
+        const bName = buildingMap[r.buildingId]?.name || `Pab. ${r.buildingId}`;
+        if (!porEdificio[bName]) porEdificio[bName] = { total:0, ocupadas:0, libres:0, camas:0, camasOcupadas:0 };
         porEdificio[bName].total++;
         if (r.status === 'occupied') porEdificio[bName].ocupadas++;
-        if (r.status === 'free') porEdificio[bName].libres++;
-        const cap = r.bedCount || 2;
-        porEdificio[bName].camas += cap;
-        ['day', 'night', 'extra'].slice(0, cap).forEach(k => {
-            if (r.beds?.[k]?.occupant) porEdificio[bName].camasOcupadas++;
-        });
+        if (r.status === 'free')     porEdificio[bName].libres++;
+        porEdificio[bName].camas += r.bedCount || 2;
+        porEdificio[bName].camasOcupadas += Object.values(r.beds || {}).filter(b => b?.occupant).length;
     });
 
     return { total, ocupadas, libres, bloqueadas, totalCamas, camasOcupadas,
@@ -299,17 +452,17 @@ function extraerTrabajadores(rooms, buildings) {
 
     rooms.forEach(r => {
         const edificio = buildingMap[r.buildingId] || `Ed. ${r.buildingId}`;
-        ['day', 'night', 'extra'].forEach(cama => {
-            const bed = r.beds?.[cama];
+        // Clave-agnóstico: soporta tanto C1/C2 como day/night/extra
+        Object.entries(r.beds || {}).forEach(([slot, bed]) => {
             if (bed?.occupant) {
                 trabajadores.push({
                     nombre: bed.occupant,
                     empresa: bed.company || '—',
-                    turno: bed.shift || cama,
+                    turno: bed.shift || slot,
                     genero: bed.gender || '—',
                     rut: bed.rut || '—',
                     habitacion: `${edificio} · Hab. ${r.number}`,
-                    cama: cama === 'day' ? 'Día' : cama === 'night' ? 'Noche' : 'Extra',
+                    cama: slot === 'day' ? 'Día' : slot === 'night' ? 'Noche' : 'Extra',
                     llegada: bed.arrivalDate || '—',
                     salida: bed.departureDate || '—',
                 });
@@ -355,12 +508,21 @@ function barraProgreso(parte, total, color) {
 // ── Generadores de informe por intención ──────────────────────────────
 
 function generarResumenGeneral(datos) {
-    const { rooms, buildings, requests } = datos;
+    const { rooms, buildings, requests, angloStats } = datos;
     const stats = calcularEstadisticasHabitaciones(rooms, buildings);
     const trabajadores = extraerTrabajadores(rooms, buildings);
     const empresas = agruparPorEmpresa(trabajadores);
     const solicPend = requests.filter(r => r.status === 'pending' || r.status === 'accepted').length;
     const solicTotal = requests.length;
+    const pctOcup = stats.totalCamas > 0 ? Math.round((stats.camasOcupadas / stats.totalCamas) * 100) : 0;
+
+    // Helper KPI compacto para la fila dashboard
+    const kpiMini = (icon, label, value, color, bg = '#f8fafc') =>
+        `<div style="background:${bg};border-radius:12px;padding:12px;border-top:3px solid ${color};text-align:center">
+          <div style="font-size:18px">${icon}</div>
+          <div style="font-size:22px;font-weight:800;color:${color}">${value}</div>
+          <div style="font-size:10px;color:#64748b;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-top:2px">${label}</div>
+         </div>`;
 
     let edificiosHTML = '';
     const edSorted = Object.entries(stats.porEdificio).sort((a, b) => a[0].localeCompare(b[0]));
@@ -394,6 +556,35 @@ function generarResumenGeneral(datos) {
 
     return `
     <div class="informe-section">
+
+        <!-- ── Dashboard de Ocupación (igual que la pantalla principal) ── -->
+        <div style="background:linear-gradient(135deg,#f8fafc,#f1f5f9);border-radius:16px;padding:16px;margin-bottom:20px;border:1px solid #e2e8f0">
+          <div style="font-size:13px;font-weight:700;color:#475569;margin-bottom:12px">📊 Dashboard de Ocupación — Tiempo Real</div>
+
+          <!-- Fila 1: inventario general -->
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:8px;margin-bottom:8px">
+            ${kpiMini('🛏️','Total Camas', stats.totalCamas,'#6366f1')}
+            ${kpiMini('✅','Disponibles', stats.totalCamas - stats.camasOcupadas,'#10b981')}
+            ${kpiMini('🔴','Ocupadas', stats.camasOcupadas,'#ef4444')}
+            ${kpiMini('📊','% Ocupación', pctOcup+'%', pctOcup>80?'#ef4444':pctOcup>50?'#f59e0b':'#10b981')}
+            ${angloStats ? kpiMini('🟡','Hab. Mantención', angloStats.habMant,'#f59e0b') : ''}
+            ${angloStats?.totalBodega > 0 ? kpiMini('📦','Bodegas', angloStats.totalBodega,'#64748b') : ''}
+            ${angloStats?.totalReserva > 0 ? kpiMini('📌','En Reserva', angloStats.totalReserva,'#7c3aed') : ''}
+          </div>
+
+          <!-- Fila 2: noche y Anglo -->
+          ${angloStats ? `
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:8px">
+            ${kpiMini('🌙','Total Noche', angloStats.totalNoche,'#4338ca')}
+            ${kpiMini('🌙✅','Disp. Noche', angloStats.dispNoche,'#6366f1')}
+            ${angloStats.totalAngloNoche > 0 ? kpiMini('⛏️🌙','Anglo Noche', angloStats.totalAngloNoche,'#b45309') : ''}
+            ${angloStats.totalAngloNoche > 0 ? kpiMini('⛏️🌙✅','Disp. Anglo Noche', angloStats.dispAngloNoche,'#92400e') : ''}
+            ${angloStats.totalAngloDia > 0 ? kpiMini('⛏️☀️','Anglo Día', angloStats.totalAngloDia,'#d97706') : ''}
+            ${angloStats.totalAngloDia > 0 ? kpiMini('⛏️☀️✅','Disp. Anglo Día', angloStats.dispAngloDia,'#f59e0b') : ''}
+          </div>` : ''}
+        </div>
+
+        <!-- ── KPIs heredados (habitaciones) ── -->
         <div class="kpi-grid">
             <div class="kpi-card kpi-red">
                 <div class="kpi-icon">🏠</div>
@@ -897,14 +1088,15 @@ function generarCamasPerdidas(datos, edificioFiltro) {
     const buildingMap = {};
     buildings.forEach(b => buildingMap[b.id] = { name: b.name || b.code, code: b.code });
 
-    // Filtrar: habitaciones con 2+ camas y exactamente 1 ocupante
+    // Filtrar: habitaciones con 2+ camas y exactamente 1 ocupante ACTIVO
+    // NOTA: cargarDatos() guarda las camas como C1, C2… (no 'day'/'night'/'extra')
+    // Se usa Object.values() para aceptar cualquier nombre de clave
     let candidatas = rooms.filter(r => {
-        if (r.status !== 'occupied') return false;
         const cap = r.bedCount || 2;
-        if (cap < 2) return false; // solo cuenta si tiene capacidad para 2+
-        // Contar cuántas camas tienen ocupante
-        const ocupadas = ['day', 'night', 'extra'].filter(k => r.beds?.[k]?.occupant).length;
-        return ocupadas === 1; // exactamente 1 de 2+ camas ocupada
+        if (cap < 2) return false;
+        // Todas las camas en beds[] son ACTIVAS (filtradas por fecha_checkout IS NULL en cargarDatos)
+        const bedsActivos = Object.values(r.beds || {}).filter(b => b?.occupant && b.occupant !== '—');
+        return bedsActivos.length >= 1 && bedsActivos.length < cap;
     });
 
     // Filtrar por edificio si se especificó
@@ -919,8 +1111,8 @@ function generarCamasPerdidas(datos, edificioFiltro) {
     // Calcular camas perdidas totales
     const camasPerdidas = candidatas.reduce((sum, r) => {
         const cap = r.bedCount || 2;
-        const ocupadas = ['day', 'night', 'extra'].filter(k => r.beds?.[k]?.occupant).length;
-        return sum + (cap - ocupadas); // camas vacías en habitaciones con 1 sola persona
+        const ocupadas = Object.values(r.beds || {}).filter(b => b?.occupant && b.occupant !== '—').length;
+        return sum + (cap - ocupadas);
     }, 0);
 
     // Agrupar por edificio para el resumen
@@ -931,7 +1123,7 @@ function generarCamasPerdidas(datos, edificioFiltro) {
         if (!porEdificio[bnom]) porEdificio[bnom] = { count: 0, perdidas: 0 };
         porEdificio[bnom].count++;
         const cap = r.bedCount || 2;
-        const ocup = ['day', 'night', 'extra'].filter(k => r.beds?.[k]?.occupant).length;
+        const ocup = Object.values(r.beds || {}).filter(b => b?.occupant && b.occupant !== '—').length;
         porEdificio[bnom].perdidas += (cap - ocup);
     });
 
@@ -990,6 +1182,20 @@ function generarCamasPerdidas(datos, edificioFiltro) {
         ? Math.round((camasPerdidas / rooms.reduce((s, r) => s + (r.bedCount || 2), 0)) * 100)
         : 0;
 
+    // ━━ Desglose Anglo vs Otras Empresas ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    const isAnglo = nombre => /anglo/i.test(nombre || '');
+    let cpAnglo = 0, cpOtras = 0;
+    candidatas.forEach(r => {
+        const cap = r.bedCount || 2;
+        const bedsAct = Object.values(r.beds || {}).filter(b => b?.occupant && b.occupant !== '—');
+        const libres  = cap - bedsAct.length;
+        if (libres <= 0) return;
+        // Clasificar según empresa del ocupante
+        const empresaOcup = bedsAct[0]?.company || '';
+        if (isAnglo(empresaOcup)) cpAnglo += libres;
+        else                      cpOtras += libres;
+    });
+
     return `
     <div class="informe-section">
         <div style="background:linear-gradient(135deg,#fffbeb,#fef3c7);border:1px solid #fde68a;border-radius:16px;padding:16px;margin-bottom:20px;">
@@ -1017,6 +1223,16 @@ function generarCamasPerdidas(datos, edificioFiltro) {
                 <div class="kpi-icon">💰</div>
                 <div class="kpi-value">${camasPerdidas}</div>
                 <div class="kpi-label">Cupos adicionales posibles</div>
+            </div>
+            <div class="kpi-card" style="background:#fffbeb;border:1.5px solid #fde68a;">
+                <div class="kpi-icon">⛏️</div>
+                <div class="kpi-value" style="color:#92400e;">${cpAnglo}</div>
+                <div class="kpi-label">Camas perdidas Anglo American</div>
+            </div>
+            <div class="kpi-card" style="background:#eff6ff;border:1.5px solid #bfdbfe;">
+                <div class="kpi-icon">🏢</div>
+                <div class="kpi-value" style="color:#1d4ed8;">${cpOtras}</div>
+                <div class="kpi-label">Camas perdidas otras empresas</div>
             </div>
         </div>
 
@@ -1113,72 +1329,52 @@ function generarHabitacionDetalle(datos, habNumero) {
     </div>`;
 }
 
-// ── Cupos por Gerencia disponibles ───────────────────────────────────────────
+// ── Cupos por Gerencia disponibles (V2 — lee de v2_cupos_gerencias) ───────────
 function generarCuposGerencia(datos) {
-    const { rooms, quotas } = datos;
+    const { quotas } = datos;
 
-    // Contar uso real de camas por company||gerencia
-    const usage = {};
-    rooms.forEach(r => {
-        ['day', 'night', 'extra'].forEach(bk => {
-            const bed = r.beds?.[bk];
-            if (!bed?.occupant) return;
-            const company  = (bed.company  || '').trim().toLowerCase();
-            const gerencia = (bed.management || bed.gerencia || '').trim().toLowerCase();
-            if (!gerencia) return;
-            const key = `${company}||${gerencia}`;
-            usage[key] = (usage[key] || 0) + 1;
-        });
-    });
-
-    // Recolectar gerencias conocidas (de cupos + de camas)
-    const gerenciasSet = new Set();
-    rooms.forEach(r => {
-        ['day', 'night', 'extra'].forEach(bk => {
-            const bed = r.beds?.[bk];
-            if (!bed?.occupant) return;
-            const c = (bed.company || '').trim();
-            const g = (bed.management || bed.gerencia || '').trim();
-            if (c && g) gerenciasSet.add(`${c}||${g}`);
-        });
-    });
-    quotas.forEach(q => { if (q.company && q.gerencia) gerenciasSet.add(`${q.company}||${q.gerencia}`); });
-
-    const quotaMap = {};
-    quotas.forEach(q => {
-        const key = `${(q.company||'').trim().toLowerCase()}||${(q.gerencia||'').trim().toLowerCase()}`;
-        quotaMap[key] = q;
-    });
-
-    if (gerenciasSet.size === 0) {
-        return `<div class="informe-section"><p style="text-align:center;padding:40px;color:#94a3b8;">ℹ️ No hay gerencias con camas asignadas ni cupos configurados.</p></div>`;
+    if (!quotas || quotas.length === 0) {
+        return `<div class="informe-section"><p style="text-align:center;padding:40px;color:#94a3b8;">
+            ℹ️ No hay contratos cargados en <b>v2_cupos_gerencias</b>.<br>
+            Usa el módulo <b>📊 Cupos por Gerencia</b> para importar el maestro SAP.
+        </p></div>`;
     }
 
-    let rows = '';
-    [...gerenciasSet].sort().forEach(fullKey => {
-        const [company, gerencia] = fullKey.split('||');
-        const lookupKey = `${company.toLowerCase()}||${gerencia.toLowerCase()}`;
-        const quota = quotaMap[lookupKey];
-        const usado = usage[lookupKey] || 0;
-        const limite = quota?.limit ?? null;
-        const disponible = limite !== null ? Math.max(0, limite - usado) : '∞';
-        const pct = limite !== null ? Math.min(100, Math.round((usado / limite) * 100)) : 0;
-        const barColor = pct >= 100 ? '#e53e3e' : pct >= 80 ? '#dd6b20' : '#38a169';
-        const badgeBg  = pct >= 100 ? '#fff5f5' : pct >= 80 ? '#fffbeb' : '#f0fff4';
-        const badgeCol = pct >= 100 ? '#c0392b' : pct >= 80 ? '#92400e' : '#16a34a';
-        const statusTxt = limite === null ? 'Sin límite' : pct >= 100 ? '🔴 Agotado' : pct >= 80 ? '🟠 Casi lleno' : '🟢 Disponible';
+    // Agrupar por gerencia para los KPIs
+    const gerSet = new Set(quotas.map(q => q.gerencia));
+    const totalCupos    = quotas.reduce((s, q) => s + (q.cupos_totales  || 0), 0);
+    const totalOcupados = quotas.reduce((s, q) => s + (q.cupos_ocupados || 0), 0);
+    const totalLibres   = Math.max(0, totalCupos - totalOcupados);
 
+    // Tabla de contratos
+    let rows = '';
+    quotas.forEach(q => {
+        const ocupados   = q.cupos_ocupados  || 0;
+        const totales    = q.cupos_totales   || 0;
+        const libres     = Math.max(0, totales - ocupados);
+        const pct        = totales > 0 ? Math.min(100, Math.round((ocupados / totales) * 100)) : 0;
+        const barColor   = pct >= 100 ? '#e53e3e' : pct >= 80 ? '#dd6b20' : '#38a169';
+        const badgeBg    = pct >= 100 ? '#fff5f5' : pct >= 80 ? '#fffbeb' : '#f0fff4';
+        const badgeCol   = pct >= 100 ? '#c0392b' : pct >= 80 ? '#92400e' : '#16a34a';
+        const statusTxt  = totales === 0 ? '⚪ Sin definir'
+                         : pct >= 100    ? '🔴 Agotado'
+                         : pct >= 80     ? '🟠 Casi lleno'
+                         :                 '🟢 Disponible';
         rows += `
         <tr>
-            <td style="padding:10px 12px;font-weight:700">${company}</td>
-            <td style="padding:10px 12px;font-weight:600">${gerencia}</td>
-            <td style="padding:10px 12px;text-align:center;font-weight:800;color:#c0392b">${usado}</td>
-            <td style="padding:10px 12px;text-align:center;font-weight:700;color:#64748b">${limite !== null ? limite : '∞'}</td>
-            <td style="padding:10px 12px;text-align:center;font-weight:800;color:${badgeCol}">${disponible}</td>
+            <td style="padding:10px 12px;font-weight:700;font-family:monospace;font-size:12px;color:#6366f1">${q.numero_contrato||'—'}</td>
+            <td style="padding:10px 12px;font-weight:700">${q.company}</td>
+            <td style="padding:10px 12px">
+                <span style="background:#e0f2fe;color:#0369a1;padding:2px 10px;border-radius:99px;font-size:11px;font-weight:700">${q.gerencia}</span>
+            </td>
+            <td style="padding:10px 12px;font-size:12px;color:#64748b;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${q.nombre_contrato||''}">${q.nombre_contrato||'—'}</td>
+            <td style="padding:10px 12px;text-align:center;font-weight:800;color:#c0392b">${ocupados}</td>
+            <td style="padding:10px 12px;text-align:center;font-weight:700;color:#64748b">${totales || '∞'}</td>
+            <td style="padding:10px 12px;text-align:center;font-weight:800;color:${badgeCol}">${totales > 0 ? libres : '∞'}</td>
             <td style="padding:10px 12px">
                 <div style="display:flex;align-items:center;gap:8px">
-                    <div style="flex:1;background:#e2e8f0;border-radius:99px;height:8px;overflow:hidden">
-                        <div style="height:100%;width:${limite !== null ? pct : 0}%;background:${barColor};border-radius:99px;transition:width 0.8s ease"></div>
+                    <div style="flex:1;background:#e2e8f0;border-radius:99px;height:8px;overflow:hidden;min-width:60px">
+                        <div style="height:100%;width:${pct}%;background:${barColor};border-radius:99px;transition:width 0.8s ease"></div>
                     </div>
                     <span style="font-size:11px;font-weight:700;background:${badgeBg};color:${badgeCol};padding:2px 8px;border-radius:99px;white-space:nowrap">${statusTxt}</span>
                 </div>
@@ -1186,20 +1382,22 @@ function generarCuposGerencia(datos) {
         </tr>`;
     });
 
-    const totalUsado = Object.values(usage).reduce((a, b) => a + b, 0);
-    const totalDisp  = rooms.reduce((s, r) => s + (r.bedCount || 2), 0) - totalUsado;
-
     return `
     <div class="informe-section">
         <div class="kpi-grid">
-            <div class="kpi-card kpi-red"><div class="kpi-icon">🎯</div><div class="kpi-value">${gerenciasSet.size}</div><div class="kpi-label">Gerencias configuradas</div></div>
-            <div class="kpi-card kpi-orange"><div class="kpi-icon">🛏️</div><div class="kpi-value">${totalUsado}</div><div class="kpi-label">Camas usadas total</div></div>
-            <div class="kpi-card kpi-green"><div class="kpi-icon">✅</div><div class="kpi-value">${totalDisp}</div><div class="kpi-label">Camas libres en camp.</div></div>
+            <div class="kpi-card kpi-red"><div class="kpi-icon">📋</div><div class="kpi-value">${quotas.length}</div><div class="kpi-label">Contratos</div></div>
+            <div class="kpi-card kpi-blue"><div class="kpi-icon">🏢</div><div class="kpi-value">${gerSet.size}</div><div class="kpi-label">Gerencias</div></div>
+            <div class="kpi-card kpi-purple"><div class="kpi-icon">🛏️</div><div class="kpi-value">${totalCupos}</div><div class="kpi-label">Cupos Totales</div></div>
+            <div class="kpi-card kpi-orange"><div class="kpi-icon">👷</div><div class="kpi-value">${totalOcupados}</div><div class="kpi-label">Cupos Ocupados</div></div>
+            <div class="kpi-card kpi-green"><div class="kpi-icon">✅</div><div class="kpi-value">${totalLibres}</div><div class="kpi-label">Cupos Libres</div></div>
         </div>
-        <h3 class="section-title">🎯 Cupos por Gerencia</h3>
+        <h3 class="section-title">🎯 Cupos por Contrato / Gerencia</h3>
         <div class="table-wrap">
             <table class="informe-table">
-                <thead><tr><th>Empresa</th><th>Gerencia</th><th>Usadas</th><th>Límite</th><th>Disponibles</th><th>Ocupación</th></tr></thead>
+                <thead><tr>
+                    <th>N° Contrato</th><th>Empresa</th><th>Gerencia</th>
+                    <th>Nombre Contrato</th><th>Ocupados</th><th>Cupos</th><th>Libres</th><th>Estado</th>
+                </tr></thead>
                 <tbody>${rows}</tbody>
             </table>
         </div>

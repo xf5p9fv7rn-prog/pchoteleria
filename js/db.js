@@ -122,7 +122,8 @@ export function openDB() {
         const req = indexedDB.open(DB_NAME, DB_VERSION);
         req.onupgradeneeded = (e) => {
             const db = e.target.result;
-            const stores = ['buildings', 'rooms', 'assignments', 'census', 'b2b_requests', 'sync_queue', 'users', 'logs', 'census_records', 'gerencia_quotas'];
+            // b2b_requests ELIMINADA — migrada a v2_solicitudes_b2b en Supabase
+            const stores = ['buildings', 'rooms', 'assignments', 'census', 'sync_queue', 'users', 'logs', 'census_records', 'gerencia_quotas'];
             stores.forEach(s => {
                 if (!db.objectStoreNames.contains(s)) {
                     db.createObjectStore(s, { keyPath: s === 'users' ? 'username' : 'id', autoIncrement: s !== 'users' });
@@ -149,7 +150,11 @@ export async function getAll(storeName) {
     // La protección contra datos fantasma la da _locallyModified:
     // cuando asignamos/vaciamos una room con put(), su ID se marca localmente
     // y descargarDesdeNubeSilencioso NO la sobreescribe (ver lógica en la función).
-    if (navigator.onLine && ['rooms', 'census', 'buildings', 'b2b_requests', 'users', 'gerencia_quotas'].includes(storeName)) {
+    // ── V2 MIGRATION: Solo sincronizar silenciosamente gerencia_quotas (legacy aún activa)
+    // Las tablas V2 (v2_asignaciones, v2_camas, etc.) son gestionadas directamente
+    // por v2-service.js — db.js no las toca para evitar duplicación.
+    // rooms, buildings, census, gerencia_quotas ya no existen → NO descargar.
+    if (navigator.onLine && false) { // DESACTIVADO: tablas legacy eliminadas
         descargarDesdeNubeSilencioso(storeName, db); 
     }
     return localData;
@@ -180,15 +185,7 @@ async function descargarDesdeNubeSilencioso(storeName, db) {
                 if (data.length < 500) isFetching = false;
             } else isFetching = false;
         }
-        // 🔒 PROTECCIÓN ESPECIAL b2b_requests:
-        // Si Supabase devuelve 0 solicitudes pero hay datos locales,
-        // es muy probable que la nube esté vacía por un fallo de sync anterior.
-        // En ese caso, NO pisamos los datos locales — las solicitudes son valiosas.
-        if (storeName === 'b2b_requests' && allData.length === 0) {
-            console.log('[Sync] b2b_requests vacías en nube — preservando datos locales');
-            _isSyncing[storeName] = false;
-            return;
-        }
+        // b2b_requests ELIMINADA — todo flujo B2B usa v2_solicitudes_b2b directamente en Supabase
 
         // 🔒 MERGE SEGURO: NO hacemos clear(). Solo insertamos/actualizamos item a item.
         // Registros modificados localmente están protegidos 5 min post-cambio o hasta upsert exitoso.
@@ -244,55 +241,14 @@ export async function put(storeName, data) {
         else _memCache[storeName].push(data);
         window.dispatchEvent(new CustomEvent('db:changed', { detail: { storeName } }));
     }
-    if (['rooms', 'census', 'b2b_requests', 'buildings', 'users', 'gerencia_quotas'].includes(storeName)) {
-        // 🔒 Filtrar solo columnas que existen en Supabase (evita 400 por campos desconocidos)
-        const SUPABASE_COLS = {
-            rooms:          ['id','buildingId','number','floor','bedCount','status','gender',
-                              'reservedCompany','reservedShift','beds','lostBedReason',
-                              'blockReason','blockedAt','blockedBed'],
-            b2b_requests:   ['id','company','contactName','contactEmail','contactPhone',
-                              'startDate','endDate','totalPeople','shift','gender','specialNeeds',
-                              'status','createdAt','workers','contractNumber','gerencia','notes',
-                              'angloAdmin','receivedDate'],
-            buildings:      ['id','name','code','type','floor','capacity','shifts','notes','floorConfigs','mainShift'],
-            census:         ['id','roomId','date','state','updatedBy','updatedAt'],
-            gerencia_quotas:['id','company','gerencia','limit','overrideAllowed','createdAt'],
-            users:          ['username','role','name','password','empresa','createdAt']
-        };
-        const cols = SUPABASE_COLS[storeName];
-
-        // 🔒 Proteger temporalmente (5 min) — evita que auto-refresh sobreescriba
+    // ── V2 MIGRATION: el motor de sync legacy (IndexedDB ↔ Supabase) está desactivado
+    // para tablas antiguas. Solo usuarios se gestionan localmente.
+    // Las tablas V2 se gestionan directamente en v2-service.js con llamadas directas.
+    const LEGACY_SYNC_TABLES = ['users']; // solo 'users' queda en IndexedDB local
+    if (LEGACY_SYNC_TABLES.includes(storeName)) {
+        const cols = { users: ['username','role','name','password','empresa','createdAt'] }[storeName];
         if (data.id !== undefined) _markLocallyModified(storeName, data.id);
-
-        // ☁️ Push a Supabase — al confirmar, quitar protección
-        if (navigator.onLine) {
-            if (data.id !== undefined) {
-                const writeKey = `${storeName}:${data.id}`;
-                _recentLocalWrites.set(writeKey, Date.now());
-                setTimeout(() => _recentLocalWrites.delete(writeKey), RT_IGNORE_WINDOW_MS + 1000);
-            }
-            const payload = cols
-                ? Object.fromEntries(Object.entries(data).filter(([k]) => cols.includes(k)))
-                : data;
-
-            // 🔒 No sincronizar users a Supabase (se gestionan solo localmente)
-            if (storeName !== 'users') {
-                supabase.from(storeName).upsert(payload).then(({ error }) => {
-                    if (error) {
-                        console.warn('[Sync] Upsert error (se reintentará via sync queue):', error.message);
-                    } else {
-                        const keyVal = data.id ?? data.username ?? '?';
-                        console.log(`[Sync] ${storeName} id=${keyVal} confirmado en Supabase ✅`);
-                    }
-                }).catch(() => {});
-            }
-        }
-        // 🔒 Sync queue con payload filtrado (evita columnas desconocidas → error 400)
-        const syncPayload = cols
-            ? Object.fromEntries(Object.entries(data).filter(([k]) => cols.includes(k)))
-            : data;
-        await addToSyncQueue({ id: Date.now() + Math.random(), storeName, action: 'UPSERT', payload: syncPayload });
-        procesarColaDeSincronizacion();
+        // users solo se manejan localmente — no push a Supabase
     }
 }
 
@@ -300,79 +256,42 @@ export async function put(storeName, data) {
 // ─────────────────────────────────────────────────────────────────────────────
 // ☁️  SINCRONIZACIÓN EN TIEMPO REAL — Supabase Realtime
 // ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// ☁️  SINCRONIZACIÓN EN TIEMPO REAL V2 — Supabase Realtime
+// Suscripciones EXCLUSIVAMENTE a tablas v2_ (las legacy ya no existen).
+// ─────────────────────────────────────────────────────────────────────────────
 let _realtimeInitialized = false;
 
 export function initRealtimeSync() {
     if (_realtimeInitialized) return;
     _realtimeInitialized = true;
 
-    const TABLES = ['rooms', 'b2b_requests', 'buildings', 'census', 'gerencia_quotas', 'censo_locks'];
+    // ── V2 TABLES: las que emiten eventos relevantes para la UI ──────────────
+    const V2_EVENTS = [
+        { table: 'v2_asignaciones', event: 'checkin-updated' },
+        { table: 'v2_camas',        event: 'camas-updated'   },
+    ];
 
-    TABLES.forEach(table => {
+    V2_EVENTS.forEach(({ table, event }) => {
         supabase
-            .channel(`rt_${table}_${Math.random().toString(36).slice(2,7)}`)
+            .channel(`rt_v2_${table}_${Math.random().toString(36).slice(2,7)}`)
             .on('postgres_changes',
                 { event: '*', schema: 'public', table },
-                async (payload) => {
-                    try {
-                        const { eventType, new: newRec, old: oldRec } = payload;
-                        const id = newRec?.id ?? oldRec?.id;
-                        if (!id) return;
-
-                        // ⏱️ Ignorar cambios que nosotros mismos acabamos de hacer
-                        const writeKey = `${table}:${id}`;
-                        const lastWrite = _recentLocalWrites.get(writeKey);
-                        if (lastWrite && Date.now() - lastWrite < RT_IGNORE_WINDOW_MS) {
-                            return; // Este cambio vino de nosotros mismos
-                        }
-
-                        // ✅ Cambio remoto — aplicar localmente
-                        const db = await openDB();
-                        if (eventType === 'DELETE') {
-                            await new Promise(res => {
-                                const tx = db.transaction(table, 'readwrite');
-                                tx.objectStore(table).delete(id);
-                                tx.oncomplete = res;
-                            });
-                            if (_memCache[table]) {
-                                const idx = _memCache[table].findIndex(x => String(x.id) === String(id));
-                                if (idx !== -1) _memCache[table].splice(idx, 1);
-                            }
-                        } else if (newRec) {
-                            await new Promise(res => {
-                                const tx = db.transaction(table, 'readwrite');
-                                tx.objectStore(table).put(newRec);
-                                tx.oncomplete = res;
-                            });
-                            if (_memCache[table]) {
-                                const idx = _memCache[table].findIndex(x => String(x.id) === String(newRec.id));
-                                if (idx !== -1) _memCache[table][idx] = newRec;
-                                else _memCache[table].push(newRec);
-                            }
-                        }
-
-                        // 🔔 Notificar a la UI para que se re-pinte
-                        window.dispatchEvent(new CustomEvent('db:changed', {
-                            detail: { storeName: table, source: 'realtime', id }
-                        }));
-                        if (table === 'rooms') {
-                            window.dispatchEvent(new CustomEvent('rooms-updated'));
-                        }
-                        if (table === 'b2b_requests') {
-                            window.dispatchEvent(new CustomEvent('solicitudes-updated'));
-                        }
-
-                        console.log(`[Realtime] ${table} ${eventType} id=${id} ← remoto`);
-                    } catch(err) {
-                        console.warn('[Realtime] Error aplicando cambio remoto:', err);
-                    }
+                (payload) => {
+                    console.log(`[Realtime V2] ${table} ${payload.eventType}`);
+                    // Disparar evento genérico para que los módulos V2 recarguen
+                    window.dispatchEvent(new CustomEvent('db:changed', {
+                        detail: { storeName: table, source: 'realtime', payload }
+                    }));
+                    // Evento específico por tabla
+                    window.dispatchEvent(new CustomEvent(event));
                 }
             )
             .subscribe((status) => {
                 if (status === 'SUBSCRIBED') {
-                    console.log(`[Realtime] ✅ Suscrito a '${table}'`);
+                    console.log(`[Realtime V2] ✅ Suscrito a '${table}'`);
                 } else if (status === 'CHANNEL_ERROR') {
-                    console.warn(`[Realtime] ⚠️ Error en canal '${table}'`);
+                    console.warn(`[Realtime V2] ⚠️ Error en canal '${table}' — sin Realtime en esta tabla`);
                 }
             });
     });
@@ -383,37 +302,52 @@ export function initRealtimeSync() {
 // Cada 45 segundos descarga silenciosamente Supabase y actualiza lo que haya
 // cambiado en otros dispositivos (complementa a Realtime que puede fallar).
 // ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// 🔄 AUTO-REFRESH PERIÓDICO V2
+// Ya no refresca tablas legacy (rooms, buildings, etc.).
+// Solo emite el evento para que los módulos V2 relean desde Supabase directamente.
+// ─────────────────────────────────────────────────────────────────────────────
 let _periodicRefreshStarted = false;
 
 export function startPeriodicCloudRefresh() {
     if (_periodicRefreshStarted) return;
     _periodicRefreshStarted = true;
 
-    const SYNC_TABLES = ['rooms', 'buildings', 'b2b_requests', 'census', 'gerencia_quotas'];
-
     const doRefresh = async () => {
         if (!navigator.onLine) return;
-
-        for (const table of SYNC_TABLES) {
-            // ✅ NO borrar el caché — evita parpadeo/UI en blanco durante descarga
-            // descargarDesdeNubeSilencioso actualiza en-place con merge seguro
-            _isSyncing[table] = false; // solo resetear el flag de "ya estoy syncing"
-            const db = await openDB().catch(() => null);
-            if (db) await descargarDesdeNubeSilencioso(table, db);
-        }
-
-        // Notificar a los módulos de UI para que lean datos frescos de IndexedDB
-        window.dispatchEvent(new CustomEvent('rooms-updated'));
-        window.dispatchEvent(new CustomEvent('solicitudes-updated'));
-        console.log('[AutoRefresh] ✅ Pull de Supabase completado');
+        // Los módulos V2 consultan Supabase directamente — solo necesitamos disparar el evento
+        window.dispatchEvent(new CustomEvent('v2:refresh'));
+        console.log('[AutoRefresh V2] ✅ Evento v2:refresh emitido');
     };
 
-    // Primera descarga rápida a los 10 segundos
-    setTimeout(doRefresh, 10_000);
-    // Luego cada 60 segundos (operación pesada con 1400+ hab. — no saturar memoria)
-    setInterval(doRefresh, 60_000);
+    // Primera actualización a los 15 segundos
+    setTimeout(doRefresh, 15_000);
+    // Luego cada 90 segundos
+    setInterval(doRefresh, 90_000);
 
-    console.log('[AutoRefresh] 🔄 Auto-refresh iniciado (cada 60s)');
+    console.log('[AutoRefresh V2] 🔄 Auto-refresh V2 iniciado (cada 90s)');
+}
+
+/**
+ * 🧹 Purga la cola de sincronización offline (sync_queue en IndexedDB).
+ * Llama esta función al arrancar la app para limpiar peticiones atascadas
+ * que apuntan a tablas legacy ya eliminadas de Supabase.
+ */
+export async function purgeSyncQueue() {
+    try {
+        const db = await openDB();
+        await new Promise((resolve, reject) => {
+            const tx = db.transaction('sync_queue', 'readwrite');
+            tx.objectStore('sync_queue').clear();
+            tx.oncomplete = () => {
+                console.log('[SyncQueue] 🧹 Cola de sincronización purgada (peticiones legacy eliminadas)');
+                resolve();
+            };
+            tx.onerror = (e) => reject(e.target.error);
+        });
+    } catch(e) {
+        console.warn('[SyncQueue] No se pudo purgar la cola:', e.message);
+    }
 }
 
 
@@ -431,7 +365,7 @@ export async function remove(storeName, id) {
         if (idx !== -1) _memCache[storeName].splice(idx, 1);
         window.dispatchEvent(new CustomEvent('db:changed', { detail: { storeName } }));
     }
-    if (['rooms', 'census', 'b2b_requests'].includes(storeName)) {
+    if (['rooms', 'census'].includes(storeName)) {  // b2b_requests ELIMINADA
         // 🗑️ Marcar como eliminado localmente para que el sync no lo restaure
         if (!_locallyDeleted[storeName]) _locallyDeleted[storeName] = new Set();
         _locallyDeleted[storeName].add(String(id));
@@ -629,7 +563,7 @@ export async function preloadAllData() {
     await Promise.all([
         getAll('rooms'),
         getAll('buildings'),
-        getAll('b2b_requests'),
+        // b2b_requests ELIMINADA — solicitudes B2B ahora van directo a v2_solicitudes_b2b
     ]);
     console.log('[Cache] ✅ Datos precargados — app ultra-veloz');
 }
@@ -840,213 +774,12 @@ function cleanRut(r) {
     return String(r).replace(/[^0-9Kk]/g, '').toUpperCase();
 }
 
-export async function autoAsignarTrabajadores(requestId) {
-    const [rooms, requests, buildings] = await Promise.all([
-        getAll('rooms'),
-        getAll('b2b_requests'),
-        getAll('buildings')
-    ]);
-
-    const req = requests.find(r => String(r.id) === String(requestId));
-    if (!req || !req.workers || req.workers.length === 0) return { success: false, message: 'Solicitud vacía o no encontrada' };
-
-    let asignados = 0;
-    let fallidos = 0;
-    const roomsToUpdate = new Map(); 
-
-    // 🛡️ REGLA ANTI-CLONES: Recolectar todos los RUTs que ya están ocupando una cama
-    const rutsOcupados = new Set();
-    rooms.forEach(r => {
-        ['day', 'night', 'extra'].forEach(bed => {
-            if (r.beds?.[bed]?.rut) {
-                rutsOcupados.add(cleanRut(r.beds[bed].rut));
-            }
-        });
-    });
-
-    for (const worker of req.workers) {
-        if (worker.assignedRoomStr) continue; 
-
-        // 🛡️ Validación Anti-Clon para este trabajador
-        const workerRutClean = cleanRut(worker.rut);
-        if (workerRutClean && rutsOcupados.has(workerRutClean)) {
-            console.warn(`[Anti-Clon] El RUT ${worker.rut} ya tiene una cama asignada. Se saltará.`);
-            fallidos++;
-            continue; // Saltamos a este trabajador, no le damos cama doble
-        }
-
-        let habitacionElegida = null;
-        let camaElegida = null;
-
-        const wSex = normalizeGender(worker.sex);
-        const wShiftK = (worker.shiftSystem || worker.shiftName || 'Unknown').trim().toLowerCase();
-        const workerCompany = req.company.toLowerCase();
-
-        // ── BÚSQUEDA CON 3 NIVELES DE FALLBACK ───────────────────────────────
-        // Nivel 1 (exacto): género + empresa + turno
-        // Nivel 2 (relajado): género + empresa   (ignora turno)
-        // Nivel 3 (mínimo):  solo género          (ignora empresa y turno)
-        // → El género NUNCA se relaja (regla de oro de no mezcla)
-
-        const filterBase = (r, relaxCompany, relaxShift) => {
-            if (r.status === 'blocked') return false;
-
-            // 🔒 GÉNERO: siempre estricto
-            if (r.gender) {
-                if (normalizeGender(r.gender) !== wSex) return false;
-            } else {
-                const occDay   = r.beds?.day;
-                const occNight = r.beds?.night;
-                const occExtra = r.beds?.extra;
-                if (occDay?.occupant   && normalizeGender(occDay.gender)   !== wSex) return false;
-                if (occNight?.occupant && normalizeGender(occNight.gender) !== wSex) return false;
-                if (occExtra?.occupant && normalizeGender(occExtra.gender) !== wSex) return false;
-            }
-
-            // Empresa y turno: solo filtrar si NO estamos relajando esa restricción
-            if (!relaxCompany && r.reservedCompany && r.reservedCompany.toLowerCase() !== workerCompany) return false;
-            if (!relaxShift   && r.reservedShift   && r.reservedShift.toLowerCase()   !== wShiftK)       return false;
-
-            const dayFree   = !r.beds?.day?.occupant;
-            const nightFree = (r.bedCount >= 2) && !r.beds?.night?.occupant;
-            const extraFree = (r.bedCount >= 3) && !r.beds?.extra?.occupant;
-            return dayFree || nightFree || extraFree;
-        };
-
-        // Nivel 1: exacto (género + empresa + turno)
-        let candidatos = rooms.filter(r => filterBase(r, false, false));
-
-        // Nivel 2: si no hay nada, relajar turno
-        if (candidatos.length === 0) {
-            candidatos = rooms.filter(r => filterBase(r, false, true));
-        }
-
-        // Nivel 3: si sigue sin haber, relajar empresa Y turno (solo género)
-        // ⚠️ Garantiza que ningún trabajador solitario quede sin habitación
-        if (candidatos.length === 0) {
-            candidatos = rooms.filter(r => filterBase(r, true, true));
-        }
-
-        candidatos.sort((a, b) => {
-            // ── Contar camas ocupadas (qué tan "llena" está la habitación) ──
-            const aOccupied = (['day','night','extra'].filter(k => a.beds?.[k]?.occupant)).length;
-            const bOccupied = (['day','night','extra'].filter(k => b.beds?.[k]?.occupant)).length;
-            const aCapacity = a.bedCount || 2;
-            const bCapacity = b.bedCount || 2;
-
-            // ── Empresa ya presente en la habitación ──
-            const aDayComp  = a.beds?.day?.company?.toLowerCase()   || '';
-            const aNightComp = a.beds?.night?.company?.toLowerCase() || '';
-            const aExtraComp = a.beds?.extra?.company?.toLowerCase() || '';
-            const bDayComp  = b.beds?.day?.company?.toLowerCase()   || '';
-            const bNightComp = b.beds?.night?.company?.toLowerCase() || '';
-            const bExtraComp = b.beds?.extra?.company?.toLowerCase() || '';
-            const aSameComp = aDayComp === workerCompany || aNightComp === workerCompany || aExtraComp === workerCompany;
-            const bSameComp = bDayComp === workerCompany || bNightComp === workerCompany || bExtraComp === workerCompany;
-
-            let scoreA = 0;
-            let scoreB = 0;
-
-            // 🥇 PRIORIDAD 1: Rellenar habitaciones con mismo género PRIMERO
-            // → Cuantos más ocupantes del mismo género tenga, mayor prioridad
-            // → Habitación VACÍA = puntos bajos (se usa solo cuando no hay opción)
-            scoreA += aOccupied * 2000;   // Cada ocupante existente suma 2000 pts
-            scoreB += bOccupied * 2000;
-
-            // 🥈 PRIORIDAD 2: Misma empresa ya presente (juntar equipo)
-            if (aSameComp) scoreA += 5000;
-            if (bSameComp) scoreB += 5000;
-
-            // 🥉 PRIORIDAD 3: Reservas de empresa/turno (respetar contratos)
-            if (a.reservedCompany) scoreA += 1000;
-            if (b.reservedCompany) scoreB += 1000;
-            if (a.reservedShift) scoreA += 500;
-            if (b.reservedShift) scoreB += 500;
-
-            // 🏅 PRIORIDAD 4: Campo r.gender ya asignado (habitación ya sexada)
-            if (normalizeGender(a.gender) === wSex) scoreA += 100;
-            if (normalizeGender(b.gender) === wSex) scoreB += 100;
-
-            // 📉 ANTI-DESPERDICIO: preferir habitaciones más llenas proporcionalmente
-            // (ej: 1/2 llena es mejor que 0/2, pero peor que 1/1 si existe)
-            scoreA += Math.round((aOccupied / aCapacity) * 50);
-            scoreB += Math.round((bOccupied / bCapacity) * 50);
-
-            return scoreB - scoreA;
-        });
-
-
-        if (candidatos.length > 0) {
-            habitacionElegida = candidatos[0];
-            if (!habitacionElegida.beds.day?.occupant) camaElegida = 'day';
-            else if ((habitacionElegida.bedCount >= 2) && !habitacionElegida.beds.night?.occupant) camaElegida = 'night';
-            else if ((habitacionElegida.bedCount >= 3) && !habitacionElegida.beds.extra?.occupant) camaElegida = 'extra';
-        }
-
-        if (habitacionElegida && camaElegida) {
-            // ── VERIFICAR CUPO DE GERENCIA ─────────────────────────────────
-            const workerGerencia = worker.management || worker.gerencia || '';
-            if (workerGerencia) {
-                const quotas = await getAll('gerencia_quotas').catch(() => []);
-                const lookupKey = `${(req.company||'').trim().toLowerCase()}||${workerGerencia.trim().toLowerCase()}`;
-                const quota = quotas.find(q =>
-                    `${(q.company||'').toLowerCase()}||${(q.gerencia||'').toLowerCase()}` === lookupKey
-                );
-                if (quota && quota.limit !== null) {
-                    // Contar uso actual (ya actualizado en roomsToUpdate)
-                    let used = 0;
-                    rooms.forEach(r => {
-                        const rr = roomsToUpdate.get(r.id) || r;
-                        ['day', 'night', 'extra'].forEach(bk => {
-                            const bed = rr.beds?.[bk];
-                            if (!bed?.occupant) return;
-                            const g = (bed.management || bed.gerencia || '').trim().toLowerCase();
-                            const c = (bed.company || '').trim().toLowerCase();
-                            if (`${c}||${g}` === lookupKey) used++;
-                        });
-                    });
-                    if (used >= quota.limit && !quota.overrideAllowed) {
-                        console.warn(`[Cupos] Gerencia "${workerGerencia}" alcanzó su límite (${quota.limit}). Trabajador ${worker.name} no asignado.`);
-                        fallidos++;
-                        continue;
-                    }
-                }
-            }
-            // ──────────────────────────────────────────────────────────────
-
-            habitacionElegida.beds[camaElegida] = {
-                occupant:       worker.name,
-                company:        req.company,
-                shift:          worker.shiftName || worker.shift || '',
-                gender:         wSex, 
-                rut:            worker.rut,
-                contact:        worker.contact || '',
-                management:     worker.management || worker.gerencia || '',
-                contractNumber: req.contractNumber || worker.contract || '',
-                arrivalDate:    worker.arrivalDate,
-                departureDate:  worker.departureDate
-            };
-            habitacionElegida.status = 'occupied';
-            habitacionElegida.gender = wSex; 
-            
-            worker.assignedRoomStr = `${habitacionElegida.id}_${camaElegida}`;
-            
-            roomsToUpdate.set(habitacionElegida.id, habitacionElegida);
-            
-            // Agregamos a este trabajador a los ocupados para que no se le asigne otra vez más adelante
-            if (workerRutClean) rutsOcupados.add(workerRutClean);
-            asignados++;
-        } else {
-            fallidos++;
-        }
-    }
-
-    if (asignados > 0) {
-        // 🚀 PARALELO: Guardar todas las habitaciones asignadas simultáneamente
-        await Promise.all([...roomsToUpdate.values()].map(room => put('rooms', room)));
-        req.status = fallidos === 0 ? 'assigned' : 'accepted'; 
-        await put('b2b_requests', req);
-    }
-
-    return { success: true, asignados, fallidos };
+/**
+ * @deprecated FUNCIÓN LEGACY V1 — DESACTIVADA.
+ * Las asignaciones B2B ahora se gestionan en js/v2/modules/v2-solicitudes.js
+ * usando la tabla v2_solicitudes_b2b de Supabase directamente.
+ */
+export async function autoAsignarTrabajadores(_requestId) {
+    console.warn('[DEPRECATED] autoAsignarTrabajadores() es V1 eliminada. Usa el motor V2 en v2-solicitudes.js.');
+    return { success: false, message: 'Función V1 eliminada. Usa el motor V2.' };
 }

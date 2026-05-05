@@ -1,0 +1,1973 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Análisis de Camas Perdidas</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f5f7fa;
+            color: #333;
+            line-height: 1.6;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #dc2626 0%, #ef4444 100%);
+            color: white;
+            padding: 20px 40px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+
+        .header h1 {
+            font-size: 28px;
+            font-weight: 300;
+            margin-bottom: 15px;
+        }
+
+        .controls {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            display: inline-block;
+        }
+
+        .btn-primary {
+            background-color: #dc2626;
+            color: white;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            background-color: #b91c1c;
+            transform: translateY(-2px);
+        }
+
+        .btn-success {
+            background-color: #059669;
+            color: white;
+        }
+
+        .btn-success:hover:not(:disabled) {
+            background-color: #047857;
+            transform: translateY(-2px);
+        }
+
+        .btn-secondary {
+            background-color: #6b7280;
+            color: white;
+        }
+
+        .btn-secondary:hover:not(:disabled) {
+            background-color: #4b5563;
+            transform: translateY(-2px);
+        }
+
+        .btn:disabled {
+            background-color: #cccccc !important;
+            cursor: not-allowed !important;
+            transform: none !important;
+            opacity: 0.6;
+        }
+
+        .file-input {
+            display: none;
+        }
+
+        .date-selector {
+            display: none;
+            background: rgba(255,255,255,0.1);
+            padding: 20px;
+            border-radius: 10px;
+            margin-top: 20px;
+            backdrop-filter: blur(10px);
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .month-group {
+            margin-bottom: 25px;
+        }
+
+        .month-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: white;
+            margin-bottom: 12px;
+            padding: 8px 12px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 6px;
+            text-align: center;
+        }
+
+        .days-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(60px, 1fr));
+            gap: 8px;
+        }
+
+        .day-button {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 8px;
+            background: rgba(255,255,255,0.1);
+            border: 2px solid rgba(255,255,255,0.3);
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            user-select: none;
+            min-height: 40px;
+            font-size: 13px;
+            color: white;
+        }
+
+        .day-button:hover {
+            background: rgba(255,255,255,0.2);
+            border-color: rgba(255,255,255,0.5);
+        }
+
+        .day-button.selected {
+            background: #059669;
+            border-color: #059669;
+            color: white;
+            font-weight: bold;
+            box-shadow: 0 2px 8px rgba(5, 150, 105, 0.3);
+        }
+
+        .selection-summary {
+            margin-top: 15px;
+            padding: 12px 15px;
+            background: rgba(255,255,255,0.15);
+            border-radius: 6px;
+            color: white;
+            font-size: 14px;
+            text-align: center;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 30px 20px;
+        }
+
+        .status {
+            background: white;
+            padding: 15px 20px;
+            border-radius: 10px;
+            margin-bottom: 25px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+            border-left: 4px solid #dc2626;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 40px;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #dc2626;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .error-message {
+            background: linear-gradient(135deg, #fecaca 0%, #fca5a5 100%);
+            border: 1px solid #dc2626;
+            border-left: 4px solid #dc2626;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+            color: #7f1d1d;
+            font-weight: 500;
+        }
+
+        .success-message {
+            background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%);
+            border: 1px solid #059669;
+            border-left: 4px solid #059669;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+            color: #064e3b;
+            font-weight: 500;
+        }
+
+        .filters-section {
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            margin-bottom: 25px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+        }
+
+        .filters-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .filter-group {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .filter-label {
+            font-weight: 600;
+            color: #374151;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+
+        .filter-input {
+            padding: 10px 12px;
+            border: 2px solid #e5e7eb;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: all 0.3s ease;
+        }
+
+        .filter-input:focus {
+            outline: none;
+            border-color: #dc2626;
+            box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.1);
+        }
+
+        /* NUEVO: Sub-filtro dinámico */
+        .sub-filter-section {
+            background: linear-gradient(135deg, #fef3c7 0%, #fed7aa 100%);
+            border: 2px solid #f59e0b;
+            padding: 15px;
+            border-radius: 10px;
+            margin: 15px 0;
+            display: none;
+        }
+
+        .sub-filter-title {
+            font-weight: 700;
+            color: #92400e;
+            margin-bottom: 10px;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .sub-filter-options {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .sub-filter-btn {
+            padding: 8px 16px;
+            background: white;
+            border: 2px solid #f59e0b;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            color: #92400e;
+            transition: all 0.3s ease;
+        }
+
+        .sub-filter-btn:hover {
+            background: #f59e0b;
+            color: white;
+        }
+
+        .sub-filter-btn.active {
+            background: #f59e0b;
+            color: white;
+            font-weight: 700;
+        }
+
+        .sub-filter-btn.pdf-export {
+            background: #dc2626 !important;
+            color: white !important;
+            border-color: #dc2626 !important;
+        }
+
+        .sub-filter-btn.pdf-export:hover {
+            background: #b91c1c !important;
+            color: white !important;
+        }
+
+        .search-controls {
+            display: flex;
+            gap: 10px;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .clear-filters {
+            background-color: #6b7280;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.3s ease;
+        }
+
+        .clear-filters:hover {
+            background-color: #4b5563;
+        }
+
+        .summary-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .summary-card {
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+            border-left: 4px solid #dc2626;
+        }
+
+        .card-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: #374151;
+            margin-bottom: 10px;
+        }
+
+        .card-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #dc2626;
+        }
+
+        .card-subtitle {
+            font-size: 12px;
+            color: #6b7280;
+            margin-top: 5px;
+        }
+
+        .lost-beds-table {
+            width: 100%;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+            overflow: hidden;
+            margin-bottom: 30px;
+        }
+
+        .lost-beds-table table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+
+        .lost-beds-table th {
+            background: linear-gradient(135deg, #dc2626 0%, #ef4444 100%);
+            color: white;
+            padding: 12px 8px;
+            text-align: center;
+            font-weight: 600;
+            font-size: 11px;
+            white-space: nowrap;
+        }
+
+        .lost-beds-table td {
+            padding: 10px 8px;
+            border-bottom: 1px solid #e5e7eb;
+            font-size: 11px;
+            text-align: center;
+        }
+
+        .lost-beds-table tr:nth-child(even) {
+            background: #f8fafc;
+        }
+
+        .lost-beds-table tr:hover {
+            background: #fef2f2;
+        }
+
+        .habitacion-id {
+            font-weight: bold;
+            color: #dc2626;
+        }
+
+        .camas-perdidas {
+            font-weight: bold;
+            color: #dc2626;
+            font-size: 14px;
+        }
+
+        .empresa-anglo {
+            background-color: #fef3c7;
+            color: #92400e;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: bold;
+        }
+
+        .empresa-eecc {
+            background-color: #dbeafe;
+            color: #1e40af;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: bold;
+        }
+
+        .empresa-bloqueada {
+            background-color: #fee2e2;
+            color: #dc2626;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: bold;
+        }
+
+        .detalle-cell {
+            max-width: 250px;
+            word-wrap: break-word;
+            text-align: left;
+            font-size: 10px;
+            line-height: 1.4;
+            padding-left: 12px !important;
+        }
+
+        .tipo-ocupacion {
+            background-color: #fbbf24;
+            color: #92400e;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: bold;
+        }
+
+        .tipo-bloqueada {
+            background-color: #dc2626;
+            color: white;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: bold;
+        }
+
+        .no-data {
+            text-align: center;
+            padding: 40px;
+            color: #6b7280;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+        }
+
+        .results-summary {
+            background: linear-gradient(135deg, #fecaca 0%, #fca5a5 100%);
+            border: 1px solid #dc2626;
+            border-left: 4px solid #dc2626;
+            padding: 15px 20px;
+            border-radius: 10px;
+            margin-bottom: 25px;
+            color: #7f1d1d;
+            font-weight: 600;
+            text-align: center;
+            font-size: 16px;
+        }
+
+        /* NUEVO: Estilos para agrupación */
+        .group-header {
+            background: linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%);
+            font-weight: 700;
+            color: #374151;
+            padding: 12px 15px;
+            border-bottom: 2px solid #dc2626;
+            text-align: left;
+            font-size: 13px;
+        }
+
+        .group-header.pabellon-group {
+            background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+            color: #92400e;
+        }
+
+        .group-header.empresa-group {
+            background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+            color: #1e40af;
+        }
+
+        @media (max-width: 768px) {
+            .filters-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .search-controls {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            
+            .header {
+                padding: 15px 20px;
+            }
+            
+            .container {
+                padding: 20px 15px;
+            }
+
+            .days-grid {
+                grid-template-columns: repeat(auto-fill, minmax(50px, 1fr));
+            }
+
+            .lost-beds-table {
+                overflow-x: auto;
+            }
+
+            .lost-beds-table table {
+                min-width: 900px;
+            }
+
+            .summary-cards {
+                grid-template-columns: 1fr;
+            }
+
+            .sub-filter-options {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🔍 Dashboard - Análisis de Camas Perdidas</h1>
+        <div class="controls">
+            <input type="file" id="fileInput" class="file-input" accept=".xlsx,.xls">
+            <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
+                📁 Cargar archivo
+            </button>
+            <button class="btn btn-success" id="analyzeButton" onclick="analyzeLostBeds()" disabled>
+                🔍 Analizar pérdidas
+            </button>
+            <button class="btn btn-secondary" id="exportButton" onclick="exportReport()" disabled>
+                💾 Exportar análisis
+            </button>
+            <button class="btn btn-primary" id="sbButton" onclick="loadFromSupabase()"
+              style="background:#6366f1;border-color:#6366f1;display:flex;align-items:center;gap:6px">
+                ☁️ Cargar desde Supabase
+            </button>
+        </div>
+        <div class="date-selector" id="dateSelector">
+            <div id="monthsContainer"></div>
+            <div class="selection-summary" id="selectionSummary">
+                Selecciona un día para analizar las camas perdidas
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="status" id="status">
+            <strong>Estado:</strong> <span id="statusText">Esperando archivo...</span>
+        </div>
+
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p>Analizando camas perdidas...</p>
+        </div>
+
+        <div id="analysisContent" class="hidden">
+            <!-- Tarjetas de resumen -->
+            <div class="summary-cards">
+                <div class="summary-card">
+                    <div class="card-title">🏚️ Total Camas Perdidas</div>
+                    <div class="card-value" id="totalLostBeds">0</div>
+                    <div class="card-subtitle" id="totalLostBedsSubtitle">en el día analizado</div>
+                </div>
+                <div class="summary-card">
+                    <div class="card-title">🏠 Habitaciones Afectadas</div>
+                    <div class="card-value" id="affectedRooms">0</div>
+                    <div class="card-subtitle" id="affectedRoomsSubtitle">con pérdidas de capacidad</div>
+                </div>
+                <div class="summary-card">
+                    <div class="card-title">📊 Principal Causa</div>
+                    <div class="card-value" id="mainCause" style="font-size: 16px;">-</div>
+                    <div class="card-subtitle" id="mainCauseSubtitle">causa más frecuente</div>
+                </div>
+                <div class="summary-card">
+                    <div class="card-title">🏢 Pabellón Crítico</div>
+                    <div class="card-value" id="criticalPavilion" style="font-size: 18px;">-</div>
+                    <div class="card-subtitle" id="criticalPavilionSubtitle">mayor cantidad de pérdidas</div>
+                </div>
+            </div>
+
+            <!-- Filtros de búsqueda -->
+            <div class="filters-section">
+                <h3 style="margin-bottom: 15px; color: #dc2626; font-weight: 600;">🔎 Filtros de Búsqueda</h3>
+                <div class="filters-grid">
+                    <div class="filter-group">
+                        <label class="filter-label">Pabellón</label>
+                        <select id="pavilionFilter" class="filter-input">
+                            <option value="">Todos los pabellones</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label class="filter-label">Empresa</label>
+                        <select id="companyFilter" class="filter-input">
+                            <option value="">Todas las empresas</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label class="filter-label">Tipo de Pérdida</label>
+                        <select id="lossTypeFilter" class="filter-input">
+                            <option value="">Todos los tipos</option>
+                            <option value="OCUPACIÓN PARCIAL">Ocupación Parcial</option>
+                            <option value="BLOQUEADA">Habitación Bloqueada</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label class="filter-label">Causa Específica</label>
+                        <select id="specificCauseFilter" class="filter-input">
+                            <option value="">Todas las causas</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label class="filter-label">Búsqueda en Detalle</label>
+                        <input type="text" id="detailSearch" class="filter-input" placeholder="Buscar causa específica...">
+                    </div>
+                </div>
+
+                <!-- NUEVO: Sub-filtro dinámico -->
+                <div class="sub-filter-section" id="subFilterSection">
+                    <div class="sub-filter-title">
+                        🎯 Vista Especial - EECC sin detalle específico
+                    </div>
+                    <div class="sub-filter-options">
+                        <button class="sub-filter-btn active" data-group="ninguno" onclick="setGroupView('ninguno')">
+                            📋 Vista Normal
+                        </button>
+                        <button class="sub-filter-btn" data-group="pabellon" onclick="setGroupView('pabellon')">
+                            🏢 Agrupar por Pabellón
+                        </button>
+                        <button class="sub-filter-btn" data-group="empresa" onclick="setGroupView('empresa')">
+                            🏬 Agrupar por Empresa
+                        </button>
+                        <button class="sub-filter-btn" id="exportPdfBtn" onclick="exportFilteredToPDF()" style="background: #dc2626; color: white; border-color: #dc2626; margin-left: 10px;">
+                            📄 Exportar PDF
+                        </button>
+                    </div>
+                </div>
+
+                <div class="search-controls">
+                    <div>
+                        <span style="font-size: 12px; color: #6b7280;">Habitaciones encontradas: </span>
+                        <span id="filteredCount" style="font-weight: bold; color: #dc2626;">0</span>
+                        <span style="font-size: 12px; color: #6b7280;"> | Camas perdidas: </span>
+                        <span id="filteredLostBeds" style="font-weight: bold; color: #dc2626;">0</span>
+                    </div>
+                    <button class="clear-filters" onclick="clearFilters()">Limpiar filtros</button>
+                </div>
+            </div>
+
+            <!-- Resultados -->
+            <div class="results-summary" id="resultsSummary">
+                Camas perdidas encontradas: <span id="summaryCount">0</span> en <span id="summaryRooms">0</span> habitaciones
+            </div>
+
+            <!-- Tabla detallada de camas perdidas -->
+            <div class="lost-beds-table">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Pabellón</th>
+                            <th>Nivel</th>
+                            <th>Habitación</th>
+                            <th>Capacidad</th>
+                            <th>Ocupación</th>
+                            <th>Camas Perdidas</th>
+                            <th>Empresa</th>
+                            <th>Detalle / Causa</th>
+                            <th>Tipo Pérdida</th>
+                        </tr>
+                    </thead>
+                    <tbody id="lostBedsTableBody">
+                        <!-- Los datos se llenarán dinámicamente -->
+                    </tbody>
+                </table>
+            </div>
+
+            <div id="noDataMessage" class="no-data hidden">
+                <h3>🎉 ¡Excelente!</h3>
+                <p>No se encontraron camas perdidas para la fecha y filtros seleccionados</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let workbookData = null;
+        let lostBedsData = [];
+        let filteredData = [];
+        let fechasDisponibles = [];
+        let selectedDay = null;
+        let currentGroupView = 'ninguno'; // NUEVO: Para controlar la vista de agrupación
+
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('Dashboard de Análisis de Camas Perdidas inicializado');
+            const fileInput = document.getElementById('fileInput');
+            if (fileInput) {
+                fileInput.addEventListener('change', handleFile);
+            }
+
+            // Event listeners para filtros
+            document.getElementById('pavilionFilter').addEventListener('change', applyFilters);
+            document.getElementById('companyFilter').addEventListener('change', function() {
+                checkSubFilterVisibility();
+                applyFilters();
+            });
+            document.getElementById('lossTypeFilter').addEventListener('change', applyFilters);
+            document.getElementById('specificCauseFilter').addEventListener('change', function() {
+                checkSubFilterVisibility();
+                applyFilters();
+            });
+            document.getElementById('detailSearch').addEventListener('input', applyFilters);
+        });
+
+        // NUEVO: Función para mostrar/ocultar sub-filtro
+        function checkSubFilterVisibility() {
+            const companyFilter = document.getElementById('companyFilter').value;
+            const specificCauseFilter = document.getElementById('specificCauseFilter').value;
+            const subFilterSection = document.getElementById('subFilterSection');
+            
+            // Mostrar sub-filtro solo si empresa = "EECC" Y causa específica = "Sin detalle específico"
+            if (companyFilter === 'EECC' && specificCauseFilter === 'Sin detalle específico') {
+                subFilterSection.style.display = 'block';
+            } else {
+                subFilterSection.style.display = 'none';
+                // Resetear vista a normal cuando se oculta
+                if (currentGroupView !== 'ninguno') {
+                    setGroupView('ninguno');
+                }
+            }
+        }
+
+        // NUEVO: Función para cambiar vista de agrupación
+        function setGroupView(groupType) {
+            currentGroupView = groupType;
+            
+            // Actualizar botones activos
+            document.querySelectorAll('.sub-filter-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            document.querySelector(`[data-group="${groupType}"]`).classList.add('active');
+            
+            // Re-renderizar resultados con nueva agrupación
+            renderFilteredResults();
+        }
+
+        function showMessage(message, type = 'info') {
+            const statusElement = document.getElementById('statusText');
+            const statusContainer = document.getElementById('status');
+            
+            statusContainer.className = 'status';
+            if (type === 'error') {
+                statusContainer.classList.add('error-message');
+            } else if (type === 'success') {
+                statusContainer.classList.add('success-message');
+            }
+            
+            statusElement.textContent = message;
+            console.log(`[${type.toUpperCase()}] ${message}`);
+        }
+
+        function isValidHabitacion(camas) {
+            const num = parseInt(camas);
+            return num > 0;
+        }
+
+        function isCeldaDisponible(value) {
+            if (value === undefined || value === null || value === '' || value === ' ') {
+                return true;
+            }
+            const num = parseInt(value);
+            return num === 0 || value === 'R';
+        }
+
+        function isCeldaOcupada(value) {
+            if (value === undefined || value === null || value === '' || value === ' ') {
+                return false;
+            }
+            const num = parseInt(value);
+            return num >= 1;
+        }
+
+        function isCeldaBloqueada(value) {
+            return value === 'M';
+        }
+
+        function isAngloCompany(empresa) {
+            if (!empresa) return false;
+            return empresa.toString().toUpperCase().trim() === 'ANGLO';
+        }
+
+        function isHabitacionBloqueada(empresa) {
+            if (!empresa) return false;
+            const empresaStr = empresa.toString().toLowerCase();
+            return empresaStr.includes('bloqueada') || empresaStr.includes('bloqueado');
+        }
+
+        function calcularCamasPerdidas(totalCamas, ocupacion) {
+            if (totalCamas < 2) return 0;
+            if (ocupacion > 0 && ocupacion < totalCamas) {
+                return totalCamas - ocupacion;
+            }
+            return 0;
+        }
+
+        function getTipoPerdida(empresa, totalCamas, ocupacion) {
+            if (isHabitacionBloqueada(empresa)) {
+                return 'BLOQUEADA';
+            }
+            if (totalCamas >= 2 && ocupacion > 0 && ocupacion < totalCamas) {
+                return 'OCUPACIÓN PARCIAL';
+            }
+            return 'OTRO';
+        }
+
+        function getEmpresaDisplay(empresa, valorCelda) {
+            // Si la celda tiene M, es bloqueada temporalmente
+            if (valorCelda === 'M') {
+                return 'BLOQUEADA';
+            }
+            // Si la empresa indica bloqueada
+            if (isHabitacionBloqueada(empresa)) {
+                return 'BLOQUEADA';
+            }
+            // Si es ANGLO
+            if (isAngloCompany(empresa)) {
+                return 'ANGLO';
+            }
+            // Todo lo demás es EECC
+            return 'EECC';
+        }
+
+        function normalizeValue(value) {
+            if (value === undefined || value === null || value === '' || value === ' ') return 0;
+            // Ignorar objetos Date (cellDates puede convertir algunos números)
+            if (value instanceof Date) return 0;
+            // Manejar strings que pueden ser números
+            const str = String(value).trim();
+            if (str === '' || str === 'R' || str === 'M') return 0;
+            const num = parseFloat(str);
+            if (isNaN(num) || num < 0) return 0;
+            return Math.round(num); // round para manejar 1.0, 2.0, etc.
+        }
+
+        function handleFile(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            console.log('Procesando archivo:', file.name);
+            
+            // Reiniciar estado
+            selectedDay = null;
+            fechasDisponibles = [];
+            workbookData = null;
+            lostBedsData = [];
+            filteredData = [];
+            currentGroupView = 'ninguno';
+            document.getElementById('analyzeButton').disabled = true;
+            document.getElementById('analysisContent').classList.add('hidden');
+            document.getElementById('dateSelector').style.display = 'none';
+
+            // Validar tipo
+            const validTypes = [
+                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                'application/vnd.ms-excel'
+            ];
+            
+            if (!validTypes.includes(file.type)) {
+                showMessage('Archivo no válido. Use .xlsx o .xls', 'error');
+                return;
+            }
+
+            document.getElementById('loading').style.display = 'block';
+            showMessage('Cargando archivo...');
+
+            setTimeout(() => {
+                const reader = new FileReader();
+                
+                reader.onload = function(event) {
+                    try {
+                        console.log('Leyendo datos del archivo...');
+                        
+                        workbookData = XLSX.read(event.target.result, {
+                            cellDates: true,
+                            cellNF: false,
+                            cellStyles: false
+                        });
+                        
+                        console.log('Hojas encontradas:', workbookData.SheetNames);
+                        
+                        if (!workbookData.Sheets['GLOBAL']) {
+                            throw new Error('No se encontró la hoja "GLOBAL"');
+                        }
+                        
+                        console.log('Extrayendo fechas...');
+                        extractFechasDisponibles();
+                        
+                        console.log('Creando selector de fechas...');
+                        createDateSelector();
+                        
+                        showMessage('Archivo cargado correctamente', 'success');
+                        document.getElementById('dateSelector').style.display = 'block';
+                        
+                    } catch (error) {
+                        console.error('Error:', error);
+                        showMessage('Error al procesar archivo: ' + error.message, 'error');
+                    } finally {
+                        document.getElementById('loading').style.display = 'none';
+                    }
+                };
+                
+                reader.onerror = function() {
+                    showMessage('Error al leer el archivo', 'error');
+                    document.getElementById('loading').style.display = 'none';
+                };
+                
+                reader.readAsArrayBuffer(file);
+            }, 100);
+        }
+
+        function extractFechasDisponibles() {
+            fechasDisponibles = [];
+            
+            const globalSheet = workbookData.Sheets['GLOBAL'];
+            const range = XLSX.utils.decode_range(globalSheet['!ref']);
+            
+            // Leer primera fila (headers)
+            for (let col = 10; col <= range.e.c; col++) {
+                const cellAddress = XLSX.utils.encode_cell({ r: 0, c: col });
+                const cell = globalSheet[cellAddress];
+                
+                if (cell && cell.v instanceof Date) {
+                    const fecha = new Date(cell.v);
+                    fechasDisponibles.push({
+                        indice: col,
+                        fecha: fecha,
+                        fechaISO: fecha.toISOString().split('T')[0],
+                        dia: fecha.getDate(),
+                        mes: fecha.getMonth(),
+                        año: fecha.getFullYear()
+                    });
+                }
+            }
+            
+            console.log(`Fechas extraídas: ${fechasDisponibles.length}`);
+            
+            if (fechasDisponibles.length === 0) {
+                throw new Error('No se encontraron fechas válidas');
+            }
+        }
+
+        function createDateSelector() {
+            const container = document.getElementById('monthsContainer');
+            container.innerHTML = '';
+            
+            // Agrupar por mes
+            const mesesAgrupados = {};
+            fechasDisponibles.forEach(fecha => {
+                const key = `${fecha.año}-${fecha.mes}`;
+                if (!mesesAgrupados[key]) {
+                    mesesAgrupados[key] = {
+                        nombre: formatearMes(fecha.mes, fecha.año),
+                        fechas: []
+                    };
+                }
+                mesesAgrupados[key].fechas.push(fecha);
+            });
+
+            // Crear HTML
+            Object.values(mesesAgrupados).forEach(mes => {
+                mes.fechas.sort((a, b) => a.dia - b.dia);
+
+                const monthGroup = document.createElement('div');
+                monthGroup.className = 'month-group';
+
+                const monthTitle = document.createElement('div');
+                monthTitle.className = 'month-title';
+                monthTitle.textContent = mes.nombre;
+
+                const daysGrid = document.createElement('div');
+                daysGrid.className = 'days-grid';
+
+                mes.fechas.forEach(fecha => {
+                    const dayButton = document.createElement('button');
+                    dayButton.className = 'day-button';
+                    dayButton.textContent = fecha.dia;
+                    dayButton.setAttribute('data-indice', fecha.indice);
+                    
+                    dayButton.onclick = function() {
+                        selectDay(fecha.indice, dayButton);
+                    };
+
+                    daysGrid.appendChild(dayButton);
+                });
+
+                monthGroup.appendChild(monthTitle);
+                monthGroup.appendChild(daysGrid);
+                container.appendChild(monthGroup);
+            });
+        }
+
+        function formatearMes(mes, año) {
+            const meses = ['ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO',
+                          'JULIO', 'AGOSTO', 'SEPTIEMBRE', 'OCTUBRE', 'NOVIEMBRE', 'DICIEMBRE'];
+            return `${meses[mes]} ${año}`;
+        }
+
+        function selectDay(indice, buttonElement) {
+            console.log('Día seleccionado:', indice);
+            
+            // Limpiar selecciones anteriores
+            document.querySelectorAll('.day-button.selected').forEach(btn => {
+                btn.classList.remove('selected');
+            });
+
+            // Marcar nueva selección
+            selectedDay = indice;
+            buttonElement.classList.add('selected');
+
+            // Actualizar UI
+            const fecha = fechasDisponibles.find(f => f.indice === indice);
+            document.getElementById('selectionSummary').innerHTML = 
+                `Día seleccionado: <strong>${fecha.dia}/${fecha.mes + 1}/${fecha.año}</strong>`;
+
+            // Habilitar botón
+            document.getElementById('analyzeButton').disabled = false;
+        }
+
+        function analyzeLostBeds() {
+            if (!workbookData || selectedDay === null) {
+                showMessage('Debe cargar un archivo y seleccionar un día', 'error');
+                return;
+            }
+
+            document.getElementById('loading').style.display = 'block';
+            showMessage('Analizando camas perdidas...');
+
+            setTimeout(() => {
+                try {
+                    processLostBedsData();
+                    setupFilters();
+                    renderSummaryCards();
+                    applyFilters();
+                    
+                    document.getElementById('analysisContent').classList.remove('hidden');
+                    document.getElementById('exportButton').disabled = false;
+                    
+                    const fecha = fechasDisponibles.find(f => f.indice === selectedDay);
+                    showMessage(`Análisis completado para ${fecha.dia}/${fecha.mes + 1}/${fecha.año}`, 'success');
+                    
+                    setTimeout(() => {
+                        document.getElementById('analysisContent').scrollIntoView({ behavior: 'smooth' });
+                    }, 200);
+
+                } catch (error) {
+                    console.error('Error:', error);
+                    showMessage('Error al analizar: ' + error.message, 'error');
+                } finally {
+                    document.getElementById('loading').style.display = 'none';
+                }
+            }, 500);
+        }
+
+        function processLostBedsData() {
+            const globalSheet = workbookData.Sheets['GLOBAL'];
+            const globalData = XLSX.utils.sheet_to_json(globalSheet, { header: 1, raw: true });
+
+            if (globalData.length < 2) {
+                throw new Error('Archivo sin datos válidos');
+            }
+
+            lostBedsData = [];
+            const habitacionesProcesadas = new Set();
+
+            // ── Diagnóstico ───────────────────────────────────────────────────
+            let diagTotal = 0, diagSaltadoCorto = 0, diagSaltadoSinHab = 0,
+                diagDuplicado = 0, diagSinOcup = 0, diagDetectado = 0;
+            const diagMuestras = []; // primeros 20 valorCelda para diagnóstico
+
+            for (let i = 1; i < globalData.length; i++) {
+                const row = globalData[i];
+                diagTotal++;
+
+                // CORRECCIÓN: solo necesitamos pabellon(0), habitacion(2) y camas(3)
+                // La comprobación row.length < 9 eliminaba filas con cols 5-8 vacías
+                if (!row || row.length < 4) { diagSaltadoCorto++; continue; }
+
+                const pabellon  = row[0];
+                const nivel     = row[1];
+                const habitacion= row[2];
+                const camas     = parseInt(row[3]);
+                const empresa   = row[4] || '';
+                // col[8] es detalle — puede no existir, no es crítico
+                const detalle   = row[8] || '';
+
+                if (!pabellon || !habitacion || !isValidHabitacion(camas)) { diagSaltadoSinHab++; continue; }
+
+                const habitacionKey = `${pabellon}-${nivel}-${habitacion}`;
+                if (habitacionesProcesadas.has(habitacionKey)) { diagDuplicado++; continue; }
+                habitacionesProcesadas.add(habitacionKey);
+
+                const valorCelda = row[selectedDay];
+                let camasPerdidas = 0;
+                let ocupacion = 0;
+                let tipoPerdida = '';
+
+                // Guardar muestras para diagnóstico (primeras 20 filas válidas)
+                if (diagMuestras.length < 20) {
+                    diagMuestras.push({ hab: habitacion, pab: pabellon, camas, valorCelda, empresa });
+                }
+
+                if (isHabitacionBloqueada(empresa)) {
+                    camasPerdidas = camas;
+                    tipoPerdida = 'BLOQUEADA';
+                }
+                else if (isCeldaBloqueada(valorCelda)) {
+                    camasPerdidas = camas;
+                    tipoPerdida = 'BLOQUEADA';
+                }
+                else if (isCeldaOcupada(valorCelda)) {
+                    ocupacion = normalizeValue(valorCelda);
+                    ocupacion = Math.min(ocupacion, camas);
+                    camasPerdidas = calcularCamasPerdidas(camas, ocupacion);
+                    if (camasPerdidas > 0) {
+                        tipoPerdida = 'OCUPACIÓN PARCIAL';
+                    } else {
+                        diagSinOcup++;
+                    }
+                } else {
+                    diagSinOcup++;
+                }
+
+                if (camasPerdidas > 0) {
+                    diagDetectado++;
+                    lostBedsData.push({
+                        pabellon,
+                        nivel: nivel || '',
+                        habitacion,
+                        totalCamas: camas,
+                        ocupacion,
+                        camasPerdidas,
+                        empresa: empresa || 'Sin empresa',
+                        detalle: detalle || 'Sin detalle específico',
+                        tipoPerdida,
+                        empresaDisplay: getEmpresaDisplay(empresa, valorCelda)
+                    });
+                }
+            }
+
+            // ── Log diagnóstico completo ──────────────────────────────────────
+            console.group(`[CamasPerdidas] Diagnóstico columna ${selectedDay}`);
+            console.log(`Total filas leídas (excl. header): ${diagTotal}`);
+            console.log(`  ❌ Saltadas por < 4 cols:   ${diagSaltadoCorto}`);
+            console.log(`  ❌ Saltadas sin pab/hab/cam: ${diagSaltadoSinHab}`);
+            console.log(`  ⏩ Duplicadas (ya procesadas): ${diagDuplicado}`);
+            console.log(`  ⚪ Sin ocupación ese día:    ${diagSinOcup}`);
+            console.log(`  ✅ Detectadas con pérdida:  ${diagDetectado}`);
+            console.log('Muestra de primeras filas válidas (valorCelda = columna seleccionada):');
+            console.table(diagMuestras);
+            console.groupEnd();
+        }
+
+        function setupFilters() {
+            const pabellones = [...new Set(lostBedsData.map(item => item.pabellon))].sort();
+            const empresas = [...new Set(lostBedsData.map(item => item.empresaDisplay))].sort();
+            const causasEspecificas = [...new Set(lostBedsData.map(item => item.detalle))].sort();
+
+            console.log('Configurando filtros...');
+
+            // Llenar filtro de pabellones
+            const pavilionFilter = document.getElementById('pavilionFilter');
+            pavilionFilter.innerHTML = '<option value="">Todos los pabellones</option>';
+            pabellones.forEach(pabellon => {
+                pavilionFilter.innerHTML += `<option value="${pabellon}">${pabellon}</option>`;
+            });
+
+            // Llenar filtro de empresas
+            const companyFilter = document.getElementById('companyFilter');
+            companyFilter.innerHTML = '<option value="">Todas las empresas</option>';
+            empresas.forEach(empresa => {
+                companyFilter.innerHTML += `<option value="${empresa}">${empresa}</option>`;
+            });
+
+            // Llenar filtro de causas específicas
+            const specificCauseFilter = document.getElementById('specificCauseFilter');
+            specificCauseFilter.innerHTML = '<option value="">Todas las causas</option>';
+            causasEspecificas.forEach(causa => {
+                const causaDisplay = causa.length > 40 ? causa.substring(0, 37) + '...' : causa;
+                specificCauseFilter.innerHTML += `<option value="${causa}">${causaDisplay}</option>`;
+            });
+
+            console.log('Filtros configurados correctamente');
+        }
+
+        function applyFilters() {
+            const pavilionFilter = document.getElementById('pavilionFilter').value;
+            const companyFilter = document.getElementById('companyFilter').value;
+            const lossTypeFilter = document.getElementById('lossTypeFilter').value;
+            const specificCauseFilter = document.getElementById('specificCauseFilter').value;
+            const detailSearch = document.getElementById('detailSearch').value.toLowerCase();
+
+            filteredData = lostBedsData.filter(item => {
+                const matchesPavilion = !pavilionFilter || item.pabellon === pavilionFilter;
+                const matchesCompany = !companyFilter || item.empresaDisplay === companyFilter;
+                const matchesLossType = !lossTypeFilter || item.tipoPerdida === lossTypeFilter;
+                const matchesSpecificCause = !specificCauseFilter || item.detalle === specificCauseFilter;
+                const matchesDetail = !detailSearch || 
+                    item.detalle.toLowerCase().includes(detailSearch) ||
+                    item.habitacion.toString().toLowerCase().includes(detailSearch) ||
+                    item.empresa.toLowerCase().includes(detailSearch);
+
+                return matchesPavilion && matchesCompany && matchesLossType && matchesSpecificCause && matchesDetail;
+            });
+
+            renderFilteredResults();
+            updateFilterCounters();
+        }
+
+        // NUEVA: Función mejorada para renderizar resultados con agrupación
+        function renderFilteredResults() {
+            const tableBody = document.getElementById('lostBedsTableBody');
+            const noDataMessage = document.getElementById('noDataMessage');
+            const lostBedsTable = document.querySelector('.lost-beds-table');
+
+            if (filteredData.length === 0) {
+                tableBody.innerHTML = '';
+                lostBedsTable.style.display = 'none';
+                noDataMessage.classList.remove('hidden');
+                return;
+            }
+
+            noDataMessage.classList.add('hidden');
+            lostBedsTable.style.display = 'block';
+            tableBody.innerHTML = '';
+
+            // Renderizar según el tipo de agrupación seleccionado
+            if (currentGroupView === 'pabellon') {
+                renderGroupedByPabellon();
+            } else if (currentGroupView === 'empresa') {
+                renderGroupedByEmpresa();
+            } else {
+                renderNormalView();
+            }
+        }
+
+        // NUEVA: Vista normal (sin agrupación)
+        function renderNormalView() {
+            const tableBody = document.getElementById('lostBedsTableBody');
+            
+            filteredData.forEach(item => {
+                const row = createTableRow(item);
+                tableBody.appendChild(row);
+            });
+        }
+
+        // NUEVA: Vista agrupada por pabellón
+        function renderGroupedByPabellon() {
+            const tableBody = document.getElementById('lostBedsTableBody');
+            
+            // Agrupar datos por pabellón
+            const grouped = {};
+            filteredData.forEach(item => {
+                if (!grouped[item.pabellon]) {
+                    grouped[item.pabellon] = [];
+                }
+                grouped[item.pabellon].push(item);
+            });
+
+            // Renderizar cada grupo
+            Object.keys(grouped).sort().forEach(pabellon => {
+                // Header del grupo
+                const groupHeader = document.createElement('tr');
+                groupHeader.innerHTML = `
+                    <td colspan="9" class="group-header pabellon-group">
+                        🏢 ${pabellon} - ${grouped[pabellon].length} habitaciones - ${grouped[pabellon].reduce((sum, item) => sum + item.camasPerdidas, 0)} camas perdidas
+                    </td>
+                `;
+                tableBody.appendChild(groupHeader);
+
+                // Filas del grupo
+                grouped[pabellon].forEach(item => {
+                    const row = createTableRow(item);
+                    tableBody.appendChild(row);
+                });
+            });
+        }
+
+        // NUEVA: Vista agrupada por empresa
+        function renderGroupedByEmpresa() {
+            const tableBody = document.getElementById('lostBedsTableBody');
+            
+            // Agrupar datos por empresa real (no por empresaDisplay)
+            const grouped = {};
+            filteredData.forEach(item => {
+                const empresaKey = item.empresa || 'Sin empresa';
+                if (!grouped[empresaKey]) {
+                    grouped[empresaKey] = [];
+                }
+                grouped[empresaKey].push(item);
+            });
+
+            // Renderizar cada grupo
+            Object.keys(grouped).sort().forEach(empresa => {
+                // Header del grupo
+                const groupHeader = document.createElement('tr');
+                groupHeader.innerHTML = `
+                    <td colspan="9" class="group-header empresa-group">
+                        🏬 ${empresa} - ${grouped[empresa].length} habitaciones - ${grouped[empresa].reduce((sum, item) => sum + item.camasPerdidas, 0)} camas perdidas
+                    </td>
+                `;
+                tableBody.appendChild(groupHeader);
+
+                // Filas del grupo
+                grouped[empresa].forEach(item => {
+                    const row = createTableRow(item);
+                    tableBody.appendChild(row);
+                });
+            });
+        }
+
+        // NUEVA: Función helper para crear filas de tabla
+        function createTableRow(item) {
+            const row = document.createElement('tr');
+            
+            let empresaClass = '';
+            if (item.empresaDisplay === 'ANGLO') empresaClass = 'empresa-anglo';
+            else if (item.empresaDisplay === 'EECC') empresaClass = 'empresa-eecc';
+            else if (item.empresaDisplay === 'BLOQUEADA') empresaClass = 'empresa-bloqueada';
+
+            const tipoClass = item.tipoPerdida === 'BLOQUEADA' ? 'tipo-bloqueada' : 'tipo-ocupacion';
+
+            row.innerHTML = `
+                <td class="habitacion-id">${item.pabellon}</td>
+                <td>${item.nivel}</td>
+                <td class="habitacion-id">${item.habitacion}</td>
+                <td>${item.totalCamas}</td>
+                <td>${item.ocupacion}</td>
+                <td class="camas-perdidas">${item.camasPerdidas}</td>
+                <td><span class="${empresaClass}">${item.empresa}</span></td>
+                <td class="detalle-cell">${item.detalle}</td>
+                <td><span class="${tipoClass}">${item.tipoPerdida}</span></td>
+            `;
+
+            return row;
+        }
+
+        function updateFilterCounters() {
+            const totalCamasPerdidas = filteredData.reduce((sum, item) => sum + item.camasPerdidas, 0);
+            
+            document.getElementById('filteredCount').textContent = filteredData.length;
+            document.getElementById('filteredLostBeds').textContent = totalCamasPerdidas;
+            document.getElementById('summaryCount').textContent = totalCamasPerdidas;
+            document.getElementById('summaryRooms').textContent = filteredData.length;
+        }
+
+        function renderSummaryCards() {
+            const totalCamasPerdidas = lostBedsData.reduce((sum, item) => sum + item.camasPerdidas, 0);
+            const habitacionesAfectadas = lostBedsData.length;
+
+            // Calcular principal causa
+            const causas = {};
+            lostBedsData.forEach(item => {
+                const causa = item.detalle || 'SIN DETALLE';
+                causas[causa] = (causas[causa] || 0) + item.camasPerdidas;
+            });
+            
+            const principalCausa = Object.keys(causas).length > 0 ? 
+                Object.keys(causas).reduce((a, b) => causas[a] > causas[b] ? a : b) : '-';
+
+            // Calcular pabellón crítico
+            const pabellones = {};
+            lostBedsData.forEach(item => {
+                pabellones[item.pabellon] = (pabellones[item.pabellon] || 0) + item.camasPerdidas;
+            });
+            
+            const pabellonCritico = Object.keys(pabellones).length > 0 ?
+                Object.keys(pabellones).reduce((a, b) => pabellones[a] > pabellones[b] ? a : b) : '-';
+
+            // Actualizar cards
+            document.getElementById('totalLostBeds').textContent = totalCamasPerdidas;
+            document.getElementById('affectedRooms').textContent = habitacionesAfectadas;
+            document.getElementById('mainCause').textContent = principalCausa.length > 20 ? 
+                principalCausa.substring(0, 17) + '...' : principalCausa;
+            document.getElementById('criticalPavilion').textContent = pabellonCritico;
+
+            // Actualizar subtítulos
+            document.getElementById('mainCauseSubtitle').textContent = 
+                `${causas[principalCausa] || 0} camas perdidas`;
+            document.getElementById('criticalPavilionSubtitle').textContent = 
+                `${pabellones[pabellonCritico] || 0} camas perdidas`;
+        }
+
+        function clearFilters() {
+            document.getElementById('pavilionFilter').value = '';
+            document.getElementById('companyFilter').value = '';
+            document.getElementById('lossTypeFilter').value = '';
+            document.getElementById('specificCauseFilter').value = '';
+            document.getElementById('detailSearch').value = '';
+            
+            // Ocultar sub-filtro y resetear vista
+            document.getElementById('subFilterSection').style.display = 'none';
+            setGroupView('ninguno');
+            
+            applyFilters();
+        }
+
+        function exportReport() {
+            if (lostBedsData.length === 0) {
+                showMessage('No hay datos para exportar', 'error');
+                return;
+            }
+
+            try {
+                const reportHtml = generateStaticReport();
+                const blob = new Blob([reportHtml], { type: 'text/html' });
+                const url = URL.createObjectURL(blob);
+                
+                const a = document.createElement('a');
+                a.href = url;
+                const fecha = fechasDisponibles.find(f => f.indice === selectedDay);
+                a.download = `Analisis_Camas_Perdidas_${fecha.dia}_${fecha.mes + 1}_${fecha.año}.html`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                
+                showMessage('Análisis exportado exitosamente', 'success');
+            } catch (error) {
+                console.error('Error al exportar:', error);
+                showMessage('Error al exportar el análisis: ' + error.message, 'error');
+            }
+        }
+
+        function generateStaticReport() {
+            const now = new Date();
+            const fechaGeneracion = now.toLocaleDateString('es-CL');
+            const horaGeneracion = now.toLocaleTimeString('es-CL');
+            const fecha = fechasDisponibles.find(f => f.indice === selectedDay);
+            const diaTexto = `${fecha.dia}/${fecha.mes + 1}/${fecha.año}`;
+
+            const css = `
+                * { margin: 0; padding: 0; box-sizing: border-box; }
+                body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f5f7fa; color: #333; line-height: 1.6; margin: 20px; }
+                .header { background: linear-gradient(135deg, #dc2626 0%, #ef4444 100%); color: white; padding: 20px 40px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); border-radius: 10px; margin-bottom: 30px; text-align: center; }
+                .header h1 { font-size: 28px; font-weight: 300; margin-bottom: 15px; }
+                .generation-info { text-align: right; font-size: 12px; color: #666; margin-bottom: 20px; padding: 10px; background: #f8f9fa; border-radius: 5px; }
+                .summary-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin-bottom: 30px; }
+                .summary-card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); border-left: 4px solid #dc2626; }
+                .card-title { font-size: 14px; font-weight: 600; color: #374151; margin-bottom: 10px; }
+                .card-value { font-size: 24px; font-weight: bold; color: #dc2626; }
+                .card-subtitle { font-size: 12px; color: #6b7280; margin-top: 5px; }
+                .lost-beds-table { width: 100%; background: white; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); overflow: hidden; margin-bottom: 30px; }
+                .lost-beds-table table { width: 100%; border-collapse: collapse; font-size: 12px; }
+                .lost-beds-table th { background: linear-gradient(135deg, #dc2626 0%, #ef4444 100%); color: white; padding: 12px 8px; text-align: center; font-weight: 600; font-size: 11px; white-space: nowrap; }
+                .lost-beds-table td { padding: 10px 8px; border-bottom: 1px solid #e5e7eb; font-size: 11px; text-align: center; }
+                .lost-beds-table tr:nth-child(even) { background: #f8fafc; }
+                .habitacion-id { font-weight: bold; color: #dc2626; }
+                .camas-perdidas { font-weight: bold; color: #dc2626; font-size: 14px; }
+                .empresa-anglo { background-color: #fef3c7; color: #92400e; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; }
+                .empresa-eecc { background-color: #dbeafe; color: #1e40af; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; }
+                .empresa-bloqueada { background-color: #fee2e2; color: #dc2626; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; }
+                .detalle-cell { max-width: 250px; word-wrap: break-word; text-align: left; font-size: 10px; line-height: 1.4; padding-left: 12px !important; }
+                .tipo-ocupacion { background-color: #fbbf24; color: #92400e; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; }
+                .tipo-bloqueada { background-color: #dc2626; color: white; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; }
+            `;
+
+            // Generar tabla HTML estática
+            let tableHtml = '<table><thead><tr><th>Pabellón</th><th>Nivel</th><th>Habitación</th><th>Capacidad</th><th>Ocupación</th><th>Camas Perdidas</th><th>Empresa</th><th>Detalle / Causa</th><th>Tipo Pérdida</th></tr></thead><tbody>';
+            
+            lostBedsData.forEach(item => {
+                let empresaClass = '';
+                if (item.empresaDisplay === 'ANGLO') empresaClass = 'empresa-anglo';
+                else if (item.empresaDisplay === 'EECC') empresaClass = 'empresa-eecc';
+                else if (item.empresaDisplay === 'BLOQUEADA') empresaClass = 'empresa-bloqueada';
+
+                const tipoClass = item.tipoPerdida === 'BLOQUEADA' ? 'tipo-bloqueada' : 'tipo-ocupacion';
+
+                tableHtml += `
+                    <tr>
+                        <td class="habitacion-id">${item.pabellon}</td>
+                        <td>${item.nivel}</td>
+                        <td class="habitacion-id">${item.habitacion}</td>
+                        <td>${item.totalCamas}</td>
+                        <td>${item.ocupacion}</td>
+                        <td class="camas-perdidas">${item.camasPerdidas}</td>
+                        <td><span class="${empresaClass}">${item.empresa}</span></td>
+                        <td class="detalle-cell">${item.detalle}</td>
+                        <td><span class="${tipoClass}">${item.tipoPerdida}</span></td>
+                    </tr>
+                `;
+            });
+            
+            tableHtml += '</tbody></table>';
+
+            // Generar cards HTML estático
+            const totalCamasPerdidas = lostBedsData.reduce((sum, item) => sum + item.camasPerdidas, 0);
+            const habitacionesAfectadas = lostBedsData.length;
+            
+            const causas = {};
+            lostBedsData.forEach(item => {
+                const causa = item.detalle || 'SIN DETALLE';
+                causas[causa] = (causas[causa] || 0) + item.camasPerdidas;
+            });
+            const principalCausa = Object.keys(causas).length > 0 ? 
+                Object.keys(causas).reduce((a, b) => causas[a] > causas[b] ? a : b) : '-';
+
+            const pabellones = {};
+            lostBedsData.forEach(item => {
+                pabellones[item.pabellon] = (pabellones[item.pabellon] || 0) + item.camasPerdidas;
+            });
+            const pabellonCritico = Object.keys(pabellones).length > 0 ?
+                Object.keys(pabellones).reduce((a, b) => pabellones[a] > pabellones[b] ? a : b) : '-';
+
+            const cardsHtml = `
+                <div class="summary-cards">
+                    <div class="summary-card">
+                        <div class="card-title">🏚️ Total Camas Perdidas</div>
+                        <div class="card-value">${totalCamasPerdidas}</div>
+                        <div class="card-subtitle">en el día analizado</div>
+                    </div>
+                    <div class="summary-card">
+                        <div class="card-title">🏠 Habitaciones Afectadas</div>
+                        <div class="card-value">${habitacionesAfectadas}</div>
+                        <div class="card-subtitle">con pérdidas de capacidad</div>
+                    </div>
+                    <div class="summary-card">
+                        <div class="card-title">📊 Principal Causa</div>
+                        <div class="card-value" style="font-size: 16px;">${principalCausa.length > 20 ? principalCausa.substring(0, 17) + '...' : principalCausa}</div>
+                        <div class="card-subtitle">${causas[principalCausa] || 0} camas perdidas</div>
+                    </div>
+                    <div class="summary-card">
+                        <div class="card-title">🏢 Pabellón Crítico</div>
+                        <div class="card-value" style="font-size: 18px;">${pabellonCritico}</div>
+                        <div class="card-subtitle">${pabellones[pabellonCritico] || 0} camas perdidas</div>
+                    </div>
+                </div>
+            `;
+
+            return `<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Análisis de Camas Perdidas - ${diaTexto}</title>
+    <style>${css}</style>
+</head>
+<body>
+    <div class="header">
+        <h1>🔍 Análisis de Camas Perdidas</h1>
+    </div>
+    <div class="generation-info">
+        <strong>Análisis generado el ${fechaGeneracion} a las ${horaGeneracion}</strong><br>
+        <small>Día analizado: ${diaTexto}</small>
+    </div>
+    ${cardsHtml}
+    <div class="lost-beds-table">
+        ${tableHtml}
+    </div>
+    <div style="margin-top: 40px; padding: 20px; background: #f8f9fa; border-radius: 10px; text-align: center; color: #666; font-size: 12px;">
+        <p><strong>Dashboard de Análisis de Camas Perdidas con Sub-filtro Dinámico</strong></p>
+        <p>Este análisis detallado identifica cada habitación con pérdidas y permite agrupación especial para casos EECC sin detalle.</p>
+    </div>
+<\/body>
+<\/html>`;
+        }
+
+        // NUEVA: Función para exportar filtro específico a PDF
+        function exportFilteredToPDF() {
+            if (filteredData.length === 0) {
+                showMessage('No hay datos filtrados para exportar', 'error');
+                return;
+            }
+
+            try {
+                showMessage('Generando PDF...');
+                
+                // Inicializar jsPDF
+                const { jsPDF } = window.jspdf;
+                const doc = new jsPDF();
+                
+                // Información del reporte
+                const fecha = fechasDisponibles.find(f => f.indice === selectedDay);
+                const diaTexto = `${fecha.dia}/${fecha.mes + 1}/${fecha.año}`;
+                const totalCamasPerdidas = filteredData.reduce((sum, item) => sum + item.camasPerdidas, 0);
+                
+                // Header del documento
+                doc.setFontSize(18);
+                doc.setTextColor(220, 38, 38);
+                doc.text('📄 Análisis Filtrado - Camas Perdidas EECC', 20, 25);
+                
+                doc.setFontSize(12);
+                doc.setTextColor(0, 0, 0);
+                doc.text(`Día analizado: ${diaTexto}`, 20, 35);
+                doc.text(`Vista: ${getGroupViewText()}`, 20, 42);
+                doc.text(`Generado: ${new Date().toLocaleString('es-CL')}`, 20, 49);
+                
+                // Resumen ejecutivo
+                doc.setFontSize(14);
+                doc.setTextColor(220, 38, 38);
+                doc.text('📊 Resumen Ejecutivo', 20, 65);
+                
+                doc.setFontSize(10);
+                doc.setTextColor(0, 0, 0);
+                doc.text(`• Total habitaciones afectadas: ${filteredData.length}`, 25, 75);
+                doc.text(`• Total camas perdidas: ${totalCamasPerdidas}`, 25, 82);
+                doc.text(`• Filtros aplicados: EECC + Sin detalle específico`, 25, 89);
+                
+                // Preparar datos para la tabla
+                let tableData = [];
+                let headers = ['Pabellón', 'Nivel', 'Habitación', 'Capacidad', 'Ocupación', 'Pérdidas', 'Empresa', 'Detalle'];
+                
+                if (currentGroupView === 'pabellon') {
+                    // Agrupar por pabellón para PDF
+                    const grouped = {};
+                    filteredData.forEach(item => {
+                        if (!grouped[item.pabellon]) {
+                            grouped[item.pabellon] = [];
+                        }
+                        grouped[item.pabellon].push(item);
+                    });
+                    
+                    Object.keys(grouped).sort().forEach(pabellon => {
+                        // Header del grupo
+                        tableData.push([
+                            { content: `🏢 ${pabellon} (${grouped[pabellon].length} hab, ${grouped[pabellon].reduce((sum, item) => sum + item.camasPerdidas, 0)} camas)`, 
+                              colSpan: 8, styles: { fillColor: [254, 243, 199], textColor: [146, 64, 14], fontStyle: 'bold' }}
+                        ]);
+                        
+                        // Datos del grupo
+                        grouped[pabellon].forEach(item => {
+                            tableData.push([
+                                item.pabellon,
+                                item.nivel,
+                                item.habitacion,
+                                item.totalCamas.toString(),
+                                item.ocupacion.toString(),
+                                item.camasPerdidas.toString(),
+                                item.empresa.length > 15 ? item.empresa.substring(0, 12) + '...' : item.empresa,
+                                item.detalle.length > 20 ? item.detalle.substring(0, 17) + '...' : item.detalle
+                            ]);
+                        });
+                    });
+                } else if (currentGroupView === 'empresa') {
+                    // Agrupar por empresa para PDF
+                    const grouped = {};
+                    filteredData.forEach(item => {
+                        const empresaKey = item.empresa || 'Sin empresa';
+                        if (!grouped[empresaKey]) {
+                            grouped[empresaKey] = [];
+                        }
+                        grouped[empresaKey].push(item);
+                    });
+                    
+                    Object.keys(grouped).sort().forEach(empresa => {
+                        // Header del grupo
+                        tableData.push([
+                            { content: `🏬 ${empresa} (${grouped[empresa].length} hab, ${grouped[empresa].reduce((sum, item) => sum + item.camasPerdidas, 0)} camas)`, 
+                              colSpan: 8, styles: { fillColor: [219, 234, 254], textColor: [30, 64, 175], fontStyle: 'bold' }}
+                        ]);
+                        
+                        // Datos del grupo
+                        grouped[empresa].forEach(item => {
+                            tableData.push([
+                                item.pabellon,
+                                item.nivel,
+                                item.habitacion,
+                                item.totalCamas.toString(),
+                                item.ocupacion.toString(),
+                                item.camasPerdidas.toString(),
+                                item.empresa.length > 15 ? item.empresa.substring(0, 12) + '...' : item.empresa,
+                                item.detalle.length > 20 ? item.detalle.substring(0, 17) + '...' : item.detalle
+                            ]);
+                        });
+                    });
+                } else {
+                    // Vista normal
+                    filteredData.forEach(item => {
+                        tableData.push([
+                            item.pabellon,
+                            item.nivel,
+                            item.habitacion,
+                            item.totalCamas.toString(),
+                            item.ocupacion.toString(),
+                            item.camasPerdidas.toString(),
+                            item.empresa.length > 15 ? item.empresa.substring(0, 12) + '...' : item.empresa,
+                            item.detalle.length > 20 ? item.detalle.substring(0, 17) + '...' : item.detalle
+                        ]);
+                    });
+                }
+                
+                // Generar tabla con autoTable
+                doc.autoTable({
+                    head: [headers],
+                    body: tableData,
+                    startY: 100,
+                    styles: {
+                        fontSize: 8,
+                        cellPadding: 3,
+                    },
+                    headStyles: {
+                        fillColor: [220, 38, 38],
+                        textColor: 255,
+                        fontStyle: 'bold',
+                        fontSize: 9
+                    },
+                    alternateRowStyles: {
+                        fillColor: [248, 250, 252]
+                    },
+                    margin: { top: 20, right: 15, bottom: 20, left: 15 },
+                    pageBreak: 'auto',
+                    showHead: 'everyPage'
+                });
+                
+                // Footer
+                const pageCount = doc.internal.getNumberOfPages();
+                for (let i = 1; i <= pageCount; i++) {
+                    doc.setPage(i);
+                    doc.setFontSize(8);
+                    doc.setTextColor(128, 128, 128);
+                    doc.text(`Página ${i} de ${pageCount} | Dashboard Camas Perdidas`, 15, doc.internal.pageSize.height - 10);
+                    doc.text(`Filtro: EECC sin detalle - ${getGroupViewText()}`, 15, doc.internal.pageSize.height - 5);
+                }
+                
+                // Guardar PDF
+                const filename = `EECC_SinDetalle_${getGroupViewText().replace(/\s+/g, '_')}_${fecha.dia}_${fecha.mes + 1}_${fecha.año}.pdf`;
+                doc.save(filename);
+                
+                showMessage('PDF exportado exitosamente', 'success');
+                
+            } catch (error) {
+                console.error('Error al exportar PDF:', error);
+                showMessage('Error al generar PDF: ' + error.message, 'error');
+            }
+        }
+
+        // NUEVA: Función helper para obtener texto de vista actual
+        function getGroupViewText() {
+            switch(currentGroupView) {
+                case 'pabellon': return 'Agrupado por Pabellón';
+                case 'empresa': return 'Agrupado por Empresa';
+                default: return 'Vista Normal';
+            }
+        }
+
+        // ── Cargar camas perdidas desde Supabase ─────────────────────────────
+        // ── Helper: paginar tabla Supabase ─────────────────────────────────
+        async function _sbFetchAll(sb, tabla, select, filtro = null) {
+            let all = [], page = 0;
+            while (true) {
+                let q = sb.from(tabla).select(select).range(page * 1000, page * 1000 + 999);
+                if (filtro) q = filtro(q);
+                const { data, error } = await q;
+                if (error) throw error;
+                if (data?.length) all = all.concat(data);
+                if (!data || data.length < 1000) break;
+                page++;
+                if (page > 20) break;
+            }
+            return all;
+        }
+
+        // ── Cargar camas perdidas desde Supabase ─────────────────────────────
+        async function loadFromSupabase() {
+            const btn = document.getElementById('sbButton');
+            btn.disabled = true;
+            btn.textContent = '⏳ Cargando...';
+            showMessage('Consultando base de datos (paginado)...');
+            document.getElementById('loading').style.display = 'block';
+
+            try {
+                const sb = window._sbClient;
+                if (!sb) throw new Error('Supabase no cargado aún. Espera 2 segundos y reintenta.');
+
+                // Paginar tablas grandes (>1000 filas)
+                const [camas, habs, asigs] = await Promise.all([
+                    _sbFetchAll(sb, 'v2_camas',       'id_cama, estado, habitacion_id'),
+                    _sbFetchAll(sb, 'v2_habitaciones', 'id_custom, numero_hab, nivel, pabellon_id'),
+                    _sbFetchAll(sb, 'v2_asignaciones', 'id_cama, nombre_huesped, empresa_id',
+                                q => q.is('fecha_checkout', null)),
+                ]);
+
+                // Tablas pequeñas
+                const { data: pabs,    error: e3 } = await sb.from('v2_pabellones').select('id, nombre, edificio_id').limit(500);
+                const { data: edifs,   error: e4 } = await sb.from('v2_edificios').select('id, nombre').limit(50);
+                const { data: empresas }            = await sb.from('v2_empresas').select('id, nombre').limit(500);
+                const { data: motivos }             = await sb.from('v2_camas_perdidas').select('id_cama_perdida, motivo, motivo_texto').limit(5000);
+                if (e3) throw e3;
+
+                console.log(`[Supabase] 📊 Cargados: ${camas.length} camas | ${habs.length} habs | ${asigs.length} asigs activas`);
+
+                // Mapas de lookup (String() evita mismatch int/string)
+                const habMap    = {}; (habs    || []).forEach(h => { habMap[String(h.id_custom)]    = h; });
+                const pabMap    = {}; (pabs    || []).forEach(p => { pabMap[String(p.id)]           = p; });
+                const edifMap   = {}; (edifs   || []).forEach(e => { edifMap[String(e.id)]          = e; });
+                const asigMap   = {}; (asigs   || []).forEach(a => { asigMap[String(a.id_cama)]     = a; });
+                const empMap    = {}; (empresas|| []).forEach(e => { empMap[String(e.id)]           = e; });
+                const motivoMap = {}; (motivos || []).forEach(m => { motivoMap[m.id_cama_perdida]   = m; });
+
+                const MOTIVOS = {
+                    acuerdo_anglo:     'Acuerdo Anglo',
+                    impar_mujer:       'Impar mujer',
+                    impar_hombre:      'Impar hombre',
+                    motivos_medicos:   'Motivos médicos',
+                    motivos_personales:'Motivos personales',
+                    otros:             'Otros',
+                    sin_motivo:        'Sin motivo registrado'
+                };
+
+                // Agrupar camas por habitación
+                const porHab = {};
+                camas.forEach(c => {
+                    const hid = String(c.habitacion_id);
+                    if (!porHab[hid]) porHab[hid] = [];
+                    porHab[hid].push(c);
+                });
+
+                lostBedsData = [];
+                let nTotal = 0, nBloq = 0, nParc = 0;
+
+                Object.entries(porHab).forEach(([habId, cs]) => {
+                    // Mínimo 2 camas
+                    if (cs.length < 2) return;
+
+                    const hab  = habMap[String(habId)]               || {};
+                    const pab  = pabMap[String(hab.pabellon_id)]     || {};
+                    const edif = edifMap[String(pab.edificio_id)]    || {};
+                    if (!hab.numero_hab) return;
+
+                    // Ocupada = estado='Ocupada' O tiene asignacion activa
+                    const camasOcup  = cs.filter(c => c.estado === 'Ocupada' || !!asigMap[String(c.id_cama)]);
+                    const camasLibre = cs.filter(c => c.estado !== 'Ocupada' && !asigMap[String(c.id_cama)]);
+                    const nOcup  = camasOcup.length;
+                    const nLibre = camasLibre.length;
+
+                    // Detectar bloqueo
+                    const empresasEnHab = camasOcup
+                        .map(c => empMap[String(asigMap[String(c.id_cama)]?.empresa_id)]?.nombre || '')
+                        .filter(Boolean);
+                    const isBloqueada = empresasEnHab.some(n => /bloquead[ao]/i.test(n));
+
+                    let tipoPerdida = '', camasPerdidas = 0;
+                    let empresaRef = '';
+
+                    if (isBloqueada) {
+                        tipoPerdida   = 'BLOQUEADA';
+                        camasPerdidas = cs.length;
+                        empresaRef    = empresasEnHab[0] || '';
+                        nBloq += cs.length;
+                    } else if (nOcup === 0 || nLibre === 0) {
+                        return; // vacía o llena → no cuenta
+                    } else {
+                        tipoPerdida   = 'OCUPACIÓN PARCIAL';
+                        camasPerdidas = nLibre;
+                        const asigRef = asigMap[String(camasOcup[0]?.id_cama)];
+                        empresaRef    = asigRef ? (empMap[String(asigRef.empresa_id)]?.nombre || '') : '';
+                        nParc += nLibre;
+                    }
+
+                    if (camasPerdidas === 0) return;
+                    nTotal += camasPerdidas;
+
+                    // Una entrada por cada cama libre perdida
+                    const camasTarget = isBloqueada ? cs : camasLibre;
+                    camasTarget.forEach(camaPerd => {
+                        const reg = motivoMap[camaPerd.id_cama] || {};
+                        const motivoLabel = MOTIVOS[reg.motivo] || 'Sin motivo registrado';
+                        const detalleTexto = (reg.motivo === 'otros' && reg.motivo_texto)
+                            ? reg.motivo_texto : motivoLabel;
+                        const esAnglo = ['anglo','angloamerican'].some(k => empresaRef.toLowerCase().includes(k));
+
+                        lostBedsData.push({
+                            pabellon:      (edif.nombre || '?') + ' - ' + (pab.nombre || '?'),
+                            nivel:         hab.nivel || '',
+                            habitacion:    hab.numero_hab || habId,
+                            totalCamas:    cs.length,
+                            ocupacion:     nOcup,
+                            camasPerdidas: 1, // una entrada por cama perdida
+                            empresa:       empresaRef || 'Sin empresa',
+                            detalle:       detalleTexto,
+                            tipoPerdida,
+                            empresaDisplay: esAnglo ? 'ANGLO' : (isBloqueada ? 'BLOQUEADA' : 'EECC')
+                        });
+                    });
+                });
+
+                console.log(`[Supabase] ✅ Detectadas: ${lostBedsData.length} camas perdidas (${nBloq} bloq · ${nParc} parciales)`);
+
+                filteredData = [...lostBedsData];
+                if (lostBedsData.length === 0) {
+                    showMessage('✅ No se encontraron camas perdidas en la BD actualmente', 'success');
+                } else {
+                    setupFilters();
+                    renderSummaryCards();
+                    applyFilters();
+                    document.getElementById('analysisContent').classList.remove('hidden');
+                    document.getElementById('exportButton').disabled = false;
+                    showMessage(`✅ ${lostBedsData.length} camas perdidas cargadas desde Supabase`, 'success');
+                    setTimeout(() => document.getElementById('analysisContent').scrollIntoView({ behavior:'smooth' }), 200);
+                }
+
+            } catch(err) {
+                showMessage('❌ Error Supabase: ' + err.message, 'error');
+                console.error('[Supabase]', err);
+            } finally {
+                document.getElementById('loading').style.display = 'none';
+                btn.disabled = false;
+                btn.innerHTML = '☁️ Cargar desde Supabase';
+            }
+        }
+    </script>
+
+    <!-- Expone el cliente Supabase al scope global -->
+    <script type="module">
+        import { supabase } from './js/supabaseClient.js';
+        window._sbClient = supabase;
+        console.log('[Supabase] Cliente listo', supabase);
+    </script>
+</body>
+</html>

@@ -192,7 +192,16 @@ async function _buscar(rut) {
     document.getElementById('a-llave').innerHTML=llave==='verde'
         ?'<span style="background:#dcfce7;color:#166534;border-radius:8px;padding:2px 10px;font-size:12px;font-weight:800">🟢 Día</span>'
         :'<span style="background:#1e293b;color:#94a3b8;border-radius:8px;padding:2px 10px;font-size:12px;font-weight:700">🌙 Noche</span>';
-    document.getElementById('a-info').textContent=`${data.cargo||''} · ${data.gerencia||''}`;
+    document.getElementById('a-info').innerHTML=`
+        <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:6px">
+          <div><span style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase">Rol</span>
+               <div style="font-size:13px;font-weight:700;color:var(--text-primary)">${data.cargo||'—'}</div></div>
+          <div><span style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase">Gerencia</span>
+               <div style="font-size:13px;font-weight:600;color:var(--text-primary)">${data.gerencia||'—'}</div></div>
+          <div><span style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase">Turno</span>
+               <div style="font-size:13px;color:var(--text-primary)">${_turno||'—'}</div></div>
+        </div>`;
+
     document.getElementById('a-card').style.display='flex';
     const btn=document.getElementById('a-btn-add');
     btn.disabled=false; btn.style.background='#f97316'; btn.style.cursor='pointer';

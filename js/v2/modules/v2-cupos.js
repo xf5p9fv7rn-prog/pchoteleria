@@ -403,6 +403,60 @@ function renderResumenGerencias() {
         </div>`;
 }
 
+// ── Exportar Desglose por Gerencia a Excel ───────────────────────────────────
+window._cupoExportarDesglose = async () => {
+    if (!window.XLSX) {
+        toast('Cargando librería Excel…', 'warn');
+        await new Promise((res, rej) => {
+            const s = document.createElement('script');
+            s.src = 'https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js';
+            s.onload = res;
+            s.onerror = () => rej(new Error('No se pudo cargar XLSX'));
+            document.head.appendChild(s);
+        });
+    }
+    const { utils, writeFile } = XLSX;
+    const wb = utils.book_new();
+    const filas = [];
+
+    const fechaHoy = new Date().toLocaleDateString('es-CL', { day:'2-digit', month:'2-digit', year:'numeric' });
+    filas.push(['DESGLOSE DE CUPOS POR GERENCIA', '', '', '']);
+    filas.push([`Generado: ${fechaHoy}`, '', '', '']);
+    filas.push(['', '', '', '']);
+    filas.push(['GERENCIA / EMPRESA', 'N° CONTRATO', 'CUPOS TOTALES', 'CUPOS OCUPADOS']);
+
+    const porGerencia = {};
+    _contratos.forEach(c => {
+        const g = c.gerencia || 'Sin Gerencia';
+        if (!porGerencia[g]) porGerencia[g] = [];
+        porGerencia[g].push(c);
+    });
+
+    let grandTotal = 0;
+    Object.entries(porGerencia)
+        .sort(([a],[b]) => a.localeCompare(b))
+        .forEach(([ger, rows]) => {
+            const subtotal = rows.reduce((s, c) => s + (c.cupos_totales || 0), 0);
+            const ocupSub  = rows.reduce((s, c) => s + (c.cupos_ocupados || 0), 0);
+            filas.push([`▶ ${ger}`, `${rows.length} contrato${rows.length!==1?'s':''}`, subtotal, ocupSub]);
+            rows.sort((a,b) => (a.empresa||'').localeCompare(b.empresa||'')).forEach(c => {
+                filas.push([`  ${c.empresa || '—'}`, c.numero_contrato || '—', c.cupos_totales || 0, c.cupos_ocupados || 0]);
+            });
+            filas.push([`Subtotal — ${ger}`, '', subtotal, ocupSub]);
+            filas.push(['', '', '', '']);
+            grandTotal += subtotal;
+        });
+
+    filas.push(['TOTAL GENERAL DE CUPOS', `${Object.keys(porGerencia).length} gerencias · ${_contratos.length} contratos`, grandTotal, '']);
+
+    const ws = utils.aoa_to_sheet(filas);
+    ws['!cols'] = [{ wch: 45 }, { wch: 22 }, { wch: 18 }, { wch: 18 }];
+    utils.book_append_sheet(wb, ws, 'Desglose Gerencias');
+    const nombre = `Cupos_Gerencias_${fechaHoy.replace(/\//g,'-')}.xlsx`;
+    writeFile(wb, nombre);
+    toast('✅ Excel descargado: ' + nombre);
+};
+
 // ── Render principal ──────────────────────────────────────────────────────────
 export async function renderV2Cupos(container) {
     container.innerHTML = `
@@ -431,12 +485,17 @@ export async function renderV2Cupos(container) {
       <!-- KPIs -->
       <div id="cupo-kpis" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px;margin-bottom:16px"></div>
 
-      <!-- Botón desglose -->
-      <div style="margin-bottom:20px">
+      <!-- Botón desglose + exportar -->
+      <div style="margin-bottom:20px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
         <button id="btn-desglose" onclick="window._cupoToggleDesglose()"
           style="padding:10px 20px;border:1.5px solid #6366f1;border-radius:10px;background:transparent;color:#6366f1;
                  font-weight:700;font-size:13px;cursor:pointer;transition:all .2s;display:inline-flex;align-items:center;gap:8px">
           <span id="btn-desglose-icon">▼</span> Ver desglose por gerencia
+        </button>
+        <button onclick="window._cupoExportarDesglose()"
+          style="padding:10px 18px;border:none;border-radius:10px;background:linear-gradient(135deg,#10b981,#059669);color:#fff;
+                 font-weight:700;font-size:13px;cursor:pointer;box-shadow:0 2px 8px rgba(16,185,129,.35);display:inline-flex;align-items:center;gap:8px">
+          📥 Descargar Excel
         </button>
       </div>
 

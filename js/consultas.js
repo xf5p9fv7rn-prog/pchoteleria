@@ -685,47 +685,7 @@ function generarResumenGeneral(datos) {
             </div>` : ''}
         </div>
 
-        <h3 class="section-title">📊 Estado por Edificio</h3>
 
-        <!-- COPC colapsable -->
-        <details style="margin-bottom:10px">
-          <summary style="cursor:pointer;background:linear-gradient(135deg,#1e293b,#334155);color:#fff;
-            padding:10px 16px;border-radius:10px;font-weight:700;font-size:13px;list-style:none;
-            display:flex;justify-content:space-between;align-items:center">
-            <span>🏢 Campamento COPC &nbsp;<span style="opacity:.7;font-size:11px">${copcCam} camas · ${copcLib} disp. · ${copcCam>0?Math.round(copcOcu/copcCam*100):0}% ocup.</span></span>
-            <span style="font-size:11px;opacity:.6">▼ ver</span>
-          </summary>
-          <div class="table-wrap">
-            <table class="informe-table">
-              <thead><tr><th>Edificio</th><th>Total Hab.</th><th>Libres</th><th>Ocupadas</th><th>Camas</th><th>Ocupación</th></tr></thead>
-              <tbody>${copcHTML}</tbody>
-            </table>
-          </div>
-        </details>
-
-        <!-- R-220 colapsable -->
-        ${r220HTML ? `
-        <details style="margin-bottom:10px">
-          <summary style="cursor:pointer;background:linear-gradient(135deg,#312e81,#4338ca);color:#fff;
-            padding:10px 16px;border-radius:10px;font-weight:700;font-size:13px;list-style:none;
-            display:flex;justify-content:space-between;align-items:center">
-            <span>🏗️ Edificio R-220 &nbsp;<span style="opacity:.7;font-size:11px">${r220Cam} camas · ${r220Lib} disp. · ${r220Cam>0?Math.round(r220Ocu/r220Cam*100):0}% ocup.</span></span>
-            <span style="font-size:11px;opacity:.6">▼ ver</span>
-          </summary>
-          <div class="table-wrap">
-            <table class="informe-table">
-              <thead><tr><th>Edificio</th><th>Total Hab.</th><th>Libres</th><th>Ocupadas</th><th>Camas</th><th>Ocupación</th></tr></thead>
-              <tbody>${r220HTML}</tbody>
-            </table>
-          </div>
-        </details>` : ''}
-
-        <!-- Resumen Combinado -->
-        <div style="background:linear-gradient(135deg,#4338ca,#6366f1);border-radius:10px;padding:12px 18px;
-          display:flex;justify-content:space-between;align-items:center;color:#fff;margin-bottom:10px;flex-wrap:wrap;gap:8px">
-          <span style="font-weight:800;font-size:14px">📊 TOTAL COMBINADO COPC + R-220</span>
-          <span style="font-size:13px;opacity:.9">${totCam} camas &middot; ${totLib} disp. &middot; ${totCam>0?Math.round(totOcu/totCam*100):0}% ocupación</span>
-        </div>
 
         ${empresas.length > 0 ? `
         <h3 class="section-title">🏢 Trabajadores por Empresa</h3>

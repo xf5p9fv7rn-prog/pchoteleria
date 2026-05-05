@@ -5,7 +5,7 @@
 import {
     getEdificios, getPabellones, getHabitaciones, getCamas,
     getEmpresas, getAsignacionByCama, doCheckin, doCheckout,
-    buscarTrabajadorPorRut, today
+    buscarTrabajadorPorRut, today, checkConflictoFechas
 } from '../v2-service.js';
 import { abrirPopover, cerrarPopover } from './CheckinPopoverV2.js';
 import { supabase } from '../../supabaseClient.js';
@@ -272,20 +272,26 @@ async function renderGrid() {
           })()}
           <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px">
             ${cs.map(c => {
-              const confirmo = c.estado==='Ocupada' && c.huesped_confirmo;
-              const ocupada  = c.estado==='Ocupada';
-              const bg  = ocupada ? (confirmo ? '#22c55e' : '#ef4444')
+              const confirmo    = c.estado==='Ocupada' && c.huesped_confirmo;
+              const ocupada     = c.estado==='Ocupada';
+              const enRotacion  = ocupada && c.tieneRotacion;
+              const bg  = enRotacion ? '#f97316'
+                        : ocupada ? (confirmo ? '#22c55e' : '#ef4444')
                         : c.estado==='Mantencion' ? '#f59e0b' : '#10b981';
-              const lbl = ocupada ? (confirmo ? '✓' : 'O')
+              const lbl = enRotacion ? '↻'
+                        : ocupada ? (confirmo ? '✓' : 'O')
                         : c.estado==='Mantencion' ? 'M' : 'L';
+              const titleExtra = enRotacion && c.entrante
+                ? ` · Entra: ${c.entrante.nombre} el ${c.entrante.fecha}` : '';
               const infoHTML = ocupada && (c.empresa || c.numero_contrato)
                 ? `<div style="display:flex;flex-direction:column;line-height:1.3">
                      ${c.empresa ? `<span style="font-size:11px;font-weight:700;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:130px">${c.empresa}</span>` : ''}
                      ${c.numero_contrato ? `<span style="font-size:10px;font-family:monospace;color:#6366f1">${c.numero_contrato}</span>` : ''}
+                     ${enRotacion && c.entrante ? `<span style="font-size:9px;color:#f97316;font-weight:700">↻ ${c.entrante.nombre?.split(' ')[0]||''} entra ${c.entrante.fecha}</span>` : ''}
                    </div>`
                 : '';
               return `<div style="display:flex;align-items:center;gap:8px">
-                <button onclick="window._v2iOpenCama(event,'${c.id_cama}')" title="${c.id_cama} — ${c.estado}${confirmo?' · Llegada confirmada':''}"
+                <button onclick="window._v2iOpenCama(event,'${c.id_cama}')" title="${c.id_cama} — ${c.estado}${confirmo?' · Llegada confirmada':''}${titleExtra}"
                   style="width:28px;height:28px;min-width:28px;border-radius:7px;border:none;background:${bg};color:#fff;font-size:11px;font-weight:800;cursor:pointer;transition:transform 0.1s"
                   onmouseover="this.style.transform='scale(1.18)'" onmouseout="this.style.transform='scale(1)'">${lbl}</button>
                 ${infoHTML}
@@ -332,16 +338,29 @@ async function handleCheckin(idCama) {
     if (!rut || !nombre || !empId || !llegada) {
         msg('⚠️ RUT, Nombre, Empresa y Fecha de llegada son obligatorios','#f59e0b'); return;
     }
-    msg('Registrando…','var(--text-muted)');
+
+    // ─ Validar solapamiento de fechas antes de registrar ─
+    msg('Verificando disponibilidad…','var(--text-muted)');
     try {
+        const conflicto = await checkConflictoFechas(idCama, llegada);
+        if (!conflicto.ok) {
+            msg('❌ ' + conflicto.razon, '#ef4444'); return;
+        }
+        const esPreAsignacion = conflicto.esPreAsignacion || false;
+        if (esPreAsignacion) {
+            msg('🔄 Pre-asignando (cama en rotación)…','#f97316');
+        } else {
+            msg('Registrando…','var(--text-muted)');
+        }
         await doCheckin({
             idCama, rutHuesped: rut, nombreHuesped: nombre, empresaId: empId,
             fechaCheckin: llegada, fechaSalidaProgramada: salida||null,
-            numeroContrato: contrato||null, telefono: tel||null
+            numeroContrato: contrato||null, telefono: tel||null,
+            esPreAsignacion
         });
-        msg('✅ Check-in registrado','#10b981');
+        msg(esPreAsignacion ? '🔄 Pre-asignación registrada (entra el ' + llegada + ')' : '✅ Check-in registrado','#10b981');
         if (_camaData[idCama]) _camaData[idCama].estado = 'Ocupada';
-        setTimeout(() => { closeModal(); selectPabellon(_selPabellon); }, 1200);
+        setTimeout(() => { closeModal(); selectPabellon(_selPabellon); }, 1400);
     } catch(e) { msg('❌ '+e.message,'#ef4444'); }
 }
 

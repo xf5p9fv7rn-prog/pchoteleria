@@ -2,12 +2,23 @@
  * v2-dashboard.js — Dashboard de Ocupación V2
  * Consume getReporteOcupacion() del servicio centralizado.
  */
-import { getReporteOcupacion, getAsignacionesActivas } from '../v2-service.js';
+import { getReporteOcupacion, getAsignacionesActivas, ejecutarAutoRotacion, getSinCheckout } from '../v2-service.js';
 import { supabase } from '../../supabaseClient.js';
 
 export async function renderV2Dashboard(container) {
     container.innerHTML = getSkeletonHTML();
     try {
+        // ─ Auto-rotación: ejecutar al cargar (silencioso, no bloquea el render) ─
+        ejecutarAutoRotacion().then(async ({ autoCheckout }) => {
+            if (autoCheckout && autoCheckout.length > 0) {
+                const banner = document.getElementById('v2-rotacion-banner');
+                if (banner) {
+                    banner.style.display = 'flex';
+                    banner.querySelector('[data-count]').textContent = autoCheckout.length;
+                }
+            }
+        }).catch(e => console.warn('[Rotación] Error auto-rotación:', e));
+
         const [{ reporte, totales }, activas, distData] = await Promise.all([
             getReporteOcupacion(),
             getAsignacionesActivas({ limit: 10 }),
@@ -149,6 +160,31 @@ export async function renderV2Dashboard(container) {
             </div>
             <div style="background:#ef4444;color:white;border-radius:8px;padding:6px 14px;font-size:12px;font-weight:700;white-space:nowrap">Ver Camas Perdidas →</div>
           </div>`:''}
+
+          <!-- Banner auto-rotación (se activa si hubo checkouts automáticos hoy) -->
+          <div id="v2-rotacion-banner" style="display:none;background:linear-gradient(135deg,rgba(249,115,22,.10),rgba(249,115,22,.04));
+            border:1.5px solid #fdba74;border-radius:14px;padding:14px 18px;margin-bottom:16px;
+            align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+            <div style="display:flex;align-items:center;gap:12px">
+              <div style="font-size:28px">⚠️</div>
+              <div>
+                <div style="font-weight:800;font-size:15px;color:#c2410c">
+                  <span data-count>0</span> trabajador(es) sin check-out manual hoy
+                </div>
+                <div style="font-size:12px;color:var(--text-muted)">Rotación automática ejecutada · Sus salidas fueron registradas por el sistema</div>
+              </div>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center">
+              <button onclick="window.navigate&&window.navigate('sincheckout')"
+                style="background:#f97316;color:white;border:none;border-radius:8px;padding:6px 14px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">
+                Ver Informe →
+              </button>
+              <button onclick="document.getElementById('v2-rotacion-banner').style.display='none'"
+                style="background:transparent;color:var(--text-muted);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:12px;cursor:pointer">
+                ✕
+              </button>
+            </div>
+          </div>
 
           <!-- Etiquetas empresa activas -->
           ${empresasTag.length>0?`

@@ -61,7 +61,10 @@ export async function getCamas(habitacionId) {
             .order('id_cama');
         if (error) throw error;
         return (data || []).map(c => {
-            const asigActiva = (c.v2_asignaciones || []).find(a => !a.fecha_checkout);
+            const asigs = c.v2_asignaciones || [];
+            const asigActiva   = asigs.find(a => !a.fecha_checkout && a.estado_asignacion === 'activa');
+            const asigEntrante = asigs.find(a => !a.fecha_checkout && a.estado_asignacion === 'pre_asignado')
+                              || asigs.find(a => !a.fecha_checkout && !a.estado_asignacion); // compatibilidad
             return {
                 id_cama:          c.id_cama,
                 habitacion_id:    c.habitacion_id,
@@ -71,6 +74,13 @@ export async function getCamas(habitacionId) {
                 gerencia:         asigActiva?.v2_empresas?.v2_gerencias?.nombre || null,
                 nombre_huesped:   asigActiva?.nombre_huesped || null,
                 numero_contrato:  asigActiva?.numero_contrato || null,
+                // Rotación: trabajador entrante pre-asignado
+                tieneRotacion:    !!asigEntrante,
+                entrante:         asigEntrante ? {
+                    nombre:   asigEntrante.nombre_huesped,
+                    fecha:    asigEntrante.fecha_checkin,
+                    empresa:  asigEntrante.v2_empresas?.nombre || null,
+                } : null,
             };
         });
     } catch(_) {
@@ -96,14 +106,49 @@ export async function getCamasDisponibles(habitacionId) {
 }
 
 export async function getAsignacionByCama(idCama) {
+    // Retorna { actual, entrante } — puede haber 1 activo + 1 pre_asignado
     const { data, error } = await supabase
         .from('v2_asignaciones')
-        .select('id,rut_huesped,nombre_huesped,fecha_checkin,fecha_salida_programada,numero_contrato,telefono,v2_empresas(id,nombre,turno,gerencia_id,v2_gerencias(nombre))')
+        .select('id,rut_huesped,nombre_huesped,fecha_checkin,fecha_salida_programada,numero_contrato,telefono,estado_asignacion,v2_empresas(id,nombre,turno,gerencia_id,v2_gerencias(nombre))')
         .eq('id_cama', idCama)
         .is('fecha_checkout', null)
-        .maybeSingle();
+        .in('estado_asignacion', ['activa', 'pre_asignado'])
+        .order('estado_asignacion'); // 'activa' antes que 'pre_asignado'
     if (error) throw new Error('[v2-service] asignacion by cama: ' + error.message);
-    return data || null;
+    const rows = data || [];
+    return {
+        actual:    rows.find(r => r.estado_asignacion === 'activa')    || null,
+        entrante:  rows.find(r => r.estado_asignacion === 'pre_asignado') || null,
+    };
+}
+
+/** Chequea si una cama tiene conflicto de fechas para una nueva llegada */
+export async function checkConflictoFechas(idCama, fechaLlegadaNueva) {
+    const { data } = await supabase
+        .from('v2_asignaciones')
+        .select('id,nombre_huesped,fecha_salida_programada,estado_asignacion')
+        .eq('id_cama', idCama)
+        .is('fecha_checkout', null)
+        .in('estado_asignacion', ['activa', 'pre_asignado']);
+    const rows = data || [];
+    if (rows.length === 0) return { ok: true, libre: true };
+
+    const llegada = new Date(fechaLlegadaNueva);
+    for (const r of rows) {
+        if (!r.fecha_salida_programada) {
+            return { ok: false, razon: `${r.nombre_huesped} ocupa esta cama sin fecha de salida definida.` };
+        }
+        const salida = new Date(r.fecha_salida_programada);
+        // Conflicto: el nuevo llega ANTES de que salga el actual
+        if (llegada < salida) {
+            return {
+                ok: false,
+                razon: `${r.nombre_huesped} está hasta el ${r.fecha_salida_programada}. El nuevo llegaría el ${fechaLlegadaNueva} — se toparían.`
+            };
+        }
+    }
+    // La nueva llegada es >= a la salida del actual → pre-asignación válida
+    return { ok: true, libre: false, esPreAsignacion: true };
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -224,16 +269,20 @@ export async function crearGerencia(nombre) {
 // ─────────────────────────────────────────────────────────────────
 //  ASIGNACIONES (CHECK-IN / CHECK-OUT)
 // ─────────────────────────────────────────────────────────────────
-export async function doCheckin({ idCama, rutHuesped, nombreHuesped, empresaId, fechaCheckin, fechaSalidaProgramada, numeroContrato, telefono }) {
+export async function doCheckin({ idCama, rutHuesped, nombreHuesped, empresaId, fechaCheckin, fechaSalidaProgramada, numeroContrato, telefono, esPreAsignacion }) {
+    // Estado según si el check-in es para hoy o para fecha futura
+    const hoy = new Date().toISOString().split('T')[0];
+    const estadoAsig = esPreAsignacion ? 'pre_asignado' : 'activa';
     const { error } = await supabase.from('v2_asignaciones').insert({
         id_cama:                 idCama,
         rut_huesped:             rutHuesped,
         nombre_huesped:          nombreHuesped,
         empresa_id:              empresaId,
-        fecha_checkin:           fechaCheckin,
+        fecha_checkin:           fechaCheckin || hoy,
         fecha_salida_programada: fechaSalidaProgramada || null,
         numero_contrato:         numeroContrato || null,
-        telefono:                telefono || null
+        telefono:                telefono || null,
+        estado_asignacion:       estadoAsig
     });
     if (error) throw new Error('[v2-service] checkin: ' + error.message);
 }
@@ -248,8 +297,9 @@ export async function doCheckout(asigId) {
 
 export async function getAsignacionesActivas({ busqueda = null, limit = 50 } = {}) {
     let q = supabase.from('v2_asignaciones')
-        .select('id,rut_huesped,nombre_huesped,id_cama,fecha_checkin,v2_empresas(nombre,turno)')
+        .select('id,rut_huesped,nombre_huesped,id_cama,fecha_checkin,fecha_salida_programada,estado_asignacion,v2_empresas(nombre,turno)')
         .is('fecha_checkout', null)
+        .in('estado_asignacion', ['activa', 'pre_asignado'])
         .order('fecha_checkin', { ascending: false })
         .limit(limit);
     if (busqueda) {
@@ -257,6 +307,98 @@ export async function getAsignacionesActivas({ busqueda = null, limit = 50 } = {
     }
     const { data, error } = await q;
     if (error) throw new Error('[v2-service] asignaciones: ' + error.message);
+    return data || [];
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  ROTACIÓN AUTOMÁTICA DE TURNO
+// ─────────────────────────────────────────────────────────────────
+
+/**
+ * Ejecuta la rotación diaria:
+ * 1. Auto-checkout de trabajadores cuya fecha_salida_programada ya pasó
+ * 2. Activa pre-asignados cuya fecha_checkin llegó
+ * Retorna: { autoCheckout: [], activados: [] }
+ */
+export async function ejecutarAutoRotacion() {
+    const hoy = new Date().toISOString().split('T')[0];
+
+    // PASO 1: Marcar sin_checkout los que debían salir y no lo hicieron
+    const { data: vencidos } = await supabase
+        .from('v2_asignaciones')
+        .select('id,nombre_huesped,id_cama,fecha_salida_programada')
+        .is('fecha_checkout', null)
+        .eq('estado_asignacion', 'activa')
+        .lt('fecha_salida_programada', hoy); // salida programada < hoy
+
+    let autoCheckout = [];
+    if (vencidos && vencidos.length > 0) {
+        const ids = vencidos.map(v => v.id);
+        await supabase.from('v2_asignaciones')
+            .update({
+                fecha_checkout:    hoy,
+                estado_asignacion: 'sin_checkout',
+                auto_checkout:     true
+            })
+            .in('id', ids);
+
+        // Liberar camas de los que tenían fecha_salida_programada sin entrante
+        // (si hay pre_asignado en esa cama, la cama sigue ocupada)
+        const camasConEntrante = new Set();
+        const { data: preAsig } = await supabase
+            .from('v2_asignaciones')
+            .select('id_cama')
+            .is('fecha_checkout', null)
+            .eq('estado_asignacion', 'pre_asignado');
+        (preAsig || []).forEach(a => camasConEntrante.add(a.id_cama));
+
+        for (const v of vencidos) {
+            if (!camasConEntrante.has(v.id_cama)) {
+                await supabase.from('v2_camas')
+                    .update({ estado: 'Disponible' })
+                    .eq('id_cama', v.id_cama);
+            }
+        }
+        autoCheckout = vencidos;
+    }
+
+    // PASO 2: Activar pre-asignados cuya fecha_checkin ya llegó
+    const { data: activables } = await supabase
+        .from('v2_asignaciones')
+        .select('id,nombre_huesped,id_cama,fecha_checkin')
+        .is('fecha_checkout', null)
+        .eq('estado_asignacion', 'pre_asignado')
+        .lte('fecha_checkin', hoy);
+
+    let activados = [];
+    if (activables && activables.length > 0) {
+        const ids = activables.map(a => a.id);
+        await supabase.from('v2_asignaciones')
+            .update({ estado_asignacion: 'activa' })
+            .in('id', ids);
+        // Marcar sus camas como Ocupadas
+        for (const a of activables) {
+            await supabase.from('v2_camas')
+                .update({ estado: 'Ocupada' })
+                .eq('id_cama', a.id_cama);
+        }
+        activados = activables;
+    }
+
+    return { autoCheckout, activados };
+}
+
+/** Trabajadores con auto_checkout = true (no hicieron checkout manual) */
+export async function getSinCheckout({ fechaDesde = null } = {}) {
+    let q = supabase.from('v2_asignaciones')
+        .select('id,nombre_huesped,rut_huesped,id_cama,fecha_salida_programada,fecha_checkout,v2_empresas(nombre)')
+        .eq('auto_checkout', true)
+        .eq('estado_asignacion', 'sin_checkout')
+        .order('fecha_salida_programada', { ascending: false })
+        .limit(200);
+    if (fechaDesde) q = q.gte('fecha_salida_programada', fechaDesde);
+    const { data, error } = await q;
+    if (error) throw new Error('[v2-service] sin_checkout: ' + error.message);
     return data || [];
 }
 

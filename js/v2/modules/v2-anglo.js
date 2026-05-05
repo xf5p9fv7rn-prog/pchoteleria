@@ -12,59 +12,69 @@ function colorLlave(turno = '') {
 
 let _timer = null, _rut = null, _turno = '', _registro = [], _incidencias = [], _tabActual = 'registro';
 
+// Fecha por defecto: hoy + 4 días
+function _fecha4dias() {
+    const d = new Date(); d.setDate(d.getDate() + 4);
+    return d.toISOString().split('T')[0];
+}
+
 export async function renderV2Anglo(container) {
     container.innerHTML = `
     <div style="max-width:900px;margin:0 auto">
 
-      <!-- BÚSQUEDA -->
+      <!-- FILA PRINCIPAL: RUT + HAB + FECHA + BOTÓN todo junto -->
       <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:16px;padding:20px;margin-bottom:16px">
-        <label style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;display:block;margin-bottom:8px">
-          ⛏️ Buscar trabajador Anglo por RUT
+        <label style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;display:block;margin-bottom:10px">
+          ⛏️ Asignación Rápida Anglo
         </label>
-        <input id="anglo-rut" type="text" placeholder="Ingresa el RUT (solo números)"
-          style="width:100%;padding:12px 16px;border-radius:12px;border:1.5px solid var(--border);
-                 background:var(--bg);color:var(--text-primary);font-size:16px;outline:none;box-sizing:border-box"
-          oninput="window._angloSearch(this.value)">
 
-        <!-- Card trabajador -->
-        <div id="anglo-card" style="display:none;margin-top:14px;padding:14px;
-             background:rgba(249,115,22,.06);border:1.5px solid #f97316;border-radius:14px">
-          <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
-            <div>
-              <div id="ac-nombre" style="font-size:17px;font-weight:800"></div>
-              <div id="ac-cargo" style="font-size:13px;color:#f97316;font-weight:600;margin-top:2px"></div>
-              <div id="ac-gerencia" style="font-size:12px;color:var(--text-muted)"></div>
-              <div id="ac-turno" style="font-size:12px;color:var(--text-muted)"></div>
-            </div>
-            <div id="ac-llave" style="align-self:center"></div>
+        <!-- Fila de inputs: RUT | HAB | Fecha | Botón -->
+        <div style="display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:10px;align-items:end">
+          <div>
+            <label style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;display:block;margin-bottom:5px">RUT Trabajador</label>
+            <input id="anglo-rut" type="text" placeholder="ej: 12345678" autocomplete="off"
+              style="width:100%;padding:11px 14px;border-radius:10px;border:1.5px solid var(--border);
+                     background:var(--bg);color:var(--text-primary);font-size:15px;outline:none;box-sizing:border-box"
+              oninput="window._angloSearch(this.value)"
+              onkeydown="window._angloKey(event,'rut')">
           </div>
-          <div id="ac-alertas" style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap"></div>
-        </div>
-
-        <!-- Formulario -->
-        <div id="anglo-form" style="display:none;margin-top:14px;padding:16px;
-             background:var(--bg-card);border:1px solid var(--border);border-radius:14px">
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
-            <div>
-              <label style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;display:block;margin-bottom:5px">N° Habitación</label>
-              <input id="anglo-hab" type="text" placeholder="Ej: 4119"
-                style="width:100%;padding:10px;border-radius:10px;border:1.5px solid var(--border);
-                       background:var(--bg);color:var(--text-primary);font-size:14px;outline:none;box-sizing:border-box">
-            </div>
-            <div>
-              <label style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;display:block;margin-bottom:5px">Fecha salida programada</label>
-              <input id="anglo-salida" type="date"
-                style="width:100%;padding:10px;border-radius:10px;border:1.5px solid var(--border);
-                       background:var(--bg);color:var(--text-primary);font-size:14px;outline:none;box-sizing:border-box">
-            </div>
+          <div>
+            <label style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;display:block;margin-bottom:5px">N° Habitación</label>
+            <input id="anglo-hab" type="text" placeholder="Ej: 4119" autocomplete="off"
+              style="width:100%;padding:11px 14px;border-radius:10px;border:1.5px solid var(--border);
+                     background:var(--bg);color:var(--text-primary);font-size:15px;outline:none;box-sizing:border-box"
+              onkeydown="window._angloKey(event,'hab')">
           </div>
-          <button onclick="window._angloAsignar()"
-            style="background:#f97316;color:#fff;border:none;border-radius:10px;padding:12px;
-                   font-weight:800;font-size:14px;cursor:pointer;width:100%">
-            ✅ Cargar en Habitación
+          <div>
+            <label style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;display:block;margin-bottom:5px">Salida</label>
+            <input id="anglo-salida" type="date"
+              style="width:100%;padding:11px 10px;border-radius:10px;border:1.5px solid var(--border);
+                     background:var(--bg);color:var(--text-primary);font-size:13px;outline:none;box-sizing:border-box"
+              onkeydown="window._angloKey(event,'salida')">
+          </div>
+          <button id="anglo-btn" onclick="window._angloAsignar()" disabled
+            style="padding:11px 18px;border-radius:10px;border:none;background:#ccc;color:#fff;
+                   font-weight:800;font-size:13px;cursor:not-allowed;white-space:nowrap;transition:.15s">
+            ✅ Cargar
           </button>
-          <div id="anglo-msg" style="display:none;margin-top:10px;padding:10px;border-radius:8px;font-size:13px;font-weight:600"></div>
         </div>
+
+        <!-- Info del trabajador encontrado -->
+        <div id="anglo-card" style="display:none;margin-top:12px;padding:12px;
+             background:rgba(249,115,22,.06);border:1.5px solid #f97316;border-radius:12px">
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+            <div>
+              <span id="ac-nombre" style="font-size:16px;font-weight:800"></span>
+              <span id="ac-llave" style="margin-left:10px"></span>
+            </div>
+            <div id="ac-alertas" style="display:flex;gap:6px;flex-wrap:wrap"></div>
+          </div>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:4px">
+            <span id="ac-cargo"></span> · <span id="ac-gerencia"></span> · <span id="ac-turno"></span>
+          </div>
+        </div>
+
+        <div id="anglo-msg" style="display:none;margin-top:10px;padding:10px;border-radius:8px;font-size:13px;font-weight:600"></div>
       </div>
 
       <!-- TABS -->
@@ -84,22 +94,55 @@ export async function renderV2Anglo(container) {
       <div id="tab-incidencias" style="display:none"><div id="anglo-incid-lista" style="display:flex;flex-direction:column;gap:10px"><p style="color:var(--text-muted);text-align:center;padding:30px">Cargando…</p></div></div>
     </div>`;
 
+    // Fecha default +4 días
+    const salidaEl = document.getElementById('anglo-salida');
+    if (salidaEl) salidaEl.value = _fecha4dias();
+
     _bindGlobals();
     await Promise.all([_cargarRegistro(), _cargarIncidencias()]);
 }
 
 // ─── GLOBALS ──────────────────────────────────────────────────────
 function _bindGlobals() {
-    window._angloSearch = v => { clearTimeout(_timer); const r = v.replace(/\D/g,''); if (r.length < 6) { _hideCard(); return; } _timer = setTimeout(() => _buscar(r), 350); };
+    window._angloSearch = v => {
+        clearTimeout(_timer);
+        const r = v.replace(/\D/g,'');
+        if (r.length < 6) { _hideCard(); return; }
+        _timer = setTimeout(() => _buscar(r), 350);
+    };
     window._angloAsignar = _asignar;
     window._angloTab = _switchTab;
     window._angloFiltrar = _filtrar;
     window._angloSinLlave = _sinLlave;
     window._angloBaja = _bajaAnticipada;
     window._angloDevuelta = _devuelta;
+    // Navegación teclado: Tab/ArrowRight avanza, ArrowLeft retrocede, Enter = Cargar
+    window._angloKey = (e, campo) => {
+        if (e.key === 'Enter') { e.preventDefault(); window._angloAsignar(); return; }
+        if (e.key === 'ArrowRight' || (e.key === 'Tab' && !e.shiftKey)) {
+            e.preventDefault();
+            const orden = ['anglo-rut','anglo-hab','anglo-salida'];
+            const idx = orden.indexOf(campo === 'rut' ? 'anglo-rut' : campo === 'hab' ? 'anglo-hab' : 'anglo-salida');
+            const next = document.getElementById(orden[idx+1]);
+            if (next) next.focus();
+        }
+        if (e.key === 'ArrowLeft' || (e.key === 'Tab' && e.shiftKey)) {
+            e.preventDefault();
+            const orden = ['anglo-rut','anglo-hab','anglo-salida'];
+            const idx = orden.indexOf(campo === 'rut' ? 'anglo-rut' : campo === 'hab' ? 'anglo-hab' : 'anglo-salida');
+            const prev = document.getElementById(orden[idx-1]);
+            if (prev) prev.focus();
+        }
+    };
 }
 
-function _hideCard() { document.getElementById('anglo-card').style.display='none'; document.getElementById('anglo-form').style.display='none'; _rut=null; }
+function _hideCard() {
+    const card = document.getElementById('anglo-card');
+    if (card) card.style.display='none';
+    const btn = document.getElementById('anglo-btn');
+    if (btn) { btn.disabled=true; btn.style.background='#ccc'; btn.style.cursor='not-allowed'; }
+    _rut=null;
+}
 
 // ─── BUSCAR RUT ───────────────────────────────────────────────────
 async function _buscar(rut) {
@@ -107,15 +150,23 @@ async function _buscar(rut) {
     if (!data) { _hideCard(); return; }
     _rut = data.rut; _turno = data.turno || '';
     document.getElementById('ac-nombre').textContent = data.nombre;
-    document.getElementById('ac-cargo').textContent = '💼 ' + (data.cargo || '—');
-    document.getElementById('ac-gerencia').textContent = '🏢 ' + (data.gerencia || '—');
-    document.getElementById('ac-turno').textContent = '🔄 ' + (_turno || '—');
+    document.getElementById('ac-cargo').textContent = data.cargo || '—';
+    document.getElementById('ac-gerencia').textContent = data.gerencia || '—';
+    document.getElementById('ac-turno').textContent = _turno || '—';
+    // Solo mostrar llave si es turno de día (verde)
     const llave = colorLlave(_turno);
     document.getElementById('ac-llave').innerHTML = llave === 'verde'
-        ? `<span style="background:#dcfce7;color:#166534;border-radius:8px;padding:5px 12px;font-weight:800;font-size:13px">🟢 Llave Verde · Día</span>`
-        : `<span style="background:#fee2e2;color:#991b1b;border-radius:8px;padding:5px 12px;font-weight:800;font-size:13px">🔴 Llave Roja · Noche</span>`;
+        ? `<span style="background:#dcfce7;color:#166534;border-radius:8px;padding:3px 10px;font-weight:800;font-size:12px">🟢 Día</span>`
+        : `<span style="background:#1e293b;color:#94a3b8;border-radius:8px;padding:3px 10px;font-weight:700;font-size:12px">🌙 Noche</span>`;
     document.getElementById('anglo-card').style.display = 'block';
-    document.getElementById('anglo-form').style.display = 'block';
+    // Activar botón
+    const btn = document.getElementById('anglo-btn');
+    if (btn) { btn.disabled=false; btn.style.background='#f97316'; btn.style.cursor='pointer'; }
+    // Fecha por defecto +4 si aún no fue modificada por el usuario
+    const salidaEl = document.getElementById('anglo-salida');
+    if (salidaEl && !salidaEl.dataset.modified) salidaEl.value = _fecha4dias();
+    // Mover foco al campo habitación
+    setTimeout(() => document.getElementById('anglo-hab')?.focus(), 50);
 
     // Alertas históricas
     const [{ count: sl }, { count: ba }] = await Promise.all([
@@ -124,9 +175,9 @@ async function _buscar(rut) {
     ]);
     const al = document.getElementById('ac-alertas');
     al.innerHTML = '';
-    if (sl > 0) al.innerHTML += `<span style="background:#fee2e2;color:#991b1b;border-radius:8px;padding:4px 10px;font-size:12px;font-weight:800">🔑 ${sl}x sin devolver llave</span>`;
-    if (ba > 0) al.innerHTML += `<span style="background:#fef3c7;color:#92400e;border-radius:8px;padding:4px 10px;font-size:12px;font-weight:800">🏃 ${ba}x bajó anticipado</span>`;
-    if (!sl && !ba) al.innerHTML = '<span style="background:#dcfce7;color:#166534;border-radius:8px;padding:4px 10px;font-size:12px;font-weight:700">✅ Sin incidencias</span>';
+    if (sl > 0) al.innerHTML += `<span style="background:#fee2e2;color:#991b1b;border-radius:8px;padding:3px 10px;font-size:12px;font-weight:800">🔑 ${sl}x sin llave</span>`;
+    if (ba > 0) al.innerHTML += `<span style="background:#fef3c7;color:#92400e;border-radius:8px;padding:3px 10px;font-size:12px;font-weight:800">🏃 ${ba}x bajó antes</span>`;
+    if (!sl && !ba) al.innerHTML = '<span style="background:#dcfce7;color:#166534;border-radius:8px;padding:3px 10px;font-size:12px;font-weight:700">✅ Sin incidencias</span>';
 }
 
 // ─── ASIGNAR HABITACIÓN (integra con sistema de camas) ─────────────
@@ -150,13 +201,23 @@ async function _asignar() {
     if (!camas?.length) { msg('❌ No hay camas disponibles en HAB ' + hab, false); return; }
     const camaId = camas[0].id_cama;
 
-    // 3. Buscar o crear empresa "Anglo American" en el sistema
-    let { data: emp } = await supabase.from('v2_empresas').select('id').ilike('nombre','Anglo%').maybeSingle();
-    if (!emp) {
-        const { data: newEmp } = await supabase.from('v2_empresas').insert({ nombre: 'Anglo American', turno: '4x4' }).select('id').single();
-        emp = newEmp;
+    // 3. Buscar empresa "Anglo American" (o crear si no existe)
+    let empresaId = null;
+    try {
+        const { data: empList } = await supabase.from('v2_empresas').select('id').ilike('nombre','%Anglo%').limit(1);
+        if (empList?.length) {
+            empresaId = empList[0].id;
+        } else {
+            // Crear la empresa Anglo American
+            const { data: newEmp, error: empErr } = await supabase
+                .from('v2_empresas').insert({ nombre: 'Anglo American', turno: '4x4' }).select('id').single();
+            if (empErr) throw new Error('No se pudo crear empresa Anglo: ' + empErr.message);
+            empresaId = newEmp?.id;
+        }
+    } catch(e) {
+        msg('❌ ' + e.message, false); return;
     }
-    const empresaId = emp?.id;
+    if (!empresaId) { msg('❌ No se pudo obtener empresa Anglo American', false); return; }
 
     // 4. Check-in en el sistema principal (aparece en Infraestructura)
     const hoy = new Date().toISOString().split('T')[0];

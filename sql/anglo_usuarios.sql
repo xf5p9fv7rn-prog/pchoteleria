@@ -84,3 +84,8 @@ DROP POLICY IF EXISTS "anglo_incid_all"      ON v2_incidencias_anglo;
 CREATE POLICY "anglo_usuarios_read"  ON v2_usuarios_anglo     FOR ALL USING (TRUE) WITH CHECK (TRUE);
 CREATE POLICY "anglo_asig_all"       ON v2_asignaciones_anglo FOR ALL USING (TRUE) WITH CHECK (TRUE);
 CREATE POLICY "anglo_incid_all"      ON v2_incidencias_anglo  FOR ALL USING (TRUE) WITH CHECK (TRUE);
+
+-- Agregar columna color_llave (verde/rojo) a asignaciones
+ALTER TABLE v2_asignaciones_anglo
+  ADD COLUMN IF NOT EXISTS color_llave TEXT DEFAULT 'verde'
+    CHECK (color_llave IN ('verde','rojo'));

@@ -6,6 +6,7 @@
 import { openDB, getAll, getById, put, remove, seedDemoData, cleanupExpiredAssignments, getExpiredBeds, confirmCheckout, ensureDefaultUsers, ensureAramarkReservations, ensureAllRooms, freeAllRoomRestrictions, procesarColaDeSincronizacion, preloadAllData, initRealtimeSync, startPeriodicCloudRefresh, autoPromoteNextOccupants, purgeSyncQueue } from './db.js';
 import { showToast, watchOnlineStatus } from './utils.js';
 import { renderV2Infraestructura } from './v2/modules/v2-infraestructura.js';
+import { renderV2Anglo }          from './v2/modules/v2-anglo.js';
 import { renderV2Dashboard } from './v2/modules/v2-dashboard.js';
 import { renderV2Buscador } from './v2/modules/v2-buscador.js';
 import { renderV2Checkin } from './v2/modules/v2-checkin.js';
@@ -44,6 +45,7 @@ let currentRoute = 'v2dashboard';
 const ROUTES = {
     // ── V2 (Sistema Principal) ────────────────────────────────
     v2dashboard:      { label: 'Dashboard',               icon: '📊', render: renderV2Dashboard },
+    v2anglo:          { label: 'Asignación Anglo',          icon: '⛏️🗝️', render: renderV2Anglo },
     v2infraestructura:{ label: 'Infraestructura',          icon: '🏛️', render: renderV2Infraestructura },
     v2censo:          { label: 'Censo Administrativo',     icon: '📅', render: renderV2Censo },
     v2checkin:        { label: 'Check-in / Check-out',     icon: '🛎️', render: renderV2Checkin },

@@ -306,10 +306,10 @@ async function renderCheckout(pop, idCama, onSuccess) {
 async function renderCheckin(pop, idCama, onSuccess) {
     const body = document.getElementById(ID + '-body');
 
-    // Fetch empresas de v2_cupos_gerencias (fuente real de contratos)
+    // Fetch empresas de v2_cupos_gerencias — incluye empresa_id si existe
     const { data: cuposData } = await supabase
         .from('v2_cupos_gerencias')
-        .select('id, empresa, gerencia, numero_contrato')
+        .select('id, empresa, gerencia, numero_contrato, empresa_id')
         .order('empresa');
 
     // Fetch también v2_empresas para tener el empresa_id para el INSERT
@@ -350,6 +350,7 @@ async function renderCheckin(pop, idCama, onSuccess) {
             <option value="">— Seleccionar empresa —</option>
             ${cupos.map(c => `<option value="${c.id}"
               data-empresa="${c.empresa || ''}"
+              data-empresa-id="${c.empresa_id || ''}"
               data-gerencia="${c.gerencia || ''}"
               data-contrato="${c.numero_contrato || ''}"
             >${c.empresa || '—'}${c.numero_contrato ? ' · ' + c.numero_contrato : ''}</option>`).join('')}
@@ -429,8 +430,8 @@ async function renderCheckin(pop, idCama, onSuccess) {
         const salida  = val('checkin-salida');
         const contrato= val('checkin-contrato');
 
-        // Resolver empresa_id — búsqueda server-side tolerante a mayúsculas/tildes
-        const cupoOpt      = document.getElementById('checkin-emp-cupo')?.selectedOptions[0];
+        // Resolver empresa_id — 3 capas de fallback
+        const cupoOpt       = document.getElementById('checkin-emp-cupo')?.selectedOptions[0];
         const empresaNombre = (cupoOpt?.dataset?.empresa || '').trim();
 
         if (!rut || !nombre || !cupoOpt?.value || !llegada) {
@@ -439,28 +440,37 @@ async function renderCheckin(pop, idCama, onSuccess) {
 
         setMsg('Verificando empresa…', '#6b7280');
         let empId = null;
-        if (empresaNombre) {
-            // 1. Buscar en v2_empresas con ilike (insensible a mayúsculas)
+
+        // Capa 1: empresa_id directo desde v2_cupos_gerencias (si existe la columna)
+        const cupoEmpId = cupoOpt?.dataset?.empresaId;
+        if (cupoEmpId && cupoEmpId !== 'null' && cupoEmpId !== '') {
+            empId = cupoEmpId;
+        }
+
+        // Capa 2: búsqueda en v2_empresas con wildcards (contiene)
+        if (!empId && empresaNombre) {
+            const palabras = empresaNombre.split(' ').slice(0, 2).join(' ');
             const { data: empSearch } = await supabase
                 .from('v2_empresas')
                 .select('id')
-                .ilike('nombre', empresaNombre)
+                .ilike('nombre', `%${palabras}%`)
                 .limit(1);
             empId = empSearch?.[0]?.id ?? null;
+        }
 
-            // 2. Si no existe, crear la empresa automáticamente
-            if (!empId) {
-                const { data: newEmp } = await supabase
-                    .from('v2_empresas')
-                    .insert([{ nombre: empresaNombre }])
-                    .select('id')
-                    .single();
-                empId = newEmp?.id ?? null;
-            }
+        // Capa 3: crear la empresa si no existe
+        if (!empId && empresaNombre) {
+            const { data: newEmp, error: errEmp } = await supabase
+                .from('v2_empresas')
+                .insert([{ nombre: empresaNombre }])
+                .select('id')
+                .single();
+            if (!errEmp) empId = newEmp?.id ?? null;
         }
 
         if (!empId) {
-            setMsg('❌ No se pudo resolver la empresa. Verifica v2_empresas.', '#ef4444'); return;
+            setMsg('❌ No se resolvió la empresa. Ve a V2 Empresas y agrega: ' + empresaNombre, '#ef4444');
+            return;
         }
 
 

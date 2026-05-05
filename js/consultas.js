@@ -518,8 +518,8 @@ function generarResumenGeneral(datos) {
 
     // Helper KPI compacto — con key muestra 🔍 y activa modal desglose
     const kpiMini = (icon, label, value, color, bg = '#f8fafc', key = null) => {
-        const click = key ? `onclick="window._constanzaModal('${key}')" title="Ver desglose por edificio"` : '';
-        const cursor = key ? 'cursor:pointer;' : '';
+        const click = key ? `onclick="window._constanzaModal('${key}',this)" title="Ver desglose por edificio"` : '';
+        const cursor = key ? 'cursor:pointer;transition:box-shadow .15s,transform .1s;' : '';
         return `<div ${click} style="${cursor}background:${bg};border-radius:12px;padding:12px;border-top:3px solid ${color};text-align:center">
           <div style="font-size:18px">${icon}${key ? '<span style="float:right;font-size:9px;color:#94a3b8">🔍</span>' : ''}</div>
           <div style="font-size:22px;font-weight:800;color:${color}">${value}</div>
@@ -560,20 +560,30 @@ function generarResumenGeneral(datos) {
         'Ocupadas':      { copc:copcOcu,  r220:r220Ocu,  unit:'' },
         '% Ocupación':   { copc:pctCOPC,  r220:pctR220,  unit:'%', isAvg:true },
     };
-    window._constanzaModal = (key) => {
+    window._constanzaModal = (key, el) => {
         const d = window._constanzaBreakdowns?.[key]; if(!d) return;
         const existing = document.getElementById('constanza-kpi-modal');
         if(existing) existing.remove();
+        // Quitar active previo y marcar el nuevo
+        document.querySelectorAll('[data-cz-active]').forEach(e => {
+            e.removeAttribute('data-cz-active'); e.style.boxShadow=''; e.style.transform='';
+        });
+        if(el) {
+            el.setAttribute('data-cz-active','1');
+            el.style.boxShadow='0 0 0 3px #6366f1, 0 4px 20px rgba(99,102,241,.35)';
+            el.style.transform='scale(0.97)';
+        }
+        const clearActive = () => { if(el){el.style.boxShadow='';el.style.transform='';el.removeAttribute('data-cz-active');} };
         const copcV = d.isAvg ? d.copc+d.unit : d.copc.toLocaleString('es-CL')+d.unit;
         const r220V = d.isAvg ? d.r220+d.unit : d.r220.toLocaleString('es-CL')+d.unit;
         const tot   = d.isAvg ? Math.round((d.copc*0.898+d.r220*0.102))+d.unit : (d.copc+d.r220).toLocaleString('es-CL')+d.unit;
         const overlay = document.createElement('div');
         overlay.id = 'constanza-kpi-modal';
-        overlay.innerHTML = `<div onclick="this.parentElement.remove()" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:flex-end;justify-content:center">
+        overlay.innerHTML = `<div onclick="this.parentElement.remove();" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:flex-end;justify-content:center">
           <div onclick="event.stopPropagation()" style="background:#fff;border-radius:20px 20px 0 0;padding:28px;width:100%;max-width:480px;box-shadow:0 -8px 40px rgba(0,0,0,.25)">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
               <div style="font-size:17px;font-weight:800;color:#1e293b">🔍 Desglose: ${key}</div>
-              <button onclick="document.getElementById('constanza-kpi-modal').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#94a3b8">×</button>
+              <button onclick="document.getElementById('constanza-kpi-modal').remove();" style="background:none;border:none;font-size:20px;cursor:pointer;color:#94a3b8">×</button>
             </div>
             <div style="display:grid;gap:10px">
               <div style="display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:12px;background:#f8fafc;border-radius:12px;padding:14px">
@@ -595,6 +605,9 @@ function generarResumenGeneral(datos) {
           </div>
         </div>`;
         document.body.appendChild(overlay);
+        // Limpiar active al cerrar
+        overlay.querySelector('div').addEventListener('click', () => clearActive());
+        overlay.querySelector('button').addEventListener('click', () => clearActive());
     };
 
     let empresasHTML = '';

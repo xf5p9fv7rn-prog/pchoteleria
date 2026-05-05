@@ -309,8 +309,8 @@ export async function renderV2Dashboard(container) {
 }
 
 function kpi(icon, label, value, color, key=null) {
-    const clickable = key ? `onclick="window._dashModal('${key}')" title="Ver desglose por edificio"` : '';
-    const hover = key ? ';cursor:pointer;transition:box-shadow .15s' : '';
+    const clickable = key ? `onclick="window._dashModal('${key}',this)" title="Ver desglose por edificio"` : '';
+    const hover = key ? ';cursor:pointer;transition:box-shadow .15s,transform .1s' : '';
     return `<div ${clickable} style="background:var(--bg-card);border:1px solid var(--border);border-radius:14px;padding:16px;border-top:3px solid ${color}${hover}">
       <div style="font-size:20px;margin-bottom:6px">${icon}${key?'<span style="float:right;font-size:11px;color:var(--text-muted);margin-top:2px">🔍</span>':''}</div>
       <div style="font-size:26px;font-weight:800;color:${color}">${value}</div>
@@ -318,16 +318,30 @@ function kpi(icon, label, value, color, key=null) {
     </div>`;
 }
 
-window._dashModal = (key) => {
+window._dashModal = (key, el) => {
     const d = window._dashBreakdowns?.[key];
     if (!d) return;
     const modal = document.getElementById('dash-modal');
     if (!modal) return;
+    // Quitar active previo
+    document.querySelectorAll('[data-dash-kpi-active]').forEach(e => {
+        e.removeAttribute('data-dash-kpi-active');
+        e.style.boxShadow = ''; e.style.transform = '';
+    });
+    // Marcar el card presionado
+    if (el) {
+        el.setAttribute('data-dash-kpi-active','1');
+        el.style.boxShadow = '0 0 0 3px #6366f1, 0 4px 20px rgba(99,102,241,.35)';
+        el.style.transform = 'scale(0.97)';
+    }
+    const clearActive = () => {
+        if (el) { el.style.boxShadow=''; el.style.transform=''; el.removeAttribute('data-dash-kpi-active'); }
+    };
     document.getElementById('dash-modal-title').textContent = '🔍 Desglose: ' + key;
     const copcVal = d.isAvg ? d.copc + d.unit : d.copc.toLocaleString('es-CL') + d.unit;
     const r220Val = d.isAvg ? d.r220 + d.unit : d.r220.toLocaleString('es-CL') + d.unit;
     const total   = d.isAvg
-        ? Math.round((d.copc * 0.898 + d.r220 * 0.102)) + d.unit  // ponderado aprox
+        ? Math.round((d.copc * 0.898 + d.r220 * 0.102)) + d.unit
         : (d.copc + d.r220).toLocaleString('es-CL') + d.unit;
     document.getElementById('dash-modal-body').innerHTML = `
       <div style="display:grid;gap:10px">
@@ -347,6 +361,8 @@ window._dashModal = (key) => {
           <div style="font-size:24px;font-weight:900;color:#6366f1">${total}</div>
         </div>
       </div>`;
+    modal.onclick = (e) => { if(e.target===modal){modal.style.display='none';clearActive();} };
+    document.querySelector('#dash-modal button').onclick = () => { modal.style.display='none'; clearActive(); };
     modal.style.display = 'flex';
 };
 

@@ -969,23 +969,23 @@
                         showErrorMessage: true, errorTitle: 'Turno inválido', error: 'Seleccione de la lista'
                     };
 
-                    // Col K: Sistema Turno (dropdown) — 4x3, 4x4, Turno H, 7x7, 8x6, 14x14
+                    // Col K: Sistema Turno — 4x3, Turno H, 8x6, 7x7, 14x14
                     var cellK = ws.getRow(row).getCell(11);
                     styleData(cellK);
                     ws.getRow(row).getCell(11).dataValidation = {
                         type: 'list', allowBlank: true, showDropDown: false,
-                        formulae: ['"4x3,4x4,Turno H,7x7,8x6,14x14"'],
+                        formulae: ['"4x3,Turno H,8x6,7x7,14x14"'],
                         showErrorMessage: true, errorTitle: 'Sistema inválido', error: 'Seleccione de la lista'
                     };
 
-                    // Col L: Tipo Turno (dropdown) — Turno Dia / Turno Noche
+                    // Col L: Tipo Turno — Dia / Noche
                     var cellL = ws.getRow(row).getCell(12);
                     styleData(cellL);
-                    cellL.value = 'Turno Dia';
+                    cellL.value = 'Dia';
                     ws.getRow(row).getCell(12).dataValidation = {
                         type: 'list', allowBlank: true, showDropDown: false,
-                        formulae: ['"Turno Dia,Turno Noche"'],
-                        showErrorMessage: true, errorTitle: 'Tipo inválido', error: 'Seleccione: Turno Dia o Turno Noche'
+                        formulae: ['"Dia,Noche"'],
+                        showErrorMessage: true, errorTitle: 'Tipo inválido', error: 'Seleccione: Dia o Noche'
                     };
 
                     // Col M: Estado (dropdown)
@@ -1241,6 +1241,17 @@
             }
             if (!window.workers || window.workers.length === 0) {
                 alert('⚠️ No hay trabajadores cargados.\n\nDescargue la plantilla, complétela y cárguela aquí.');
+                return;
+            }
+
+            // ─ Bloquear envío si hay RUTs inválidos ─
+            const rutsInvalidos = window.workers.filter(w => w.rut && !w.rutValido);
+            if (rutsInvalidos.length > 0) {
+                alert(
+                    `❌ RUT inválido detectado en ${rutsInvalidos.length} trabajador(es):\n\n` +
+                    rutsInvalidos.map(w => `  • ${w.name} — RUT: ${w.rut}`).join('\n') +
+                    `\n\nCorrige el dígito verificador antes de enviar.`
+                );
                 return;
             }
 

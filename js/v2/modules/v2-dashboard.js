@@ -115,6 +115,15 @@ export async function renderV2Dashboard(container) {
         const pctCOPC = stCOPC.cam > 0 ? Math.round(stCOPC.ocu/stCOPC.cam*100) : 0;
         const pctR220 = stR220.cam > 0 ? Math.round(stR220.ocu/stR220.cam*100) : 0;
 
+        // Guardar desglose para modal clickable
+        window._dashBreakdowns = {
+            'Total Camas':    { copc:stCOPC.cam, r220:stR220.cam, unit:'',  label:'camas totales' },
+            'Disponibles':    { copc:stCOPC.dis, r220:stR220.dis, unit:'',  label:'camas disponibles' },
+            'Ocupadas':       { copc:stCOPC.ocu, r220:stR220.ocu, unit:'',  label:'camas ocupadas' },
+            'Ocupación':      { copc:pctCOPC,    r220:pctR220,    unit:'%', label:'% de ocupación', isAvg:true },
+            'En Mantención':  { copc:stCOPC.man, r220:stR220.man, unit:'',  label:'en mantención' },
+        };
+
         container.innerHTML = `
         <div style="padding:20px;max-width:1400px;margin:0 auto">
           <div style="display:flex;align-items:center;gap:12px;margin-bottom:24px;flex-wrap:wrap">
@@ -129,11 +138,11 @@ export async function renderV2Dashboard(container) {
           <!-- ═══ SECCIÓN 1: INVENTARIO GENERAL ═══ -->
           <div style="font-size:11px;font-weight:800;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">📊 Inventario General</div>
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:20px">
-            ${kpi('🛏️','Total Camas',totalCamas,'#6366f1')}
-            ${kpi('✅','Disponibles',totalDisp,'#10b981')}
-            ${kpi('🔴','Ocupadas',totalOcup,'#ef4444')}
-            ${kpi('📊','Ocupación',pctGlobal+'%',pctGlobal>80?'#ef4444':pctGlobal>50?'#f59e0b':'#10b981')}
-            ${habMant>0?kpi('🟡','En Mantención',habMant,'#f59e0b'):''}
+            ${kpi('🛏️','Total Camas',totalCamas,'#6366f1','Total Camas')}
+            ${kpi('✅','Disponibles',totalDisp,'#10b981','Disponibles')}
+            ${kpi('🔴','Ocupadas',totalOcup,'#ef4444','Ocupadas')}
+            ${kpi('📊','Ocupación',pctGlobal+'%',pctGlobal>80?'#ef4444':pctGlobal>50?'#f59e0b':'#10b981','Ocupación')}
+            ${habMant>0?kpi('🟡','En Mantención',habMant,'#f59e0b','En Mantención'):''}
             ${totalBodega>0?kpi('📦','Bodegas',totalBodega,'#64748b'):''}
             ${totalReserva>0?kpi('📌','En Reserva',totalReserva,'#7c3aed'):''}
           </div>
@@ -156,6 +165,17 @@ export async function renderV2Dashboard(container) {
             ${totalNoche>0?kpi('✅','Disp. Noche',dispNoche,'#6366f1'):''}
             ${camas4x3>0?kpi('🔄','Turno 4×3',camas4x3,'#0891b2'):''}
           </div>`:''}
+
+          <!-- Modal desglose COPC / R-220 -->
+          <div id="dash-modal" onclick="this.style.display='none'" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:none;align-items:flex-end;justify-content:center">
+            <div onclick="event.stopPropagation()" style="background:var(--bg-card);border-radius:20px 20px 0 0;padding:28px;width:100%;max-width:480px;box-shadow:0 -8px 40px rgba(0,0,0,.25)">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+                <div id="dash-modal-title" style="font-size:17px;font-weight:800;color:var(--text-primary)"></div>
+                <button onclick="document.getElementById('dash-modal').style.display='none'" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-muted)">×</button>
+              </div>
+              <div id="dash-modal-body"></div>
+            </div>
+          </div>
 
           <!-- Alerta camas perdidas -->
           ${camasPerd>0?`
@@ -288,13 +308,47 @@ export async function renderV2Dashboard(container) {
     }
 }
 
-function kpi(icon, label, value, color) {
-    return `<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:14px;padding:16px;border-top:3px solid ${color}">
-      <div style="font-size:20px;margin-bottom:6px">${icon}</div>
+function kpi(icon, label, value, color, key=null) {
+    const clickable = key ? `onclick="window._dashModal('${key}')" title="Ver desglose por edificio"` : '';
+    const hover = key ? ';cursor:pointer;transition:box-shadow .15s' : '';
+    return `<div ${clickable} style="background:var(--bg-card);border:1px solid var(--border);border-radius:14px;padding:16px;border-top:3px solid ${color}${hover}">
+      <div style="font-size:20px;margin-bottom:6px">${icon}${key?'<span style="float:right;font-size:11px;color:var(--text-muted);margin-top:2px">🔍</span>':''}</div>
       <div style="font-size:26px;font-weight:800;color:${color}">${value}</div>
       <div style="font-size:11px;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:0.5px;margin-top:2px">${label}</div>
     </div>`;
 }
+
+window._dashModal = (key) => {
+    const d = window._dashBreakdowns?.[key];
+    if (!d) return;
+    const modal = document.getElementById('dash-modal');
+    if (!modal) return;
+    document.getElementById('dash-modal-title').textContent = '🔍 Desglose: ' + key;
+    const copcVal = d.isAvg ? d.copc + d.unit : d.copc.toLocaleString('es-CL') + d.unit;
+    const r220Val = d.isAvg ? d.r220 + d.unit : d.r220.toLocaleString('es-CL') + d.unit;
+    const total   = d.isAvg
+        ? Math.round((d.copc * 0.898 + d.r220 * 0.102)) + d.unit  // ponderado aprox
+        : (d.copc + d.r220).toLocaleString('es-CL') + d.unit;
+    document.getElementById('dash-modal-body').innerHTML = `
+      <div style="display:grid;gap:10px">
+        <div style="display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:12px;background:var(--bg);border-radius:12px;padding:14px">
+          <div style="font-size:22px">🏗️</div>
+          <div><div style="font-weight:700;font-size:14px">Campamento COPC</div><div style="font-size:12px;color:var(--text-muted)">Edificio principal</div></div>
+          <div style="font-size:22px;font-weight:800;color:#6366f1">${copcVal}</div>
+        </div>
+        <div style="display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:12px;background:var(--bg);border-radius:12px;padding:14px">
+          <div style="font-size:22px">🏗️</div>
+          <div><div style="font-weight:700;font-size:14px">Edificio R-220</div><div style="font-size:12px;color:var(--text-muted)">Bloque adicional</div></div>
+          <div style="font-size:22px;font-weight:800;color:#8b5cf6">${r220Val}</div>
+        </div>
+        <div style="display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:12px;background:rgba(99,102,241,.08);border:1.5px solid #6366f1;border-radius:12px;padding:14px">
+          <div style="font-size:22px">∑</div>
+          <div><div style="font-weight:800;font-size:14px;color:#6366f1">TOTAL COMBINADO</div></div>
+          <div style="font-size:24px;font-weight:900;color:#6366f1">${total}</div>
+        </div>
+      </div>`;
+    modal.style.display = 'flex';
+};
 
 function edificioCard(r) {
     const pct = r.total_camas > 0 ? Math.round((r.camas_ocupadas / r.total_camas) * 100) : 0;

@@ -516,13 +516,16 @@ function generarResumenGeneral(datos) {
     const solicTotal = requests.length;
     const pctOcup = stats.totalCamas > 0 ? Math.round((stats.camasOcupadas / stats.totalCamas) * 100) : 0;
 
-    // Helper KPI compacto para la fila dashboard
-    const kpiMini = (icon, label, value, color, bg = '#f8fafc') =>
-        `<div style="background:${bg};border-radius:12px;padding:12px;border-top:3px solid ${color};text-align:center">
-          <div style="font-size:18px">${icon}</div>
+    // Helper KPI compacto — con key muestra 🔍 y activa modal desglose
+    const kpiMini = (icon, label, value, color, bg = '#f8fafc', key = null) => {
+        const click = key ? `onclick="window._constanzaModal('${key}')" title="Ver desglose por edificio"` : '';
+        const cursor = key ? 'cursor:pointer;' : '';
+        return `<div ${click} style="${cursor}background:${bg};border-radius:12px;padding:12px;border-top:3px solid ${color};text-align:center">
+          <div style="font-size:18px">${icon}${key ? '<span style="float:right;font-size:9px;color:#94a3b8">🔍</span>' : ''}</div>
           <div style="font-size:22px;font-weight:800;color:${color}">${value}</div>
           <div style="font-size:10px;color:#64748b;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-top:2px">${label}</div>
          </div>`;
+    };
 
     let copcHTML = '', r220HTML = '', copcCam=0,copcOcu=0,copcLib=0, r220Cam=0,r220Ocu=0,r220Lib=0;
     const edSorted = Object.entries(stats.porEdificio).sort((a, b) => a[0].localeCompare(b[0]));
@@ -546,6 +549,53 @@ function generarResumenGeneral(datos) {
         }
     });
     const totCam=copcCam+r220Cam, totOcu=copcOcu+r220Ocu, totLib=copcLib+r220Lib;
+    const pctCOPC = copcCam>0 ? Math.round(copcOcu/copcCam*100) : 0;
+    const pctR220 = r220Cam>0 ? Math.round(r220Ocu/r220Cam*100) : 0;
+    const totalDisp = totLib;
+
+    // Guardar desglose para modal (igual que en v2-dashboard)
+    window._constanzaBreakdowns = {
+        'Total Camas':   { copc:copcCam,  r220:r220Cam,  unit:'' },
+        'Disponibles':   { copc:copcLib,  r220:r220Lib,  unit:'' },
+        'Ocupadas':      { copc:copcOcu,  r220:r220Ocu,  unit:'' },
+        '% Ocupación':   { copc:pctCOPC,  r220:pctR220,  unit:'%', isAvg:true },
+    };
+    window._constanzaModal = (key) => {
+        const d = window._constanzaBreakdowns?.[key]; if(!d) return;
+        const existing = document.getElementById('constanza-kpi-modal');
+        if(existing) existing.remove();
+        const copcV = d.isAvg ? d.copc+d.unit : d.copc.toLocaleString('es-CL')+d.unit;
+        const r220V = d.isAvg ? d.r220+d.unit : d.r220.toLocaleString('es-CL')+d.unit;
+        const tot   = d.isAvg ? Math.round((d.copc*0.898+d.r220*0.102))+d.unit : (d.copc+d.r220).toLocaleString('es-CL')+d.unit;
+        const overlay = document.createElement('div');
+        overlay.id = 'constanza-kpi-modal';
+        overlay.innerHTML = `<div onclick="this.parentElement.remove()" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:flex-end;justify-content:center">
+          <div onclick="event.stopPropagation()" style="background:#fff;border-radius:20px 20px 0 0;padding:28px;width:100%;max-width:480px;box-shadow:0 -8px 40px rgba(0,0,0,.25)">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+              <div style="font-size:17px;font-weight:800;color:#1e293b">🔍 Desglose: ${key}</div>
+              <button onclick="document.getElementById('constanza-kpi-modal').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#94a3b8">×</button>
+            </div>
+            <div style="display:grid;gap:10px">
+              <div style="display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:12px;background:#f8fafc;border-radius:12px;padding:14px">
+                <div style="font-size:22px">🏗️</div>
+                <div><div style="font-weight:700;font-size:14px">Campamento COPC</div><div style="font-size:12px;color:#94a3b8">Edificio principal</div></div>
+                <div style="font-size:22px;font-weight:800;color:#6366f1">${copcV}</div>
+              </div>
+              <div style="display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:12px;background:#f8fafc;border-radius:12px;padding:14px">
+                <div style="font-size:22px">🏗️</div>
+                <div><div style="font-weight:700;font-size:14px">Edificio R-220</div><div style="font-size:12px;color:#94a3b8">Bloque adicional</div></div>
+                <div style="font-size:22px;font-weight:800;color:#8b5cf6">${r220V}</div>
+              </div>
+              <div style="display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:12px;background:#eef2ff;border:1.5px solid #6366f1;border-radius:12px;padding:14px">
+                <div style="font-size:22px">∑</div>
+                <div><div style="font-weight:800;font-size:14px;color:#6366f1">TOTAL COMBINADO</div></div>
+                <div style="font-size:24px;font-weight:900;color:#6366f1">${tot}</div>
+              </div>
+            </div>
+          </div>
+        </div>`;
+        document.body.appendChild(overlay);
+    };
 
     let empresasHTML = '';
     empresas.slice(0, 10).forEach(([emp, count]) => {
@@ -569,10 +619,10 @@ function generarResumenGeneral(datos) {
 
           <!-- Fila 1: inventario general -->
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:8px;margin-bottom:8px">
-            ${kpiMini('🛏️','Total Camas', stats.totalCamas,'#6366f1')}
-            ${kpiMini('✅','Disponibles', stats.totalCamas - stats.camasOcupadas,'#10b981')}
-            ${kpiMini('🔴','Ocupadas', stats.camasOcupadas,'#ef4444')}
-            ${kpiMini('📊','% Ocupación', pctOcup+'%', pctOcup>80?'#ef4444':pctOcup>50?'#f59e0b':'#10b981')}
+            ${kpiMini('🛏️','Total Camas',  stats.totalCamas,'#6366f1','#f8fafc','Total Camas')}
+            ${kpiMini('✅','Disponibles',    stats.totalCamas - stats.camasOcupadas,'#10b981','#f8fafc','Disponibles')}
+            ${kpiMini('🔴','Ocupadas',       stats.camasOcupadas,'#ef4444','#f8fafc','Ocupadas')}
+            ${kpiMini('📊','% Ocupación',    pctOcup+'%', pctOcup>80?'#ef4444':pctOcup>50?'#f59e0b':'#10b981','#f8fafc','% Ocupación')}
             ${angloStats ? kpiMini('🟡','Hab. Mantención', angloStats.habMant,'#f59e0b') : ''}
             ${angloStats?.totalBodega > 0 ? kpiMini('📦','Bodegas', angloStats.totalBodega,'#64748b') : ''}
             ${angloStats?.totalReserva > 0 ? kpiMini('📌','En Reserva', angloStats.totalReserva,'#7c3aed') : ''}

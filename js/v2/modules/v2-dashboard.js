@@ -172,32 +172,35 @@ export async function renderV2Dashboard(container) {
             </div>
           </div>
 
-          <!-- Por Edificio: COPC colapsable -->
-          <details open style="margin-bottom:12px">
-            <summary style="cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between;
-              background:linear-gradient(135deg,#1e293b,#334155);color:#fff;padding:12px 18px;
-              border-radius:12px;font-weight:700;font-size:14px;user-select:none">
-              <span>🏢 Campamento COPC &nbsp;<span style="opacity:.7;font-size:12px;font-weight:500">${stCOPC.cam} camas &middot; ${stCOPC.dis} disp. &middot; ${pctCOPC}% ocup.</span></span>
-              <span style="font-size:12px;opacity:.6">▼ ver detalle</span>
-            </summary>
-            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;padding:14px 0 4px">
-              ${reporteCOPC.map(r => edificioCard(r)).join('')}
-            </div>
-          </details>
+          <!-- Por Edificio: COPC + R-220 lado a lado -->
+          <div style="display:grid;grid-template-columns:${reporteR220.length > 0 ? '1fr 1fr' : '1fr'};gap:12px;margin-bottom:12px;align-items:start">
 
-          <!-- Por Edificio: R-220 colapsable -->
-          ${reporteR220.length > 0 ? `
-          <details style="margin-bottom:12px">
-            <summary style="cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between;
-              background:linear-gradient(135deg,#312e81,#4338ca);color:#fff;padding:12px 18px;
-              border-radius:12px;font-weight:700;font-size:14px;user-select:none">
-              <span>🏗️ Edificio R-220 &nbsp;<span style="opacity:.7;font-size:12px;font-weight:500">${stR220.cam} camas &middot; ${stR220.dis} disp. &middot; ${pctR220}% ocup.</span></span>
-              <span style="font-size:12px;opacity:.6">▼ ver detalle</span>
-            </summary>
-            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;padding:14px 0 4px">
-              ${reporteR220.map(r => edificioCard(r)).join('')}
-            </div>
-          </details>` : ''}
+            <details open>
+              <summary style="cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between;
+                background:linear-gradient(135deg,#1e293b,#334155);color:#fff;padding:12px 18px;
+                border-radius:12px;font-weight:700;font-size:13px;user-select:none">
+                <span>🏢 COPC &nbsp;<span style="opacity:.7;font-size:11px;font-weight:500">${stCOPC.cam} camas · ${stCOPC.dis} disp. · ${pctCOPC}%</span></span>
+                <span style="font-size:11px;opacity:.6">▼</span>
+              </summary>
+              <div style="display:grid;grid-template-columns:1fr;gap:10px;padding:12px 0 4px">
+                ${reporteCOPC.map(r => edificioCard(r)).join('')}
+              </div>
+            </details>
+
+            ${reporteR220.length > 0 ? `
+            <details open>
+              <summary style="cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between;
+                background:linear-gradient(135deg,#312e81,#4338ca);color:#fff;padding:12px 18px;
+                border-radius:12px;font-weight:700;font-size:13px;user-select:none">
+                <span>🏗️ R-220 &nbsp;<span style="opacity:.7;font-size:11px;font-weight:500">${stR220.cam} camas · ${stR220.dis} disp. · ${pctR220}%</span></span>
+                <span style="font-size:11px;opacity:.6">▼</span>
+              </summary>
+              <div style="display:grid;grid-template-columns:1fr;gap:10px;padding:12px 0 4px">
+                ${reporteR220.map(r => edificioCard(r)).join('')}
+              </div>
+            </details>` : ''}
+
+          </div>
 
           <!-- Últimos Check-ins colapsable -->
           <details style="margin-bottom:12px">

@@ -118,19 +118,19 @@ function _bindGlobals() {
     window._angloDevuelta = _devuelta;
     // Navegación teclado: Tab/ArrowRight avanza, ArrowLeft retrocede, Enter = Cargar
     window._angloKey = (e, campo) => {
-        if (e.key === 'Enter') { e.preventDefault(); window._angloAsignar(); return; }
+        if (e.key === 'Enter' || e.key === 'ArrowDown') { e.preventDefault(); window._angloAsignar(); return; }
         if (e.key === 'ArrowRight' || (e.key === 'Tab' && !e.shiftKey)) {
             e.preventDefault();
             const orden = ['anglo-rut','anglo-hab','anglo-salida'];
-            const idx = orden.indexOf(campo === 'rut' ? 'anglo-rut' : campo === 'hab' ? 'anglo-hab' : 'anglo-salida');
-            const next = document.getElementById(orden[idx+1]);
+            const id = campo==='rut'?'anglo-rut':campo==='hab'?'anglo-hab':'anglo-salida';
+            const next = document.getElementById(orden[orden.indexOf(id)+1]);
             if (next) next.focus();
         }
         if (e.key === 'ArrowLeft' || (e.key === 'Tab' && e.shiftKey)) {
             e.preventDefault();
             const orden = ['anglo-rut','anglo-hab','anglo-salida'];
-            const idx = orden.indexOf(campo === 'rut' ? 'anglo-rut' : campo === 'hab' ? 'anglo-hab' : 'anglo-salida');
-            const prev = document.getElementById(orden[idx-1]);
+            const id = campo==='rut'?'anglo-rut':campo==='hab'?'anglo-hab':'anglo-salida';
+            const prev = document.getElementById(orden[orden.indexOf(id)-1]);
             if (prev) prev.focus();
         }
     };
@@ -162,7 +162,7 @@ async function _buscar(rut) {
     // Activar botón
     const btn = document.getElementById('anglo-btn');
     if (btn) { btn.disabled=false; btn.style.background='#f97316'; btn.style.cursor='pointer'; }
-    // Fecha por defecto +4 si aún no fue modificada por el usuario
+    // Fecha por defecto +4 si aún no fue modificada
     const salidaEl = document.getElementById('anglo-salida');
     if (salidaEl && !salidaEl.dataset.modified) salidaEl.value = _fecha4dias();
     // Mover foco al campo habitación
@@ -196,10 +196,22 @@ async function _asignar() {
     if (!habs?.length) { msg('❌ Habitación ' + hab + ' no encontrada en el sistema', false); return; }
     const habId = habs[0].id_custom;
 
-    // 2. Buscar primera cama disponible en esa habitación
-    const { data: camas } = await supabase.from('v2_camas').select('id_cama').eq('habitacion_id', habId).eq('estado','Disponible').limit(1);
-    if (!camas?.length) { msg('❌ No hay camas disponibles en HAB ' + hab, false); return; }
-    const camaId = camas[0].id_cama;
+    // 2. Seleccionar cama según turno: CAMA 1 = Día (verde), CAMA 2 = Noche (rojo)
+    const esNoche = colorLlave(_turno) === 'rojo';
+    // Obtener todas las camas de la habitación ordenadas
+    const { data: todasCamas } = await supabase.from('v2_camas').select('id_cama,estado').eq('habitacion_id', habId).order('id_cama');
+    if (!todasCamas?.length) { msg('❌ No hay camas en HAB ' + hab, false); return; }
+    // Preferir cama 1 (índice 0) para día, cama 2 (índice 1) para noche
+    let camaId = null;
+    const camaPreferida = todasCamas[esNoche ? 1 : 0] || todasCamas[0]; // fallback a la primera
+    if (camaPreferida?.estado === 'Disponible') {
+        camaId = camaPreferida.id_cama;
+    } else {
+        // Si la preferida está ocupada, buscar cualquier disponible
+        const libre = todasCamas.find(c => c.estado === 'Disponible');
+        if (!libre) { msg('❌ No hay camas disponibles en HAB ' + hab, false); return; }
+        camaId = libre.id_cama;
+    }
 
     // 3. Buscar empresa "Anglo American" (o crear si no existe)
     let empresaId = null;
@@ -222,8 +234,13 @@ async function _asignar() {
     // 4. Check-in en el sistema principal (aparece en Infraestructura)
     const hoy = new Date().toISOString().split('T')[0];
     try {
-        await doCheckin({ idCama: camaId, rutHuesped: _rut, nombreHuesped: document.getElementById('ac-nombre').textContent,
+        await doCheckin({ idCama: camaId, rutHuesped: _rut,
+            nombreHuesped: document.getElementById('ac-nombre').textContent,
             empresaId, fechaCheckin: hoy, fechaSalidaProgramada: salida || null, esPreAsignacion: false });
+        // Marcar como confirmado (verde) inmediatamente
+        await supabase.from('v2_asignaciones')
+            .update({ huesped_confirmo: true })
+            .eq('id_cama', camaId).is('fecha_checkout', null);
     } catch (e) { msg('❌ ' + e.message, false); return; }
 
     // 5. Actualizar estado cama a Ocupada

@@ -151,6 +151,19 @@ async function renderCheckout(pop, idCama, onSuccess) {
         🚪 Registrar Check-out
       </button>
 
+      ${ (asig.v2_empresas?.nombre || '').toLowerCase().includes('anglo') ? `
+      <!-- Botones Anglo -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
+        <button id="${ID}-btn-sinllave"
+          style="background:linear-gradient(135deg,#dc2626,#b91c1c);color:white;border:none;border-radius:12px;padding:11px;font-size:12px;font-weight:700;cursor:pointer">
+          🔑 No entregó llave
+        </button>
+        <button id="${ID}-btn-baja"
+          style="background:linear-gradient(135deg,#d97706,#b45309);color:white;border:none;border-radius:12px;padding:11px;font-size:12px;font-weight:700;cursor:pointer">
+          🏃 Bajada anticipada
+        </button>
+      </div>` : ''}
+
       <!-- Panel de transferencia (oculto) -->
       <div id="${ID}-transfer-panel" style="display:none;margin-top:12px;border-top:1px solid #e5e7eb;padding-top:12px">
         <div style="font-size:13px;font-weight:700;color:#374151;margin-bottom:10px">📦 Seleccionar cama destino</div>
@@ -201,6 +214,34 @@ async function renderCheckout(pop, idCama, onSuccess) {
         setMsg('✅ Check-out registrado', '#10b981');
         setTimeout(() => { cerrarPopover(); onSuccess?.('checkout', idCama); }, 1000);
     });
+
+    // ── Botones Anglo ────────────────────────────────────────────────────────
+    const btnSinLlave = document.getElementById(ID + '-btn-sinllave');
+    const btnBaja     = document.getElementById(ID + '-btn-baja');
+    if (btnSinLlave) {
+        btnSinLlave.addEventListener('click', async () => {
+            if (!confirm(`¿Registrar que ${asig.nombre_huesped} NO entregó la llave?`)) return;
+            await supabase.from('v2_incidencias_anglo').insert({
+                rut: asig.rut_huesped,
+                tipo: 'sin_llave',
+                fecha: new Date().toISOString().split('T')[0],
+                observacion: `Desde modal habitación cama ${idCama}`
+            });
+            setMsg('🔑 Incidencia "Sin llave" registrada', '#dc2626');
+        });
+    }
+    if (btnBaja) {
+        btnBaja.addEventListener('click', async () => {
+            if (!confirm(`¿Registrar bajada anticipada de ${asig.nombre_huesped}?`)) return;
+            await supabase.from('v2_incidencias_anglo').insert({
+                rut: asig.rut_huesped,
+                tipo: 'bajo_anticipado',
+                fecha: new Date().toISOString().split('T')[0],
+                observacion: `Desde modal habitación cama ${idCama}`
+            });
+            setMsg('🏃 Incidencia "Bajada anticipada" registrada', '#d97706');
+        });
+    }
 
     // ── Eliminar ────────────────────────────────────────────────────────────
     document.getElementById(ID + '-btn-eliminar').addEventListener('click', () => {

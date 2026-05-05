@@ -909,9 +909,7 @@
 
                 // ─── FILAS 6+: 30 FILAS EDITABLES ────────────────────────────────
                 var FILAS = 30;
-                var shiftOpts_A = '"7x7,8x6,14x14,Otro"';
-                var shiftOpts_B = '"4x3,Otro"';
-                var shiftOpts = isA ? shiftOpts_A : shiftOpts_B;
+                var shiftOpts = '"4x3,4x4,Turno H,7x7,8x6,14x14"';
 
                 for (var row = 6; row <= 5 + FILAS; row++) {
                     ws.getRow(row).height = 20;
@@ -964,31 +962,30 @@
                     // Col J: Nombre Turno (dropdown)
                     var cellJ = ws.getRow(row).getCell(10);
                     styleData(cellJ);
-                    if (isA) cellJ.value = '7x7';
-                    else cellJ.value = '4x3';
+                    cellJ.value = isA ? '7x7' : '4x3';
                     ws.getRow(row).getCell(10).dataValidation = {
                         type: 'list', allowBlank: true, showDropDown: false,
                         formulae: [shiftOpts],
                         showErrorMessage: true, errorTitle: 'Turno inválido', error: 'Seleccione de la lista'
                     };
 
-                    // Col K: Sistema Turno (dropdown)
+                    // Col K: Sistema Turno (dropdown) — 4x3, 4x4, Turno H, 7x7, 8x6, 14x14
                     var cellK = ws.getRow(row).getCell(11);
                     styleData(cellK);
                     ws.getRow(row).getCell(11).dataValidation = {
                         type: 'list', allowBlank: true, showDropDown: false,
-                        formulae: ['"Sistema A,Sistema B,Sistema C,Otro"'],
-                        showErrorMessage: false
+                        formulae: ['"4x3,4x4,Turno H,7x7,8x6,14x14"'],
+                        showErrorMessage: true, errorTitle: 'Sistema inválido', error: 'Seleccione de la lista'
                     };
 
-                    // Col L: Tipo Turno (dropdown)
+                    // Col L: Tipo Turno (dropdown) — Turno Dia / Turno Noche
                     var cellL = ws.getRow(row).getCell(12);
                     styleData(cellL);
-                    cellL.value = 'Dia';
+                    cellL.value = 'Turno Dia';
                     ws.getRow(row).getCell(12).dataValidation = {
                         type: 'list', allowBlank: true, showDropDown: false,
-                        formulae: ['"Dia,Noche,Mixto"'],
-                        showErrorMessage: true, errorTitle: 'Tipo inválido', error: 'Seleccione: Dia, Noche o Mixto'
+                        formulae: ['"Turno Dia,Turno Noche"'],
+                        showErrorMessage: true, errorTitle: 'Tipo inválido', error: 'Seleccione: Turno Dia o Turno Noche'
                     };
 
                     // Col M: Estado (dropdown)
@@ -1013,14 +1010,15 @@
                     cellO.numFmt = 'yyyy-mm-dd';
                     cellO.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF5F5' } };
 
-                    // Col P: Sexo (dropdown)
+                    // Col P: Sexo (dropdown) — F=Femenino, M=Masculino
                     var cellP = ws.getRow(row).getCell(16);
                     styleData(cellP);
                     ws.getRow(row).getCell(16).dataValidation = {
                         type: 'list', allowBlank: true, showDropDown: false,
-                        formulae: ['"M,F"'],
-                        showErrorMessage: true, errorTitle: 'Sexo inválido', error: 'Ingrese M (Masculino) o F (Femenino)'
+                        formulae: ['"F,M"'],
+                        showErrorMessage: true, errorTitle: 'Sexo inválido', error: 'F = Femenino · M = Masculino'
                     };
+                    cellP.note = { texts: [{ text: 'F = Femenino\nM = Masculino', font: { size: 9 } }] };
 
                     // Col Q: Observación
                     styleData(ws.getRow(row).getCell(17));
@@ -1111,7 +1109,26 @@
                     const _normGender = g => { if (!g) return null; const u = String(g).toUpperCase().trim(); return (u === 'F' || u === 'FEMENINO' || u === 'FEM') ? 'F' : (u === 'M' || u === 'MASCULINO' || u === 'MAS') ? 'M' : null; };
                     const _normRut = r => r ? String(r).replace(/\./g, '').trim().toUpperCase() : null;
 
-                    const workers = jsonData.slice(dataStart + 1).map(row => {
+                    // ─ Validación dígito verificador RUT chileno ─
+                    const _validarRut = (rut) => {
+                        if (!rut) return false;
+                        const clean = String(rut).replace(/[^0-9kK]/g, '').toUpperCase();
+                        if (clean.length < 2) return false;
+                        const dv = clean.slice(-1);
+                        const num = clean.slice(0, -1);
+                        if (!num) return false;
+                        let sum = 0, mul = 2;
+                        for (let j = num.length - 1; j >= 0; j--) {
+                            sum += parseInt(num[j]) * mul;
+                            mul = mul === 7 ? 2 : mul + 1;
+                        }
+                        const calc = 11 - (sum % 11);
+                        const expected = calc === 11 ? '0' : calc === 10 ? 'K' : String(calc);
+                        return dv === expected;
+                    };
+
+                    // CORRECIÓN BUG: slice(dataStart) NO +1 — el +1 saltaba el primer trabajador
+                    const workers = jsonData.slice(dataStart).map(row => {
                         if (!row || row.length < 6) return null;
                         const nombre = String(row[5] || '').trim();
                         if (!nombre || nombre === 'NombreHuesped' || nombre === 'NOMBRE COMPLETO HUÉSPED') return null;
@@ -1126,17 +1143,18 @@
                             legalName: row[4],
                             name: nombre,
                             rut: _normRut(row[6]),
+                            rutValido: _validarRut(_normRut(row[6])),
                             contact: row[7],
-                            assignedRoom: habSolicitada,   // null si vacío → auto-asignación
-                            hab_solicitada: habSolicitada,   // alias para el motor V2
+                            assignedRoom: habSolicitada,
+                            hab_solicitada: habSolicitada,
                             shiftName: row[9],
                             shiftSystem: row[10],
                             shiftType: row[11],
                             status: row[12],
                             arrivalDate: fmt(row[13]),
                             departureDate: fmt(row[14]),
-                            sex: _normGender(row[15]),  // normalizado M/F/null
-                            gender: _normGender(row[15]),  // alias para el motor
+                            sex: _normGender(row[15]),
+                            gender: _normGender(row[15]),
                             observation: row[16] || ''
                         };
                     }).filter(x => x !== null && x.name);
@@ -1186,18 +1204,21 @@
             } else {
                 badge.style.display = 'none';
             }
-            document.getElementById('worker-list').innerHTML = window.workers.map(w => `
+            document.getElementById('worker-list').innerHTML = window.workers.map(w => {
+                const rutAlert = w.rut && !w.rutValido
+                    ? `<span style="background:#fee2e2;color:#b91c1c;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;margin-left:6px">RUT inválido ⚠️</span>` : '';
+                return `
                 <div class="worker-item">
                     <div>
                         <div class="worker-name">${w.name}</div>
-                        <div class="worker-meta">${w.rut || '-'} · ${w.legalName || ''}</div>
+                        <div class="worker-meta">${w.rut || '-'}${rutAlert} · ${w.legalName || ''}</div>
                     </div>
                     <div class="worker-dates">
                         <div class="worker-arrival">📅 ${w.arrivalDate || '-'}</div>
                         <div class="worker-departure">↩ ${w.departureDate || '-'}</div>
                     </div>
-                </div>
-            `).join('');
+                </div>`;
+            }).join('');
             document.getElementById('count').textContent = window.workers.length;
             document.getElementById('worker-preview').style.display = 'block';
             document.getElementById('submit-btn').disabled = false;

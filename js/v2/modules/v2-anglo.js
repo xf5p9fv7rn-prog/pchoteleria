@@ -49,6 +49,41 @@ export async function renderV2Anglo(container) {
       </div>
       <div id="a-alertas" style="display:flex;gap:6px;flex-wrap:wrap"></div>
     </div>
+
+    <!-- Nuevo trabajador (RUT no encontrado) -->
+    <div id="a-nuevo" style="display:none;margin-top:12px;padding:14px;background:rgba(99,102,241,.06);border:1.5px solid #6366f1;border-radius:12px">
+      <div style="font-size:13px;font-weight:700;color:#6366f1;margin-bottom:10px">👤 RUT no encontrado — Registrar nuevo trabajador</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+        <div>
+          <label style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;display:block;margin-bottom:4px">Nombre completo *</label>
+          <input id="an-nombre" type="text" placeholder="Juan Pérez García" autocomplete="off"
+            style="width:100%;padding:9px 12px;border-radius:9px;border:1.5px solid var(--border);background:var(--bg);color:var(--text-primary);font-size:13px;outline:none;box-sizing:border-box">
+        </div>
+        <div>
+          <label style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;display:block;margin-bottom:4px">Cargo</label>
+          <input id="an-cargo" type="text" placeholder="Operador, Supervisor..." autocomplete="off"
+            style="width:100%;padding:9px 12px;border-radius:9px;border:1.5px solid var(--border);background:var(--bg);color:var(--text-primary);font-size:13px;outline:none;box-sizing:border-box">
+        </div>
+        <div>
+          <label style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;display:block;margin-bottom:4px">Gerencia</label>
+          <input id="an-gerencia" type="text" placeholder="Gerencia Mina LB..." autocomplete="off"
+            style="width:100%;padding:9px 12px;border-radius:9px;border:1.5px solid var(--border);background:var(--bg);color:var(--text-primary);font-size:13px;outline:none;box-sizing:border-box">
+        </div>
+        <div>
+          <label style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;display:block;margin-bottom:4px">Turno</label>
+          <select id="an-turno" style="width:100%;padding:9px 12px;border-radius:9px;border:1.5px solid var(--border);background:var(--bg);color:var(--text-primary);font-size:13px;outline:none;box-sizing:border-box">
+            <option value="LB 4x4 Turno AB (puro) G4">4x4 Turno AB (Día)</option>
+            <option value="LB 4x4 Turno CD (puro) G4">4x4 Turno CD (Noche)</option>
+            <option value="5x2 Administrativo">5x2 Administrativo</option>
+            <option value="Otro">Otro</option>
+          </select>
+        </div>
+      </div>
+      <button onclick="window._aRegistrarNuevo()"
+        style="background:#6366f1;color:#fff;border:none;border-radius:9px;padding:10px 20px;font-weight:800;font-size:13px;cursor:pointer">
+        💾 Guardar y continuar
+      </button>
+    </div>
     <div id="a-msg" style="display:none;margin-top:10px;padding:9px 14px;border-radius:8px;font-size:13px;font-weight:600"></div>
   </div>
 
@@ -88,6 +123,7 @@ function _bindGlobals() {
     window._aSearch  = v => { clearTimeout(_timer); const r=v.replace(/\D/g,''); if(r.length<6){_hideCard();return;} _timer=setTimeout(()=>_buscar(r),350); };
     window._aAgregar = _agregar;
     window._aCargarTodos = _cargarTodos;
+    window._aRegistrarNuevo = _registrarNuevo;
     window._aTab     = _switchTab;
     window._aFiltrar = _filtrar;
     window._aSinLlave= _sinLlave;
@@ -105,8 +141,24 @@ function _bindGlobals() {
 
 function _hideCard() {
     const c=document.getElementById('a-card'); if(c)c.style.display='none';
+    const n=document.getElementById('a-nuevo'); if(n)n.style.display='none';
     const b=document.getElementById('a-btn-add'); if(b){b.disabled=true;b.style.background='#ccc';b.style.cursor='not-allowed';}
     _rut=null; _nombre=''; _turno='';
+}
+
+// ── REGISTRAR NUEVO TRABAJADOR ────────────────────────────────────────────
+async function _registrarNuevo() {
+    const rut = document.getElementById('ar').value.replace(/\D/g,'');
+    const nombre = document.getElementById('an-nombre').value.trim();
+    const cargo = document.getElementById('an-cargo').value.trim();
+    const gerencia = document.getElementById('an-gerencia').value.trim();
+    const turno = document.getElementById('an-turno').value;
+    if (!rut || !nombre) { _msg('⚠️ Completa al menos RUT y Nombre',false); return; }
+    const {error} = await supabase.from('v2_usuarios_anglo').insert({rut, nombre, cargo:cargo||null, gerencia:gerencia||null, turno});
+    if (error) { _msg('❌ Error al guardar: '+error.message, false); return; }
+    // Ocultar formulario y cargar el nuevo trabajador normalmente
+    document.getElementById('a-nuevo').style.display='none';
+    await _buscar(rut);
 }
 
 function _msg(t,ok) {
@@ -120,7 +172,20 @@ function _msg(t,ok) {
 // ── BUSCAR RUT ────────────────────────────────────────────────────────────────
 async function _buscar(rut) {
     const {data} = await supabase.from('v2_usuarios_anglo').select('*').eq('rut',rut).maybeSingle();
-    if (!data) { _hideCard(); return; }
+    const nuevoEl = document.getElementById('a-nuevo');
+    if (!data) {
+        _hideCard();
+        // Mostrar formulario de nuevo trabajador
+        if (nuevoEl) {
+            nuevoEl.style.display='block';
+            document.getElementById('an-nombre').value='';
+            document.getElementById('an-cargo').value='';
+            document.getElementById('an-gerencia').value='';
+            setTimeout(()=>document.getElementById('an-nombre')?.focus(),50);
+        }
+        return;
+    }
+    if (nuevoEl) nuevoEl.style.display='none';
     _rut=data.rut; _nombre=data.nombre; _turno=data.turno||'';
     const llave=colorLlave(_turno);
     document.getElementById('a-nombre').textContent=data.nombre;

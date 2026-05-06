@@ -1,4 +1,5 @@
-const CACHE_NAME = 'v2-purge-fix-6';
+const CACHE_NAME = 'v2-purge-fix-7';
+
 
 const STATIC_ASSETS = [
   '/',

@@ -166,17 +166,6 @@ export async function renderV2Dashboard(container) {
             ${camas4x3>0?kpi('🔄','Turno 4×3',camas4x3,'#0891b2'):''}
           </div>`:''}
 
-          <!-- Modal desglose COPC / R-220 -->
-          <div id="dash-modal" onclick="this.style.display='none'" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:none;align-items:flex-end;justify-content:center">
-            <div onclick="event.stopPropagation()" style="background:var(--bg-card);border-radius:20px 20px 0 0;padding:28px;width:100%;max-width:480px;box-shadow:0 -8px 40px rgba(0,0,0,.25)">
-              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
-                <div id="dash-modal-title" style="font-size:17px;font-weight:800;color:var(--text-primary)"></div>
-                <button onclick="document.getElementById('dash-modal').style.display='none'" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-muted)">×</button>
-              </div>
-              <div id="dash-modal-body"></div>
-            </div>
-          </div>
-
           <!-- Alerta camas perdidas -->
           ${camasPerd>0?`
           <div onclick="window.navigate('v2camasperdidas')" style="cursor:pointer;background:linear-gradient(135deg,rgba(239,68,68,.08),rgba(239,68,68,.04));border:1.5px solid #fca5a5;border-radius:14px;padding:14px 18px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
@@ -321,8 +310,9 @@ function kpi(icon, label, value, color, key=null) {
 window._dashModal = (key, el) => {
     const d = window._dashBreakdowns?.[key];
     if (!d) return;
-    const modal = document.getElementById('dash-modal');
-    if (!modal) return;
+    // Quitar modal previo
+    const prev = document.getElementById('dash-kpi-modal');
+    if (prev) prev.remove();
     // Quitar active previo
     document.querySelectorAll('[data-dash-kpi-active]').forEach(e => {
         e.removeAttribute('data-dash-kpi-active');
@@ -336,34 +326,43 @@ window._dashModal = (key, el) => {
     }
     const clearActive = () => {
         if (el) { el.style.boxShadow=''; el.style.transform=''; el.removeAttribute('data-dash-kpi-active'); }
+        const m = document.getElementById('dash-kpi-modal'); if(m) m.remove();
     };
-    document.getElementById('dash-modal-title').textContent = '🔍 Desglose: ' + key;
     const copcVal = d.isAvg ? d.copc + d.unit : d.copc.toLocaleString('es-CL') + d.unit;
     const r220Val = d.isAvg ? d.r220 + d.unit : d.r220.toLocaleString('es-CL') + d.unit;
     const total   = d.isAvg
         ? Math.round((d.copc * 0.898 + d.r220 * 0.102)) + d.unit
         : (d.copc + d.r220).toLocaleString('es-CL') + d.unit;
-    document.getElementById('dash-modal-body').innerHTML = `
-      <div style="display:grid;gap:10px">
-        <div style="display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:12px;background:var(--bg);border-radius:12px;padding:14px">
-          <div style="font-size:22px">🏗️</div>
-          <div><div style="font-weight:700;font-size:14px">Campamento COPC</div><div style="font-size:12px;color:var(--text-muted)">Edificio principal</div></div>
-          <div style="font-size:22px;font-weight:800;color:#6366f1">${copcVal}</div>
+    const overlay = document.createElement('div');
+    overlay.id = 'dash-kpi-modal';
+    overlay.innerHTML = `<div onclick="this.parentElement.remove();" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:flex-end;justify-content:center">
+      <div onclick="event.stopPropagation()" style="background:var(--bg-card);border-radius:20px 20px 0 0;padding:28px;width:100%;max-width:480px;box-shadow:0 -8px 40px rgba(0,0,0,.25)">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+          <div style="font-size:17px;font-weight:800;color:var(--text-primary)">🔍 Desglose: ${key}</div>
+          <button onclick="this.closest('#dash-kpi-modal').remove();" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-muted)">×</button>
         </div>
-        <div style="display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:12px;background:var(--bg);border-radius:12px;padding:14px">
-          <div style="font-size:22px">🏗️</div>
-          <div><div style="font-weight:700;font-size:14px">Edificio R-220</div><div style="font-size:12px;color:var(--text-muted)">Bloque adicional</div></div>
-          <div style="font-size:22px;font-weight:800;color:#8b5cf6">${r220Val}</div>
+        <div style="display:grid;gap:10px">
+          <div style="display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:12px;background:var(--bg);border-radius:12px;padding:14px">
+            <div style="font-size:22px">🏗️</div>
+            <div><div style="font-weight:700;font-size:14px">Campamento COPC</div><div style="font-size:12px;color:var(--text-muted)">Edificio principal</div></div>
+            <div style="font-size:22px;font-weight:800;color:#6366f1">${copcVal}</div>
+          </div>
+          <div style="display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:12px;background:var(--bg);border-radius:12px;padding:14px">
+            <div style="font-size:22px">🏗️</div>
+            <div><div style="font-weight:700;font-size:14px">Edificio R-220</div><div style="font-size:12px;color:var(--text-muted)">Bloque adicional</div></div>
+            <div style="font-size:22px;font-weight:800;color:#8b5cf6">${r220Val}</div>
+          </div>
+          <div style="display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:12px;background:rgba(99,102,241,.08);border:1.5px solid #6366f1;border-radius:12px;padding:14px">
+            <div style="font-size:22px">∑</div>
+            <div><div style="font-weight:800;font-size:14px;color:#6366f1">TOTAL COMBINADO</div></div>
+            <div style="font-size:24px;font-weight:900;color:#6366f1">${total}</div>
+          </div>
         </div>
-        <div style="display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:12px;background:rgba(99,102,241,.08);border:1.5px solid #6366f1;border-radius:12px;padding:14px">
-          <div style="font-size:22px">∑</div>
-          <div><div style="font-weight:800;font-size:14px;color:#6366f1">TOTAL COMBINADO</div></div>
-          <div style="font-size:24px;font-weight:900;color:#6366f1">${total}</div>
-        </div>
-      </div>`;
-    modal.onclick = (e) => { if(e.target===modal){modal.style.display='none';clearActive();} };
-    document.querySelector('#dash-modal button').onclick = () => { modal.style.display='none'; clearActive(); };
-    modal.style.display = 'flex';
+      </div>
+    </div>`;
+    document.body.appendChild(overlay);
+    overlay.querySelector('div').addEventListener('click', clearActive);
+    overlay.querySelector('button').addEventListener('click', clearActive);
 };
 
 function edificioCard(r) {

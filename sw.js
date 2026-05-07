@@ -1,4 +1,4 @@
-const CACHE_NAME = 'v2-purge-fix-7';
+const CACHE_NAME = 'v2-purge-fix-8';
 
 
 const STATIC_ASSETS = [

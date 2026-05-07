@@ -23,16 +23,18 @@ export async function renderV2Checkin(container) {
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px">
         ${tabBtn('ci','✅ Check-in','#10b981',true)}
         ${tabBtn('co','🚪 Check-out','#ef4444',false)}
-        ${tabBtn('activos','📋 Activos','#6366f1',false)}
+        ${tabBtn('recepcion','🏨 Recepción','#6366f1',false)}
+        ${tabBtn('activos','📋 Activos','#475569',false)}
         ${tabBtn('empresas','🏢 Empresas','#f59e0b',false)}
       </div>
       <div id="panel-ci">${panelCheckin()}</div>
       <div id="panel-co"      style="display:none">${panelCheckout()}</div>
+      <div id="panel-recepcion" style="display:none">${panelRecepcion()}</div>
       <div id="panel-activos" style="display:none"><div id="lista-activos" style="text-align:center;padding:40px;color:var(--text-muted)">Cargando…</div></div>
       <div id="panel-empresas" style="display:none">${panelEmpresas()}</div>
     </div>`;
 
-    ['ci','co','activos','empresas'].forEach(t =>
+    ['ci','co','recepcion','activos','empresas'].forEach(t =>
         document.getElementById(`tab-${t}`)?.addEventListener('click', () => switchTab(t))
     );
 
@@ -47,6 +49,10 @@ export async function renderV2Checkin(container) {
     document.getElementById('ci-edificio')?.addEventListener('change', onEdificioChange);
     document.getElementById('ci-pabellon')?.addEventListener('change', onPabellonChange);
     document.getElementById('ci-habitacion')?.addEventListener('change', onHabitacionChange);
+    document.getElementById('btn-buscar-rec')?.addEventListener('click', buscarAutorizacion);
+    document.getElementById('btn-autorizar-rapido')?.addEventListener('click', buscarAutorizacion);
+    document.getElementById('btn-autorizar-empresa')?.addEventListener('click', autorizarEmpresaCompleta);
+    document.getElementById('rec-rut')?.addEventListener('keydown', e => { if(e.key==='Enter') buscarAutorizacion(); });
     document.getElementById('btn-checkin')?.addEventListener('click', handleCheckin);
     document.getElementById('btn-buscar-co')?.addEventListener('click', buscarCheckout);
     document.getElementById('btn-nueva-empresa')?.addEventListener('click', crearNuevaEmpresa);
@@ -62,8 +68,8 @@ function tabBtn(id, label, color, active) {
 }
 
 function switchTab(name) {
-    const colors = { ci: '#10b981', co: '#ef4444', activos: '#6366f1', empresas: '#f59e0b' };
-    ['ci','co','activos','empresas'].forEach(t => {
+    const colors = { ci: '#10b981', co: '#ef4444', recepcion: '#6366f1', activos: '#475569', empresas: '#f59e0b' };
+    ['ci','co','recepcion','activos','empresas'].forEach(t => {
         const btn   = document.getElementById(`tab-${t}`);
         const panel = document.getElementById(`panel-${t}`);
         const on    = t === name;
@@ -72,6 +78,7 @@ function switchTab(name) {
     });
     if (name === 'activos') cargarActivos();
     if (name === 'empresas') renderListaEmpresas();
+    if (name === 'recepcion') cargarEmpresasRecepcion();
 }
 
 // ─── CHECK-IN ────────────────────────────────────────────────────
@@ -134,6 +141,192 @@ async function handleCheckin() {
         await onHabitacionChange(); // refresh camas
     } catch(e) { msg('❌ ' + e.message, '#ef4444'); }
 }
+
+// ─── RECEPCIÓN: AUTORIZAR LLEGADA ────────────────────────────────
+let _sbRec = null;
+async function getSbRec() {
+    if (!_sbRec) { const m = await import('../../supabaseClient.js'); _sbRec = m.supabase; }
+    return _sbRec;
+}
+
+function panelRecepcion() {
+    return `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start">
+
+      <!-- Modo rápido individual -->
+      <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:16px;padding:22px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+          <div style="background:linear-gradient(135deg,#6366f1,#4f46e5);border-radius:10px;width:36px;height:36px;display:flex;align-items:center;justify-content:center;font-size:18px">⚡</div>
+          <div>
+            <div style="font-size:14px;font-weight:800;color:var(--text-primary)">Autorización Rápida</div>
+            <div style="font-size:11px;color:var(--text-secondary)">Ingresa RUT → Enter → listo ✅</div>
+          </div>
+        </div>
+        <input id="rec-rut" type="text" placeholder="12345678-9" autocomplete="off" inputmode="numeric"
+          style="width:100%;padding:16px 18px;border-radius:12px;border:2px solid var(--border);background:var(--bg);color:var(--text-primary);font-size:20px;font-weight:700;outline:none;box-sizing:border-box;letter-spacing:1px;margin-bottom:10px;transition:border-color 0.2s"
+          onfocus="this.style.borderColor='#6366f1'" onblur="this.style.borderColor='var(--border)'">
+        <button id="btn-autorizar-rapido"
+          style="width:100%;background:linear-gradient(135deg,#6366f1,#4f46e5);color:white;border:none;border-radius:12px;padding:15px;font-size:16px;font-weight:800;cursor:pointer;box-shadow:0 4px 14px rgba(99,102,241,0.35);display:flex;align-items:center;justify-content:center;gap:8px">
+          🏨 Autorizar Llegada
+        </button>
+        <div id="rec-feedback" style="margin-top:12px;min-height:60px"></div>
+      </div>
+
+      <!-- Autorización masiva por empresa -->
+      <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:16px;padding:22px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+          <div style="background:linear-gradient(135deg,#f59e0b,#d97706);border-radius:10px;width:36px;height:36px;display:flex;align-items:center;justify-content:center;font-size:18px">🚀</div>
+          <div>
+            <div style="font-size:14px;font-weight:800;color:var(--text-primary)">Autorizar por Empresa</div>
+            <div style="font-size:11px;color:var(--text-secondary)">Para llegadas grupales masivas</div>
+          </div>
+        </div>
+        <select id="rec-empresa-sel"
+          style="width:100%;padding:13px 14px;border-radius:12px;border:2px solid var(--border);background:var(--bg);color:var(--text-primary);font-size:14px;font-weight:600;outline:none;margin-bottom:10px">
+          <option value="">— Seleccionar empresa —</option>
+        </select>
+        <div id="rec-empresa-preview" style="min-height:36px;margin-bottom:10px;text-align:center"></div>
+        <button id="btn-autorizar-empresa"
+          style="width:100%;background:linear-gradient(135deg,#f59e0b,#d97706);color:white;border:none;border-radius:12px;padding:14px;font-size:15px;font-weight:800;cursor:pointer;box-shadow:0 4px 14px rgba(245,158,11,0.35);display:flex;align-items:center;justify-content:center;gap:8px">
+          🚀 Autorizar toda la empresa
+        </button>
+        <div id="rec-empresa-msg" style="margin-top:10px;min-height:20px;font-size:13px;font-weight:600"></div>
+      </div>
+    </div>`;
+}
+
+async function buscarAutorizacion() {
+    const sb  = await getSbRec();
+    const rut = document.getElementById('rec-rut')?.value?.trim();
+    const fb  = document.getElementById('rec-feedback');
+    const btn = document.getElementById('btn-autorizar-rapido');
+    if (!rut) { fb.innerHTML = `<p style="color:#f59e0b;font-weight:600">⚠️ Ingresa un RUT</p>`; return; }
+
+    btn.innerHTML = '⏳ Buscando…'; btn.disabled = true;
+
+    const rutBase = rut.replace(/[\.\- ]/g,'').toUpperCase();
+    const rutDash = rutBase.length > 1 ? rutBase.slice(0,-1)+'-'+rutBase.slice(-1) : rutBase;
+
+    const { data, error } = await sb
+        .from('v2_asignaciones')
+        .select('id, rut_huesped, nombre_huesped, id_cama, autorizado_checkin, huesped_confirmo, v2_empresas(nombre,turno)')
+        .or(`rut_huesped.eq.${rutBase},rut_huesped.eq.${rutDash}`)
+        .is('fecha_checkout', null)
+        .order('fecha_checkin', { ascending: false })
+        .limit(1);
+
+    btn.innerHTML = '🏨 Autorizar Llegada'; btn.disabled = false;
+
+    if (error || !data?.length) {
+        fb.innerHTML = `
+          <div style="display:flex;align-items:center;gap:10px;padding:12px;background:#fff5f5;border:1.5px solid #fecaca;border-radius:10px">
+            <span style="font-size:20px">❌</span>
+            <div><div style="font-weight:700;color:#c53030;font-size:13px">RUT no encontrado</div>
+            <div style="font-size:11px;color:#718096">Verifica o registra el check-in primero</div></div>
+          </div>`;
+        return;
+    }
+
+    const a = data[0];
+
+    if (a.huesped_confirmo) {
+        fb.innerHTML = `
+          <div style="display:flex;align-items:center;gap:10px;padding:12px;background:#dcfce7;border:1.5px solid #86efac;border-radius:10px">
+            <span style="font-size:20px">✅</span>
+            <div><div style="font-weight:800;color:#15803d;font-size:13px">${a.nombre_huesped}</div>
+            <div style="font-size:11px;color:#166534">Ya confirmó llegada · Cama ${a.id_cama}</div></div>
+          </div>`;
+        document.getElementById('rec-rut').value = '';
+        document.getElementById('rec-rut').focus();
+        return;
+    }
+
+    if (a.autorizado_checkin) {
+        fb.innerHTML = `
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px;background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:10px">
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="font-size:20px">🟡</span>
+              <div><div style="font-weight:800;color:#1d4ed8;font-size:13px">${a.nombre_huesped}</div>
+              <div style="font-size:11px;color:#1e40af">Ya autorizado · esperando confirmación</div></div>
+            </div>
+            <button onclick="window._revocarAutorizacion('${a.id}')"
+              style="background:transparent;border:1.5px solid #ef4444;color:#ef4444;border-radius:8px;padding:6px 10px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap">✕ Revocar</button>
+          </div>`;
+        return;
+    }
+
+    // ── Autorizar inmediatamente sin paso extra ───────────────────
+    btn.innerHTML = '⏳ Autorizando…'; btn.disabled = true;
+    const { error: err } = await sb.from('v2_asignaciones')
+        .update({ autorizado_checkin: true }).eq('id', a.id);
+    btn.innerHTML = '🏨 Autorizar Llegada'; btn.disabled = false;
+
+    if (err) { fb.innerHTML = `<p style="color:#ef4444;font-weight:700">❌ ${err.message}</p>`; return; }
+
+    fb.innerHTML = `
+      <div style="display:flex;align-items:center;gap:12px;padding:14px;background:#dcfce7;border:1.5px solid #86efac;border-radius:12px">
+        <div style="width:42px;height:42px;border-radius:10px;background:#16a34a;display:flex;align-items:center;justify-content:center;font-size:18px;color:#fff;font-weight:900;flex-shrink:0">
+          ${a.nombre_huesped?.[0]?.toUpperCase()||'?'}
+        </div>
+        <div>
+          <div style="font-weight:800;color:#15803d;font-size:14px">✅ ${a.nombre_huesped}</div>
+          <div style="font-size:12px;color:#166534">Autorizado · Cama <strong>${a.id_cama}</strong> · ${a.v2_empresas?.nombre||'—'}</div>
+        </div>
+      </div>`;
+    // Limpiar y enfocar para el siguiente trabajador
+    document.getElementById('rec-rut').value = '';
+    setTimeout(() => document.getElementById('rec-rut').focus(), 100);
+}
+
+async function cargarEmpresasRecepcion() {
+    const sb = await getSbRec();
+    const { data } = await sb.from('v2_empresas').select('id, nombre, turno').order('nombre');
+    if (!data) return;
+    const sel = document.getElementById('rec-empresa-sel');
+    if (!sel) return;
+    sel.innerHTML = '<option value="">— Seleccionar empresa —</option>' +
+        data.map(e => `<option value="${e.id}">${e.nombre}${e.turno?' · '+e.turno:''}</option>`).join('');
+
+    sel.addEventListener('change', async () => {
+        const empId = sel.value;
+        const prev  = document.getElementById('rec-empresa-preview');
+        if (!empId) { prev.innerHTML = ''; return; }
+        prev.innerHTML = `<span style="color:var(--text-muted);font-size:12px">Contando pendientes…</span>`;
+        const { count } = await sb.from('v2_asignaciones')
+            .select('id', { count: 'exact', head: true })
+            .eq('empresa_id', empId)
+            .is('fecha_checkout', null)
+            .eq('autorizado_checkin', false);
+        prev.innerHTML = count > 0
+            ? `<span style="background:#fef9c3;border:1px solid #fde047;border-radius:8px;padding:6px 16px;font-weight:700;color:#854d0e;font-size:13px">${count} trabajador${count!==1?'es':''} pendiente${count!==1?'s':''}</span>`
+            : `<span style="background:#dcfce7;border:1px solid #86efac;border-radius:8px;padding:6px 16px;font-weight:700;color:#15803d;font-size:13px">✅ Todos autorizados</span>`;
+    });
+}
+
+async function autorizarEmpresaCompleta() {
+    const sb    = await getSbRec();
+    const empId = document.getElementById('rec-empresa-sel')?.value;
+    const msg   = document.getElementById('rec-empresa-msg');
+    const btn   = document.getElementById('btn-autorizar-empresa');
+    if (!empId) { msg.textContent = '⚠️ Selecciona una empresa'; msg.style.color = '#f59e0b'; return; }
+    const empNombre = document.getElementById('rec-empresa-sel')?.selectedOptions[0]?.text || '';
+    if (!confirm(`¿Autorizar llegada a TODOS los trabajadores activos de "${empNombre}"?`)) return;
+    btn.innerHTML = '⏳ Autorizando…'; btn.disabled = true;
+    await sb.from('v2_asignaciones')
+        .update({ autorizado_checkin: true })
+        .eq('empresa_id', empId)
+        .is('fecha_checkout', null);
+    btn.innerHTML = '🚀 Autorizar toda la empresa'; btn.disabled = false;
+    msg.innerHTML = `<span style="color:#10b981">✅ Empresa autorizada — todos pueden hacer check-in</span>`;
+    document.getElementById('rec-empresa-sel').dispatchEvent(new Event('change'));
+}
+
+window._revocarAutorizacion = async (id) => {
+    if (!confirm('¿Revocar la autorización de llegada?')) return;
+    const sb = await getSbRec();
+    await sb.from('v2_asignaciones').update({ autorizado_checkin: false }).eq('id', id);
+    buscarAutorizacion();
+};
 
 // ─── CHECK-OUT ───────────────────────────────────────────────────
 function panelCheckout() {

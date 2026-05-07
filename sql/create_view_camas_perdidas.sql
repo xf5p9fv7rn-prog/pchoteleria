@@ -3,7 +3,8 @@
 -- Ejecutar en Supabase → SQL Editor
 -- ══════════════════════════════════════════════════════════════════════════
 
-CREATE OR REPLACE VIEW v2_camas_perdidas_view AS
+DROP VIEW IF EXISTS v2_camas_perdidas_view;
+CREATE VIEW v2_camas_perdidas_view AS
 WITH conteo AS (
     SELECT
         c.habitacion_id,
@@ -58,6 +59,7 @@ WITH conteo AS (
     JOIN v2_edificios    e ON e.id = p.edificio_id
     WHERE h.pabellon_id IS NOT NULL
       AND h.numero_hab IS NOT NULL
+      AND c.estado != 'Deshabilitada'
     GROUP BY
         c.habitacion_id, h.numero_hab, h.nivel,
         p.nombre, p.id, e.nombre

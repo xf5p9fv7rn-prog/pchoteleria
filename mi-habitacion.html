@@ -752,12 +752,14 @@
                     .from('v2_asignaciones')
                     .select(`
                 id,
+                id_cama,
                 rut_huesped, 
                 nombre_huesped, 
                 fecha_checkin, 
                 fecha_checkout,
                 fecha_salida_programada,
                 huesped_confirmo,
+                 autorizado_checkin,
                 v2_camas (
                   numero_cama,
                   v2_habitaciones (
@@ -836,18 +838,26 @@
                 document.getElementById('checkout-done-section').style.display = 'none';
 
                 if (asignacion.huesped_confirmo) {
-                    // Ya confirmó antes: revelar habitación directamente
+                    // Ya confirmó: mostrar habitación completa
                     window._revelarHabitacion();
                     document.getElementById('success-section').style.display = 'block';
                     document.getElementById('t-time').textContent = 'Activo en base de datos';
-                } else {
-                    // No ha confirmado: ocultar número de habitación
-                    document.getElementById('t-building').textContent = 'Confirma tu llegada para ver tu habitación';
+                } else if (asignacion.autorizado_checkin) {
+                    // Autorizado por recepción: puede confirmar llegada
+                    document.getElementById('t-building').textContent = '✅ Autorizado — Confirma tu llegada';
                     document.getElementById('t-room').textContent = '🔒';
                     document.getElementById('t-floor-bed').textContent = 'Tu número se revelará al confirmar';
                     document.getElementById('t-floor').textContent = '—';
                     document.getElementById('t-bed').textContent = '—';
                     document.getElementById('checkin-section').style.display = 'block';
+                } else {
+                    // No autorizado aún: debe pasar por recepción
+                    document.getElementById('t-building').textContent = 'Pasa primero por Recepción';
+                    document.getElementById('t-room').textContent = '🔒';
+                    document.getElementById('t-floor-bed').textContent = 'El personal te autorizará el ingreso';
+                    document.getElementById('t-floor').textContent = '—';
+                    document.getElementById('t-bed').textContent = '—';
+                    document.getElementById('not-authorized-section').style.display = 'block';
                 }
 
                 // ── Mostrar vista ticket ──────────────────────────────────
@@ -878,12 +888,20 @@
                 const asignacion = window._currentAsignacion;
                 if (!asignacion || !asignacion.id) throw new Error('Sin datos de asignación activa');
 
+                // 1. Marcar huesped_confirmo = true en la asignación
                 const { error } = await sb
                     .from('v2_asignaciones')
                     .update({ huesped_confirmo: true })
                     .eq('id', asignacion.id);
 
                 if (error) throw error;
+
+                // 2. Asegurar que la cama quede marcada como Ocupada
+                if (asignacion.id_cama) {
+                    await sb.from('v2_camas')
+                        .update({ estado: 'Ocupada' })
+                        .eq('id_cama', asignacion.id_cama);
+                }
 
                 // Revelar habitación y mostrar confirmación
                 window._currentAsignacion.huesped_confirmo = true;
@@ -899,6 +917,7 @@
                 btn.disabled = false;
             }
         };
+
 
         // ── Confirmar salida (Check-out) ─────────────────────────────────────
         window.confirmarSalida = async () => {

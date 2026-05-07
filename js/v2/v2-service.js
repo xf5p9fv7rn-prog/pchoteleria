@@ -56,7 +56,7 @@ export async function getCamas(habitacionId) {
     try {
         const { data, error } = await supabase
             .from('v2_camas')
-            .select('id_cama,habitacion_id,estado,v2_asignaciones(huesped_confirmo,fecha_checkout,numero_contrato,nombre_huesped,v2_empresas(nombre,v2_gerencias(nombre)))')
+            .select('id_cama,habitacion_id,estado,v2_asignaciones(huesped_confirmo,fecha_checkout,fecha_salida_programada,numero_contrato,nombre_huesped,v2_empresas(nombre,v2_gerencias(nombre)))')
             .eq('habitacion_id', habitacionId)
             .order('id_cama');
         if (error) throw error;
@@ -66,20 +66,21 @@ export async function getCamas(habitacionId) {
             const asigEntrante = asigs.find(a => !a.fecha_checkout && a.estado_asignacion === 'pre_asignado')
                               || asigs.find(a => !a.fecha_checkout && !a.estado_asignacion); // compatibilidad
             return {
-                id_cama:          c.id_cama,
-                habitacion_id:    c.habitacion_id,
-                estado:           c.estado,
-                huesped_confirmo: asigActiva?.huesped_confirmo ?? false,
-                empresa:          asigActiva?.v2_empresas?.nombre || null,
-                gerencia:         asigActiva?.v2_empresas?.v2_gerencias?.nombre || null,
-                nombre_huesped:   asigActiva?.nombre_huesped || null,
-                numero_contrato:  asigActiva?.numero_contrato || null,
+                id_cama:                c.id_cama,
+                habitacion_id:          c.habitacion_id,
+                estado:                 c.estado,
+                huesped_confirmo:       asigActiva?.huesped_confirmo ?? false,
+                fecha_salida_programada: asigActiva?.fecha_salida_programada || null,
+                empresa:                asigActiva?.v2_empresas?.nombre || null,
+                gerencia:               asigActiva?.v2_empresas?.v2_gerencias?.nombre || null,
+                nombre_huesped:         asigActiva?.nombre_huesped || null,
+                numero_contrato:        asigActiva?.numero_contrato || null,
                 // Rotación: trabajador entrante pre-asignado
-                tieneRotacion:    !!asigEntrante,
-                entrante:         asigEntrante ? {
-                    nombre:   asigEntrante.nombre_huesped,
-                    fecha:    asigEntrante.fecha_checkin,
-                    empresa:  asigEntrante.v2_empresas?.nombre || null,
+                tieneRotacion: !!asigEntrante,
+                entrante: asigEntrante ? {
+                    nombre:  asigEntrante.nombre_huesped,
+                    fecha:   asigEntrante.fecha_checkin,
+                    empresa: asigEntrante.v2_empresas?.nombre || null,
                 } : null,
             };
         });
@@ -185,10 +186,11 @@ export async function getReporteOcupacion() {
         pabs.forEach(p => {
             (habByPab[p.id] || []).forEach(h => {
                 (camasByHab[h.id_custom] || []).forEach(c => {
+                    if (c.estado === 'Deshabilitada') return; // cama sin instalar
                     total++;
-                    if (c.estado === 'Ocupada')       ocup++;
+                    if (c.estado === 'Ocupada')         ocup++;
                     else if (c.estado === 'Mantencion') mant++;
-                    else                               disp++;
+                    else                                disp++;
                 });
             });
         });
@@ -204,6 +206,52 @@ export async function getReporteOcupacion() {
 
     return { reporte, totales };
 }
+
+// ─────────────────────────────────────────────────────────────────
+//  REPORTE POR PABELLÓN (para desglose en acordeones del dashboard)
+// ─────────────────────────────────────────────────────────────────
+export async function getReportePabellones() {
+    const [edificios, pabellones, habitaciones, camas] = await Promise.all([
+        fetchAll('v2_edificios',    'id,nombre',                            'nombre'),
+        fetchAll('v2_pabellones',   'id,nombre,edificio_id',                'nombre'),
+        fetchAll('v2_habitaciones', 'id_custom,pabellon_id,cantidad_camas', 'id_custom'),
+        fetchAll('v2_camas',        'id_cama,habitacion_id,estado',         'id_cama')
+    ]);
+
+    const edifMap = {};  edificios.forEach(e => { edifMap[e.id] = e.nombre; });
+    const habByPab = {}; habitaciones.forEach(h => {
+        if (!habByPab[h.pabellon_id]) habByPab[h.pabellon_id] = [];
+        habByPab[h.pabellon_id].push(h);
+    });
+    const camasByHab = {}; camas.forEach(c => {
+        if (!camasByHab[c.habitacion_id]) camasByHab[c.habitacion_id] = [];
+        camasByHab[c.habitacion_id].push(c);
+    });
+
+    return pabellones.map(pab => {
+        let total = 0, ocup = 0, disp = 0, mant = 0;
+        (habByPab[pab.id] || []).forEach(h => {
+            (camasByHab[h.id_custom] || []).forEach(c => {
+                if (c.estado === 'Deshabilitada') return;
+                total++;
+                if (c.estado === 'Ocupada')         ocup++;
+                else if (c.estado === 'Mantencion' || c.estado === 'Mantención') mant++;
+                else                                disp++;
+            });
+        });
+        return {
+            edificio:          edifMap[pab.edificio_id] || '?',
+            edificio_id:       pab.edificio_id,
+            pabellon:          pab.nombre,
+            total_camas:       total,
+            camas_ocupadas:    ocup,
+            camas_disponibles: disp,
+            camas_mantencion:  mant,
+        };
+    }).filter(r => r.total_camas > 0); // omitir pabellones sin camas activas
+}
+
+
 
 // ─────────────────────────────────────────────────────────────────
 //  EMPRESAS Y GERENCIAS

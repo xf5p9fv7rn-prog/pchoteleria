@@ -21,6 +21,75 @@ function calcularPeriodo(offset = 0) {
     };
 }
 
+// ── AUTO-SNAPSHOT: guarda ocupación real en v2_censo_registros ─────────────
+// Se ejecuta una vez por período (guard en localStorage). Fire & forget.
+async function _autoSnapshotPeriodo() {
+    if (!_periodo) return;
+    const guardKey = `censo_snap_${fmtISO(_periodo.ini)}`;
+    if (localStorage.getItem(guardKey)) return; // ya guardado este período
+
+    try {
+        const pIni = fmtISO(_periodo.ini);
+        const pFin = fmtISO(_periodo.fin);
+
+        // Traer asignaciones activas del período
+        const { data: asigs, error } = await supabase.from('v2_asignaciones')
+            .select('id_cama,fecha_checkin,fecha_salida_programada,fecha_checkout,v2_camas(numero_cama,habitacion_id)')
+            .lte('fecha_checkin', pFin)
+            .or(`fecha_checkout.is.null,fecha_checkout.gte.${pIni}`)
+            .not('estado_asignacion', 'eq', 'sin_checkout');
+
+        if (error || !asigs?.length) return;
+
+        // Construir mapa: habitacion_id + fecha → estado (dia / noche)
+        const registros = [];
+        const seen = new Set();
+
+        asigs.forEach(a => {
+            const habId  = a.v2_camas?.habitacion_id;
+            const numCama = a.v2_camas?.numero_cama; // 1 = dia, 2 = noche
+            if (!habId) return;
+            const estado = numCama === 2 ? 'noche' : 'dia';
+
+            // Días solapados con el período
+            const desde = a.fecha_checkin > pIni ? a.fecha_checkin : pIni;
+            const salida = a.fecha_salida_programada || pFin;
+            const chk    = a.fecha_checkout;
+            const real   = (chk && chk < salida) ? chk : salida;
+            const hasta  = real < pFin ? real : pFin;
+            if (desde > hasta) return;
+
+            let cur = new Date(desde);
+            const end = new Date(hasta);
+            while (cur <= end) {
+                const fecha = fmtISO(cur);
+                const key   = `${habId}|${fecha}|${estado}`;
+                if (!seen.has(key)) {
+                    seen.add(key);
+                    registros.push({ habitacion_id: habId, fecha, estado, periodo_ini: pIni });
+                }
+                cur.setDate(cur.getDate() + 1);
+            }
+        });
+
+        if (!registros.length) return;
+
+        // Upsert en lotes de 500 para no sobrepasar límites
+        const BATCH = 500;
+        for (let i = 0; i < registros.length; i += BATCH) {
+            await supabase.from('v2_censo_registros')
+                .upsert(registros.slice(i, i + BATCH), { onConflict: 'habitacion_id,fecha' });
+        }
+
+        // Marcar como guardado para este período
+        localStorage.setItem(guardKey, new Date().toISOString());
+        console.log(`[Censo] Snapshot guardado: ${registros.length} registros · período ${pIni}`);
+
+    } catch (e) {
+        console.warn('[Censo] Auto-snapshot falló (silencioso):', e.message);
+    }
+}
+
 function getDias(ini, fin) {
     const dias = []; let d = new Date(ini);
     while (d <= fin) { dias.push(new Date(d)); d.setDate(d.getDate() + 1); }
@@ -73,13 +142,29 @@ export async function renderV2Censo(container) {
         <button onclick="window._censoExportExcel()" style="padding:9px 16px;border-radius:10px;border:none;background:#dcfce7;color:#15803d;font-weight:700;font-size:12px;cursor:pointer">📥 Excel</button>
       </div>
 
-      <!-- Tabs -->
-      <div style="display:flex;gap:8px;margin-bottom:16px">
-        ${['grid','billing','bajadas'].map(t => `
-          <button id="ctab-${t}" onclick="window._censoTab('${t}')"
-            style="padding:9px 18px;border-radius:10px;border:2px solid var(--border);background:var(--bg-card);color:var(--text-secondary);font-weight:700;font-size:12px;cursor:pointer;transition:all .15s">
-            ${{grid:'📋 Cuadrícula',billing:'💰 Facturación',bajadas:'📤 Bajadas'}[t]}
-          </button>`).join('')}
+      <!-- Tabs: Facturación, Bajadas e Historial solo para supervisores -->
+      <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:center">
+        <button id="ctab-grid" onclick="window._censoTab('grid')"
+          style="padding:9px 18px;border-radius:10px;border:2px solid var(--border);background:var(--bg-card);color:var(--text-secondary);font-weight:700;font-size:12px;cursor:pointer;transition:all .15s">
+          📋 Cuadrícula
+        </button>
+        ${(['supervisor','superadmin'].includes(window._currentUser?.role)) ? `
+        <button id="ctab-billing" onclick="window._censoTab('billing')"
+          style="padding:9px 18px;border-radius:10px;border:2px solid var(--border);background:var(--bg-card);color:var(--text-secondary);font-weight:700;font-size:12px;cursor:pointer;transition:all .15s">
+          💰 Facturación
+        </button>
+        <button id="ctab-bajadas" onclick="window._censoTab('bajadas')"
+          style="padding:9px 18px;border-radius:10px;border:2px solid var(--border);background:var(--bg-card);color:var(--text-secondary);font-weight:700;font-size:12px;cursor:pointer;transition:all .15s">
+          📤 Bajadas
+        </button>
+        <button id="ctab-historial" onclick="window._censoTab('historial')"
+          style="padding:9px 18px;border-radius:10px;border:2px solid var(--border);background:var(--bg-card);color:var(--text-secondary);font-weight:700;font-size:12px;cursor:pointer;transition:all .15s">
+          📂 Historial
+        </button>
+        <button id="btn-guardar-periodo" onclick="window._censoGuardarPeriodo()"
+          style="margin-left:auto;padding:9px 18px;border-radius:10px;border:none;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;font-weight:700;font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px">
+          💾 Guardar Período
+        </button>` : ''}
       </div>
 
       <div id="censo-body" style="overflow-x:auto">
@@ -112,27 +197,43 @@ export async function renderV2Censo(container) {
     window._censoFiltroPab = async () => { _pabellonFil = document.getElementById('censo-fil-pab').value; await renderTab(); };
     window._censoTab = async (t) => { _activeTab = t; renderTab(); };
     window._censoExportExcel = exportExcel;
+    window._censoGuardarPeriodo = censoGuardarPeriodo;
 
     activarTab('grid');
     await renderTab();
 }
 
 function activarTab(t) {
-    ['grid','billing','bajadas'].forEach(x => {
+    ['grid','billing','bajadas','historial'].forEach(x => {
         const b = document.getElementById(`ctab-${x}`);
         if (!b) return;
         const on = x === t;
-        b.style.background    = on ? '#6366f1' : 'var(--bg-card)';
-        b.style.color         = on ? '#fff'     : 'var(--text-secondary)';
-        b.style.borderColor   = on ? '#6366f1'  : 'var(--border)';
+        b.style.background  = on ? '#6366f1' : 'var(--bg-card)';
+        b.style.color       = on ? '#fff'    : 'var(--text-secondary)';
+        b.style.borderColor = on ? '#6366f1' : 'var(--border)';
     });
 }
 
 async function renderTab() {
     activarTab(_activeTab);
     if      (_activeTab === 'grid')    await renderGrid();
-    else if (_activeTab === 'billing') await renderBilling();
-    else if (_activeTab === 'bajadas') await renderBajadas();
+    else if (_activeTab === 'billing') {
+        if (!['supervisor','superadmin'].includes(window._currentUser?.role)) {
+            document.getElementById('censo-body').innerHTML =
+                '<div style="text-align:center;padding:40px;color:#ef4444">🔒 Acceso restringido a supervisores</div>';
+            return;
+        }
+        await renderBilling();
+    }
+    else if (_activeTab === 'bajadas')   await renderBajadas();
+    else if (_activeTab === 'historial') {
+        if (!['supervisor','superadmin'].includes(window._currentUser?.role)) {
+            document.getElementById('censo-body').innerHTML =
+                '<div style="text-align:center;padding:40px;color:#ef4444">🔒 Acceso restringido a supervisores</div>';
+            return;
+        }
+        await renderHistorial();
+    }
 }
 
 // ── GRID: cuadrícula habitaciones × días ───────────────────────────────
@@ -140,20 +241,57 @@ async function renderGrid() {
     const body = document.getElementById('censo-body');
     body.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-muted)">⏳ Cargando…</div>';
 
-    // Habitaciones — filtro por edificio usando pabellon IDs (evita nested filter)
-    let habQ = supabase.from('v2_habitaciones')
-        .select('id_custom,numero_hab,nivel,pabellon_id,v2_pabellones(nombre,edificio_id,v2_edificios(nombre))')
-        .order('numero_hab');
+    // 🔄 Auto-snapshot: guardar datos de ocupación en Supabase una vez por período
+    _autoSnapshotPeriodo(); // fire & forget — no bloquea la UI
+
+
+    // Habitaciones — paginación completa para traer TODAS (sin límite de 1000)
+    async function fetchAllHabs(extraFilter) {
+        const PAGE = 900;
+        let offset = 0, all = [];
+        while (true) {
+            let q = supabase.from('v2_habitaciones')
+                .select('id_custom,numero_hab,nivel,pabellon_id,v2_pabellones(nombre,edificio_id,v2_edificios(nombre))')
+                .range(offset, offset + PAGE - 1);
+            if (extraFilter) q = extraFilter(q);
+            const { data, error } = await q;
+            if (error) break;
+            all = all.concat(data || []);
+            if (!data || data.length < PAGE) break;
+            offset += PAGE;
+        }
+        return all;
+    }
+
+    let filterFn = null;
     if (_pabellonFil) {
-        habQ = habQ.eq('pabellon_id', _pabellonFil);
+        filterFn = q => q.eq('pabellon_id', _pabellonFil);
     } else if (_edificioFil) {
-        // Obtener IDs de pabellones del edificio seleccionado
         const { data: pabIds } = await supabase.from('v2_pabellones')
             .select('id').eq('edificio_id', _edificioFil);
         const ids = (pabIds || []).map(p => p.id);
-        if (ids.length) habQ = habQ.in('pabellon_id', ids);
+        if (ids.length) filterFn = q => q.in('pabellon_id', ids);
     }
-    const { data: habs } = await habQ;
+
+    const rawHabs = await fetchAllHabs(filterFn);
+
+    // Ordenar: R-220 primero, luego el resto; dentro de cada grupo por número natural
+    const naturalNum = s => {
+        const n = parseInt((s || '').replace(/\D/g, ''), 10);
+        return isNaN(n) ? 99999 : n;
+    };
+    const habList = rawHabs.sort((a, b) => {
+        const edifA = a.v2_pabellones?.v2_edificios?.nombre || '';
+        const edifB = b.v2_pabellones?.v2_edificios?.nombre || '';
+        const isR220A = edifA.toUpperCase().includes('R-220') || edifA.toUpperCase().includes('R220');
+        const isR220B = edifB.toUpperCase().includes('R-220') || edifB.toUpperCase().includes('R220');
+        if (isR220A && !isR220B) return -1;
+        if (!isR220A && isR220B) return 1;
+        // Mismo grupo: ordenar por número de habitación natural
+        return naturalNum(a.numero_hab) - naturalNum(b.numero_hab);
+    });
+
+
 
     // Asignaciones activas en el período para mostrar empresa en el grid
     const { data: asigActivas } = await supabase.from('v2_asignaciones')
@@ -180,8 +318,7 @@ async function renderGrid() {
     const regMap = {}; // habitacion_id+fecha → estado
     (regs || []).forEach(r => { regMap[r.habitacion_id + '|' + r.fecha] = r.estado; });
 
-    const dias    = _periodo.dias;
-    const habList = habs || [];
+    const dias = _periodo.dias;
 
     if (!habList.length) {
         body.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-muted)">Sin habitaciones para este filtro</div>';
@@ -241,103 +378,173 @@ async function renderGrid() {
       </table>`;
 }
 
-// ── BILLING: resumen por empresa+contrato ──────────────────────────────
+// ── BILLING: cobro por N° contrato (cama ocupada × día) ────────────────
 async function renderBilling() {
     const body = document.getElementById('censo-body');
-    body.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-muted)">⏳ Calculando…</div>';
+    body.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-muted)">⏳ Calculando cobros…</div>';
 
-    // Query corregida: asignaciones ACTIVAS en el período
-    // (checkin <= fin del período) Y (checkout es null O checkout >= inicio del período)
-    const { data: asigs, error: asigErr } = await supabase.from('v2_asignaciones')
-        .select('rut_huesped,numero_contrato,fecha_checkin,fecha_salida_programada,fecha_checkout,v2_empresas(nombre,turno,v2_gerencias(nombre))')
-        .lte('fecha_checkin', fmtISO(_periodo.fin))
-        .or(`fecha_checkout.is.null,fecha_checkout.gte.${fmtISO(_periodo.ini)}`);
+    const pIni = fmtISO(_periodo.ini);
+    const pFin = fmtISO(_periodo.fin);
 
-    if (asigErr) {
-        body.innerHTML = `<div style="color:#ef4444;padding:20px">❌ Error: ${asigErr.message}</div>`;
-        return;
-    }
+    // Traer todas las asignaciones que se solapan con el período
+    const { data: asigs, error } = await supabase.from('v2_asignaciones')
+        .select('id_cama,rut_huesped,nombre_huesped,numero_contrato,fecha_checkin,fecha_salida_programada,fecha_checkout,v2_empresas(nombre,turno,v2_gerencias(nombre)),v2_camas(numero_cama,v2_habitaciones(numero_hab))')
+        .lte('fecha_checkin', pFin)
+        .or(`fecha_checkout.is.null,fecha_checkout.gte.${pIni}`)
+        .not('estado_asignacion', 'eq', 'sin_checkout');
 
-    const total = {}; // key → {dias, turno, trabajadores, gerencia, contrato}
+    if (error) { body.innerHTML = `<div style="color:#ef4444;padding:20px">❌ ${error.message}</div>`; return; }
+
+    // Calcular camas-día solapadas con el período para cada asignación
+    const diasPeriodo = _periodo.dias.map(d => fmtISO(d));
+
+    // Agrupar por N° contrato → empresa → detalle de trabajadores
+    const porContrato = {}; // contrato → { emp, ger, turno, dias: Set<fecha>, trabajadores: Map<rut, {nombre, camasDia}> }
 
     (asigs || []).forEach(a => {
-        const empNombre = a.v2_empresas?.nombre || 'Sin empresa';
-        const gerNombre = a.v2_empresas?.v2_gerencias?.nombre || '—';
-        const cont      = a.numero_contrato || '—';
-        const turno     = a.v2_empresas?.turno || '—';
-        const key       = [empNombre, gerNombre, cont, turno].join('|||');
+        const cont = a.numero_contrato || '(sin contrato)';
+        const emp  = a.v2_empresas?.nombre || 'Sin empresa';
+        const ger  = a.v2_empresas?.v2_gerencias?.nombre || '—';
+        const turno= a.v2_empresas?.turno || '—';
+        const hab  = a.v2_camas?.v2_habitaciones?.numero_hab || '—';
 
-        if (!total[key]) total[key] = { camas: 0, trabajadores: new Set() };
-        total[key].trabajadores.add(a.rut_huesped);
+        if (!porContrato[cont]) porContrato[cont] = { emp, ger, turno, totalDias: 0, trabajadores: [] };
 
-        // Días solapados con el período (usando ISO strings para evitar TZ)
-        const checkin  = a.fecha_checkin;
-        const salidaP  = a.fecha_salida_programada || fmtISO(_periodo.fin);
-        const checkout = a.fecha_checkout;
-        const eIni     = checkin  > fmtISO(_periodo.ini) ? checkin  : fmtISO(_periodo.ini);
-        const eFin     = (checkout && checkout < salidaP ? checkout : salidaP) < fmtISO(_periodo.fin)
-                         ? (checkout && checkout < salidaP ? checkout : salidaP)
-                         : fmtISO(_periodo.fin);
-        if (eIni > eFin) return;
-        const diffDias = Math.round((new Date(eFin) - new Date(eIni)) / 86400000) + 1;
-        total[key].camas += diffDias;
+        // Contar días ocupados dentro del período
+        const desde = a.fecha_checkin > pIni ? a.fecha_checkin : pIni;
+        const hasta = (() => {
+            const salida = a.fecha_salida_programada || pFin;
+            const chk    = a.fecha_checkout;
+            const real   = (chk && chk < salida) ? chk : salida;
+            return real < pFin ? real : pFin;
+        })();
+        if (desde > hasta) return;
+        const camasDia = Math.round((new Date(hasta) - new Date(desde)) / 86400000) + 1;
+
+        porContrato[cont].totalDias += camasDia;
+        porContrato[cont].trabajadores.push({ nombre: a.nombre_huesped, rut: a.rut_huesped, hab, desde, hasta, camasDia });
     });
 
-    if (!Object.keys(total).length) {
-        body.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-muted)">Sin asignaciones en este período</div>';
+    if (!Object.keys(porContrato).length) {
+        body.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-muted)">Sin asignaciones activas en este período</div>';
         return;
     }
 
-    // Totales por empresa
-    const porEmpresa = {};
-    Object.entries(total).forEach(([key, v]) => {
-        const emp = key.split('|||')[0];
-        if (!porEmpresa[emp]) porEmpresa[emp] = 0;
-        porEmpresa[emp] += v.camas;
-    });
-    const grandTotal = Object.values(total).reduce((s, v) => s + v.camas, 0);
+    const grandTotal = Object.values(porContrato).reduce((s, v) => s + v.totalDias, 0);
+    const nContratos = Object.keys(porContrato).length;
+    const nTrab      = Object.values(porContrato).reduce((s, v) => s + v.trabajadores.length, 0);
 
-    // Tarjetas resumen por empresa
-    const summaryCards = Object.entries(porEmpresa).sort().map(([emp, dias]) => `
-      <div style="background:linear-gradient(135deg,#6366f1,#8b5cf6);border-radius:14px;padding:16px 20px;color:white;min-width:200px">
-        <div style="font-size:12px;opacity:.8;text-transform:uppercase;letter-spacing:.5px">${emp}</div>
-        <div style="font-size:32px;font-weight:900;line-height:1.1">${dias.toLocaleString('es-CL')}</div>
-        <div style="font-size:11px;opacity:.8">camas-día en el período</div>
+    // KPIs resumen
+    const kpis = [
+        { icon: '📄', lbl: 'Contratos',    val: nContratos,                     c: '#6366f1' },
+        { icon: '🛏️', lbl: 'Total Camas-Día', val: grandTotal.toLocaleString('es-CL'), c: '#0ea5e9' },
+        { icon: '👷', lbl: 'Trabajadores',  val: nTrab,                          c: '#10b981' },
+        { icon: '📅', lbl: 'Días período',  val: _periodo.dias.length,           c: '#f59e0b' },
+    ].map(k => `
+      <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:14px;padding:14px 18px;display:flex;align-items:center;gap:12px">
+        <div style="font-size:26px">${k.icon}</div>
+        <div>
+          <div style="font-size:22px;font-weight:900;color:${k.c}">${k.val}</div>
+          <div style="font-size:11px;color:var(--text-muted);font-weight:700;text-transform:uppercase">${k.lbl}</div>
+        </div>
       </div>`).join('');
 
-    const rows = Object.entries(total).sort((a,b) => a[0].localeCompare(b[0])).map(([key, v]) => {
-        const [emp, ger, cont, turno] = key.split('|||');
-        return `<tr style="border-bottom:1px solid var(--border)" onmouseover="this.style.background='var(--bg-hover,#f8fafc)'" onmouseout="this.style.background=''">
-          <td style="padding:10px 12px;font-weight:800;color:var(--text-primary);font-size:13px">${emp}</td>
-          <td style="padding:10px 12px;font-size:12px;color:var(--text-secondary)">${ger}</td>
-          <td style="padding:10px 12px;font-family:monospace;font-size:12px;color:#6366f1;font-weight:700">${cont}</td>
-          <td style="padding:10px 12px;font-size:12px;color:var(--text-secondary)">${turno}</td>
-          <td style="padding:10px 12px;text-align:right;font-weight:900;font-size:16px;color:#10b981">${v.camas.toLocaleString('es-CL')}</td>
-          <td style="padding:10px 12px;text-align:center;color:var(--text-muted);font-size:12px">${v.trabajadores.size}</td>
-        </tr>`;
-    }).join('');
+    // Filas por contrato (colapsables)
+    const contRows = Object.entries(porContrato)
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([cont, v], idx) => {
+            const pct = grandTotal > 0 ? Math.round((v.totalDias / grandTotal) * 100) : 0;
+            const detalle = v.trabajadores
+                .sort((a, b) => b.camasDia - a.camasDia)
+                .map(t => `
+                  <tr style="border-bottom:1px solid #f1f5f9" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background=''">
+                    <td style="padding:6px 12px;font-size:12px;font-weight:600;color:var(--text-primary)">${t.nombre}</td>
+                    <td style="padding:6px 12px;font-size:11px;font-family:monospace;color:#64748b">${t.rut}</td>
+                    <td style="padding:6px 12px;font-size:12px;font-weight:700;color:#6366f1;text-align:center">${t.hab}</td>
+                    <td style="padding:6px 12px;font-size:11px;color:#64748b;text-align:center">${t.desde}</td>
+                    <td style="padding:6px 12px;font-size:11px;color:#64748b;text-align:center">${t.hasta}</td>
+                    <td style="padding:6px 12px;font-size:13px;font-weight:900;color:#10b981;text-align:right">${t.camasDia}</td>
+                  </tr>`).join('');
+            return `
+            <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:14px;margin-bottom:10px;overflow:hidden">
+              <div onclick="(function(el){var p=el.nextElementSibling;var ic=el.querySelector('.bi');var open=p.style.display==='none';p.style.display=open?'block':'none';ic.textContent=open?'▲':'▼';})(this)"
+                style="padding:14px 18px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;user-select:none;gap:12px;flex-wrap:wrap">
+                <div style="display:flex;align-items:center;gap:14px;flex:1;min-width:0">
+                  <span style="font-family:monospace;font-size:14px;font-weight:900;color:#6366f1;white-space:nowrap">${cont}</span>
+                  <div style="min-width:0">
+                    <div style="font-weight:700;font-size:13px;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${v.emp}</div>
+                    <div style="font-size:11px;color:var(--text-muted)">${v.ger} · ${v.turno} · ${v.trabajadores.length} trabajador${v.trabajadores.length!==1?'es':''}</div>
+                  </div>
+                </div>
+                <div style="display:flex;align-items:center;gap:10px">
+                  <div style="text-align:right">
+                    <div style="font-size:22px;font-weight:900;color:#10b981">${v.totalDias.toLocaleString('es-CL')}</div>
+                    <div style="font-size:10px;color:var(--text-muted);font-weight:700">CAMAS-DÍA · ${pct}%</div>
+                  </div>
+                  <span class="bi" style="color:var(--text-muted);font-size:12px">▼</span>
+                </div>
+              </div>
+              <div style="display:none">
+                <div style="padding:6px 12px;background:#f8fafc;border-top:1px solid var(--border)">
+                  <div style="width:100%;background:#e2e8f0;border-radius:4px;height:4px">
+                    <div style="width:${pct}%;background:#10b981;height:4px;border-radius:4px"></div>
+                  </div>
+                </div>
+                <table style="width:100%;border-collapse:collapse">
+                  <thead><tr style="background:#f8fafc">
+                    <th style="padding:6px 12px;font-size:10px;color:#94a3b8;font-weight:700;text-transform:uppercase;text-align:left">Trabajador</th>
+                    <th style="padding:6px 12px;font-size:10px;color:#94a3b8;font-weight:700;text-transform:uppercase;text-align:left">RUT</th>
+                    <th style="padding:6px 12px;font-size:10px;color:#94a3b8;font-weight:700;text-transform:uppercase;text-align:center">HAB</th>
+                    <th style="padding:6px 12px;font-size:10px;color:#94a3b8;font-weight:700;text-transform:uppercase;text-align:center">Desde</th>
+                    <th style="padding:6px 12px;font-size:10px;color:#94a3b8;font-weight:700;text-transform:uppercase;text-align:center">Hasta</th>
+                    <th style="padding:6px 12px;font-size:10px;color:#94a3b8;font-weight:700;text-transform:uppercase;text-align:right">Camas-Día</th>
+                  </tr></thead>
+                  <tbody>${detalle}</tbody>
+                  <tfoot><tr style="background:#ede9fe">
+                    <td colspan="5" style="padding:8px 12px;font-weight:800;font-size:12px;color:#4338ca">SUBTOTAL — ${cont}</td>
+                    <td style="padding:8px 12px;text-align:right;font-weight:900;font-size:15px;color:#6366f1">${v.totalDias.toLocaleString('es-CL')}</td>
+                  </tr></tfoot>
+                </table>
+              </div>
+            </div>`;
+        }).join('');
 
     body.innerHTML = `
-      <div style="margin-bottom:16px">
-        <div style="font-size:13px;font-weight:700;color:var(--text-secondary);margin-bottom:12px">💰 Facturación · ${_periodo.label}</div>
-        <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">${summaryCards}
-          <div style="background:linear-gradient(135deg,#0f172a,#1e293b);border-radius:14px;padding:16px 20px;color:white;min-width:200px">
-            <div style="font-size:12px;opacity:.8;text-transform:uppercase;letter-spacing:.5px">TOTAL PERÍODO</div>
-            <div style="font-size:32px;font-weight:900;line-height:1.1">${grandTotal.toLocaleString('es-CL')}</div>
-            <div style="font-size:11px;opacity:.8">camas-día totales</div>
-          </div>
+      <div style="margin-bottom:14px">
+        <div style="font-size:13px;font-weight:700;color:var(--text-muted);margin-bottom:10px">
+          💰 Facturación por contrato · ${_periodo.label}
+          <span style="font-size:11px;font-weight:400;margin-left:8px">Fuente: camas ocupadas reales (check-in / check-out)</span>
         </div>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+          <label style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase">Desde</label>
+          <input type="date" id="billing-desde" value="${pIni}"
+            style="padding:7px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--bg-card);color:var(--text-primary);font-size:12px;outline:none">
+          <label style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase">Hasta</label>
+          <input type="date" id="billing-hasta" value="${pFin}"
+            style="padding:7px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--bg-card);color:var(--text-primary);font-size:12px;outline:none">
+          <button onclick="window._censoExportBilling()" id="btn-export-billing"
+            style="padding:8px 18px;border:none;border-radius:9px;background:linear-gradient(135deg,#10b981,#059669);color:#fff;font-weight:700;font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px">
+            📥 Detalle Excel
+          </button>
+          <button onclick="window._censoExportEstadoPago()" id="btn-export-pago"
+            style="padding:8px 18px;border:none;border-radius:9px;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;font-weight:700;font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px">
+            📋 Estado de Pago
+          </button>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:16px">${kpis}</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;background:linear-gradient(135deg,#0f172a,#1e293b);border-radius:14px;padding:14px 20px;margin-bottom:16px">
+          <div>
+            <div style="color:rgba(255,255,255,.6);font-size:11px;font-weight:700;text-transform:uppercase">TOTAL GENERAL CAMAS-DÍA A FACTURAR</div>
+            <div style="color:rgba(255,255,255,.5);font-size:11px;margin-top:2px">${nContratos} contratos · ${nTrab} trabajadores · período ${_periodo.label}</div>
+          </div>
+          <div style="font-size:38px;font-weight:900;color:#a5f3fc">${grandTotal.toLocaleString('es-CL')}</div>
+        </div>
+        <div style="font-size:12px;font-weight:700;color:var(--text-muted);margin-bottom:8px">DESGLOSE POR CONTRATO <span style="font-weight:400">(click para expandir)</span></div>
       </div>
-      <table style="width:100%;border-collapse:collapse;font-size:12px">
-        <thead><tr style="background:var(--bg-card);border-bottom:2px solid var(--border)">
-          ${['Empresa','Gerencia','N° Contrato','Turno','Total Camas-Día','Trabajadores'].map(h =>
-            `<th style="padding:9px 12px;text-align:left;font-size:10px;color:#94a3b8;font-weight:700;text-transform:uppercase">${h}</th>`).join('')}
-        </tr></thead>
-        <tbody>${rows}</tbody>
-      </table>`;
+      ${contRows}`;
 }
-
 // ── BAJADAS: salidas por pabellón y empresa ────────────────────────────
+
 async function renderBajadas() {
     const body = document.getElementById('censo-body');
     body.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-muted)">⏳ Cargando…</div>';
@@ -421,4 +628,483 @@ async function exportExcel() {
     const wb = window.XLSX.utils.book_new();
     window.XLSX.utils.book_append_sheet(wb, ws, 'Censo');
     window.XLSX.writeFile(wb, `Censo_${fmtISO(_periodo.ini)}_${fmtISO(_periodo.fin)}.xlsx`);
+}
+
+// ── EXPORT BILLING EXCEL ────────────────────────────────────────────────
+window._censoExportBilling = async () => {
+    const btn = document.getElementById('btn-export-billing');
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Generando…'; }
+
+    const desde = document.getElementById('billing-desde')?.value || fmtISO(_periodo.ini);
+    const hasta  = document.getElementById('billing-hasta')?.value  || fmtISO(_periodo.fin);
+
+    try {
+        if (!window.XLSX) {
+            const s = document.createElement('script');
+            s.src = 'https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js';
+            await new Promise((res, rej) => { s.onload = res; s.onerror = rej; document.head.appendChild(s); });
+        }
+
+        const { data: asigs, error } = await supabase.from('v2_asignaciones')
+            .select('id_cama,rut_huesped,nombre_huesped,numero_contrato,fecha_checkin,fecha_salida_programada,fecha_checkout,v2_empresas(nombre,turno,v2_gerencias(nombre)),v2_camas(numero_cama,v2_habitaciones(numero_hab))')
+            .lte('fecha_checkin', hasta)
+            .or(`fecha_checkout.is.null,fecha_checkout.gte.${desde}`)
+            .not('estado_asignacion', 'eq', 'sin_checkout');
+
+        if (error) throw new Error(error.message);
+
+        // Construir datos por contrato
+        const porContrato = {};
+        const detalleTodos = [];
+
+        (asigs || []).forEach(a => {
+            const cont  = a.numero_contrato || '(sin contrato)';
+            const emp   = a.v2_empresas?.nombre || 'Sin empresa';
+            const ger   = a.v2_empresas?.v2_gerencias?.nombre || '—';
+            const turno = a.v2_empresas?.turno || '—';
+            const hab   = a.v2_camas?.v2_habitaciones?.numero_hab || '—';
+
+            if (!porContrato[cont]) porContrato[cont] = { emp, ger, turno, totalDias: 0, nTrab: 0 };
+
+            const ini2  = a.fecha_checkin > desde ? a.fecha_checkin : desde;
+            const salida = a.fecha_salida_programada || hasta;
+            const chk    = a.fecha_checkout;
+            const real   = (chk && chk < salida) ? chk : salida;
+            const fin2   = real < hasta ? real : hasta;
+            if (ini2 > fin2) return;
+            const dias = Math.round((new Date(fin2) - new Date(ini2)) / 86400000) + 1;
+
+            porContrato[cont].totalDias += dias;
+            porContrato[cont].nTrab++;
+
+            detalleTodos.push({
+                cont, emp, ger, turno,
+                nombre: a.nombre_huesped, rut: a.rut_huesped,
+                hab, desde: ini2, hasta: fin2, dias
+            });
+        });
+
+        const grandTotal = Object.values(porContrato).reduce((s, v) => s + v.totalDias, 0);
+        const fechaHoy   = new Date().toLocaleDateString('es-CL');
+
+        const { utils, writeFile } = window.XLSX;
+        const wb = utils.book_new();
+
+        // ── Hoja 1: RESUMEN POR CONTRATO ──────────────────────────────
+        const res = [
+            [`FACTURACIÓN PERÍODO: ${desde} → ${hasta}`],
+            [`Generado: ${fechaHoy}   |   Total camas-día: ${grandTotal}`],
+            [],
+            ['N° CONTRATO', 'EMPRESA', 'GERENCIA', 'TURNO', 'TRABAJADORES', 'TOTAL CAMAS-DÍA'],
+        ];
+        Object.entries(porContrato)
+            .sort((a, b) => a[0].localeCompare(b[0]))
+            .forEach(([cont, v]) => {
+                res.push([cont, v.emp, v.ger, v.turno, v.nTrab, v.totalDias]);
+            });
+        res.push([]);
+        res.push(['', '', '', '', 'GRAND TOTAL', grandTotal]);
+
+        const ws1 = utils.aoa_to_sheet(res);
+        ws1['!cols'] = [
+            { wch: 18 }, { wch: 30 }, { wch: 26 }, { wch: 16 }, { wch: 14 }, { wch: 18 }
+        ];
+        utils.book_append_sheet(wb, ws1, 'Resumen por Contrato');
+
+        // ── Hoja 2: DETALLE POR TRABAJADOR ────────────────────────────
+        const det = [
+            [`DETALLE TRABAJADORES · PERÍODO ${desde} → ${hasta}`],
+            [`Generado: ${fechaHoy}`],
+            [],
+            ['N° CONTRATO', 'EMPRESA', 'GERENCIA', 'TURNO', 'TRABAJADOR', 'RUT', 'HAB', 'CHECK-IN PERÍODO', 'CHECK-OUT PERÍODO', 'CAMAS-DÍA'],
+        ];
+        detalleTodos
+            .sort((a, b) => a.cont.localeCompare(b.cont) || a.nombre.localeCompare(b.nombre))
+            .forEach(t => {
+                det.push([t.cont, t.emp, t.ger, t.turno, t.nombre, t.rut, t.hab, t.desde, t.hasta, t.dias]);
+            });
+
+        const ws2 = utils.aoa_to_sheet(det);
+        ws2['!cols'] = [
+            { wch: 16 }, { wch: 26 }, { wch: 22 }, { wch: 14 },
+            { wch: 28 }, { wch: 14 }, { wch: 8 }, { wch: 16 }, { wch: 16 }, { wch: 12 }
+        ];
+        utils.book_append_sheet(wb, ws2, 'Detalle Trabajadores');
+
+        const nombre = `Facturacion_${desde}_${hasta}.xlsx`;
+        writeFile(wb, nombre);
+
+    } catch (e) {
+        alert('Error al exportar: ' + e.message);
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = '📥 Descargar Excel'; }
+    }
+};
+
+// ── EXPORT ESTADO DE PAGO (ExcelJS · estilo Aramark) ────────────────────
+window._censoExportEstadoPago = async () => {
+    const btn = document.getElementById('btn-export-pago');
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Generando…'; }
+
+    const desde = document.getElementById('billing-desde')?.value || fmtISO(_periodo.ini);
+    const hasta  = document.getElementById('billing-hasta')?.value  || fmtISO(_periodo.fin);
+
+    // ── Colores corporativos Aramark (iguales al template de empresas) ──
+    const RED       = 'FFEE3124';
+    const RED_DARK  = 'FFB71C1C';
+    const RED_LITE  = 'FFFFF5F5';
+    const WHITE     = 'FFFFFFFF';
+    const GRAY      = 'FF424242';
+    const GREEN_BG  = 'FFC6EFCE';
+    const GREEN_FG  = 'FF276221';
+    const BORDER    = { style: 'thin', color: { argb: 'FFDDDDDD' } };
+    const ALL_B     = { top: BORDER, left: BORDER, bottom: BORDER, right: BORDER };
+    const THICK_B   = { style: 'medium', color: { argb: RED_DARK } };
+
+    const styleHdr = c => {
+        c.font      = { name: 'Calibri', bold: true, size: 11, color: { argb: WHITE } };
+        c.fill      = { type: 'pattern', pattern: 'solid', fgColor: { argb: RED } };
+        c.alignment = { horizontal: 'center', vertical: 'middle' };
+        c.border    = ALL_B;
+    };
+    const styleData = (c, alt) => {
+        c.font      = { name: 'Calibri', size: 10, color: { argb: GRAY } };
+        c.fill      = { type: 'pattern', pattern: 'solid', fgColor: { argb: alt ? 'FFF9F9F9' : RED_LITE } };
+        c.alignment = { horizontal: 'center', vertical: 'middle' };
+        c.border    = ALL_B;
+    };
+    const styleTotal = c => {
+        c.font      = { name: 'Calibri', bold: true, size: 11, color: { argb: WHITE } };
+        c.fill      = { type: 'pattern', pattern: 'solid', fgColor: { argb: RED_DARK } };
+        c.alignment = { horizontal: 'center', vertical: 'middle' };
+        c.border    = { top: THICK_B, bottom: THICK_B, left: BORDER, right: BORDER };
+    };
+
+    try {
+        // Cargar ExcelJS
+        if (typeof ExcelJS === 'undefined') {
+            await new Promise((res, rej) => {
+                const s = document.createElement('script');
+                s.src = 'https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js';
+                s.onload = res; s.onerror = rej;
+                document.head.appendChild(s);
+            });
+        }
+
+        // Traer datos
+        const { data: asigs, error } = await supabase.from('v2_asignaciones')
+            .select('rut_huesped,numero_contrato,fecha_checkin,fecha_salida_programada,fecha_checkout,v2_empresas(nombre,turno,v2_gerencias(nombre))')
+            .lte('fecha_checkin', hasta)
+            .or(`fecha_checkout.is.null,fecha_checkout.gte.${desde}`)
+            .not('estado_asignacion', 'eq', 'sin_checkout');
+        if (error) throw new Error(error.message);
+
+        const porContrato = {};
+        (asigs || []).forEach(a => {
+            const cont  = a.numero_contrato || '(sin contrato)';
+            const emp   = a.v2_empresas?.nombre || 'Sin empresa';
+            const ger   = a.v2_empresas?.v2_gerencias?.nombre || '—';
+            const turno = a.v2_empresas?.turno || '—';
+            if (!porContrato[cont]) porContrato[cont] = { emp, ger, turno, totalDias: 0, ruts: new Set() };
+            const ini2   = a.fecha_checkin > desde ? a.fecha_checkin : desde;
+            const salida = a.fecha_salida_programada || hasta;
+            const chk    = a.fecha_checkout;
+            const real   = (chk && chk < salida) ? chk : salida;
+            const fin2   = real < hasta ? real : hasta;
+            if (ini2 > fin2) return;
+            const dias = Math.round((new Date(fin2) - new Date(ini2)) / 86400000) + 1;
+            porContrato[cont].totalDias += dias;
+            porContrato[cont].ruts.add(a.rut_huesped);
+        });
+
+        const grandTotal  = Object.values(porContrato).reduce((s, v) => s + v.totalDias, 0);
+        const totalTrab   = Object.values(porContrato).reduce((s, v) => s + v.ruts.size, 0);
+        const nConts      = Object.keys(porContrato).length;
+        const fechaHoy    = new Date().toLocaleDateString('es-CL');
+        const NCOLS       = 10; // columnas A-J
+
+        // ── Workbook ──────────────────────────────────────────────────────
+        const wb = new ExcelJS.Workbook();
+        wb.creator = 'PC Hotelería'; wb.created = new Date();
+
+        const ws = wb.addWorksheet('Estado de Pago', {
+            pageSetup: { paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1 },
+            views: [{ showGridLines: true, state: 'frozen', xSplit: 0, ySplit: 6 }]
+        });
+
+        ws.columns = [
+            { key: 'A', width: 18 }, // N° Contrato
+            { key: 'B', width: 30 }, // Empresa
+            { key: 'C', width: 24 }, // Gerencia
+            { key: 'D', width: 14 }, // Turno
+            { key: 'E', width: 14 }, // Trabajadores
+            { key: 'F', width: 14 }, // Camas-Día
+            { key: 'G', width: 10 }, // %
+            { key: 'H', width: 18 }, // Estado Pago
+            { key: 'I', width: 20 }, // N° OC / Factura
+            { key: 'J', width: 30 }, // Observaciones
+        ];
+
+        // ── FILAS 1-3: CABECERA ROJA CON LOGO ────────────────────────────
+        for (let r = 1; r <= 3; r++) {
+            ws.getRow(r).height = r === 2 ? 50 : 22;
+            for (let c = 1; c <= NCOLS; c++) {
+                ws.getRow(r).getCell(c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: RED } };
+            }
+        }
+
+        // Logo Aramark
+        try {
+            const resp   = await fetch('./aramark.png');
+            const buffer = await resp.arrayBuffer();
+            const imgId  = wb.addImage({ buffer, extension: 'png' });
+            ws.addImage(imgId, { tl: { col: 0.1, row: 0.1 }, ext: { width: 175, height: 80 } });
+        } catch {
+            ws.mergeCells('A1:C3');
+            const lc = ws.getCell('A1');
+            lc.value = 'ARAMARK';
+            lc.font  = { name: 'Calibri', bold: true, size: 22, color: { argb: WHITE } };
+            lc.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: RED } };
+            lc.alignment = { horizontal: 'center', vertical: 'middle' };
+        }
+
+        ws.mergeCells('D1:J3');
+        const titleCell    = ws.getCell('D1');
+        titleCell.value    = `ESTADO DE PAGO — ALOJAMIENTO ARAMARK\nPC Hotelería  ·  Período ${desde}  →  ${hasta}`;
+        titleCell.font     = { name: 'Calibri', bold: true, size: 16, color: { argb: WHITE } };
+        titleCell.fill     = { type: 'pattern', pattern: 'solid', fgColor: { argb: RED } };
+        titleCell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+
+        // ── FILA 4: RESUMEN PERÍODO ───────────────────────────────────────
+        ws.getRow(4).height = 26;
+        for (let c = 1; c <= NCOLS; c++) {
+            ws.getRow(4).getCell(c).fill   = { type: 'pattern', pattern: 'solid', fgColor: { argb: RED_DARK } };
+            ws.getRow(4).getCell(c).border = ALL_B;
+        }
+        ws.mergeCells('A4:D4');
+        const r4L    = ws.getCell('A4');
+        r4L.value    = `Generado: ${fechaHoy}   ·   ${nConts} contratos   ·   ${totalTrab} trabajadores`;
+        r4L.font     = { name: 'Calibri', bold: true, size: 10, color: { argb: WHITE } };
+        r4L.alignment = { horizontal: 'left', vertical: 'middle' };
+
+        ws.mergeCells('E4:G4');
+        const r4M    = ws.getCell('E4');
+        r4M.value    = `TOTAL CAMAS-DÍA: ${grandTotal.toLocaleString('es-CL')}`;
+        r4M.font     = { name: 'Calibri', bold: true, size: 12, color: { argb: WHITE } };
+        r4M.alignment = { horizontal: 'center', vertical: 'middle' };
+
+        ws.mergeCells('H4:J4');
+        const r4R    = ws.getCell('H4');
+        r4R.value    = '☐ Pendiente revisión Aramark';
+        r4R.font     = { name: 'Calibri', italic: true, size: 10, color: { argb: WHITE } };
+        r4R.alignment = { horizontal: 'center', vertical: 'middle' };
+
+        // ── FILA 5: CABECERAS ─────────────────────────────────────────────
+        ws.getRow(5).height = 28;
+        ['N° CONTRATO','EMPRESA','GERENCIA','TURNO','TRABAJADORES','CAMAS-DÍA','% TOTAL','ESTADO PAGO','N° OC / FACTURA','OBSERVACIONES']
+            .forEach((h, i) => styleHdr(ws.getRow(5).getCell(i + 1)));
+        ['N° CONTRATO','EMPRESA','GERENCIA','TURNO','TRABAJADORES','CAMAS-DÍA','% TOTAL','ESTADO PAGO','N° OC / FACTURA','OBSERVACIONES']
+            .forEach((h, i) => { ws.getRow(5).getCell(i + 1).value = h; });
+
+        // ── FILAS 6+: DATOS POR CONTRATO ─────────────────────────────────
+        const sorted = Object.entries(porContrato).sort((a, b) => a[0].localeCompare(b[0]));
+        sorted.forEach(([cont, v], idx) => {
+            const rowN = 6 + idx;
+            const alt  = idx % 2 === 1;
+            const pct  = grandTotal > 0 ? ((v.totalDias / grandTotal) * 100).toFixed(1) + '%' : '0%';
+            ws.getRow(rowN).height = 20;
+
+            const vals = [cont, v.emp, v.ger, v.turno, v.ruts.size, v.totalDias, pct, 'PENDIENTE', '', ''];
+            vals.forEach((val, ci) => {
+                const cell = ws.getRow(rowN).getCell(ci + 1);
+                cell.value = val;
+                styleData(cell, alt);
+                // Columna N° Contrato en negrita morada
+                if (ci === 0) { cell.font = { name: 'Calibri', bold: true, size: 10, color: { argb: 'FF6366f1' } }; }
+                // Camas-Día en verde
+                if (ci === 5) { cell.font = { name: 'Calibri', bold: true, size: 11, color: { argb: GREEN_FG } }; }
+            });
+
+            // Dropdown Estado Pago
+            ws.getRow(rowN).getCell(8).dataValidation = {
+                type: 'list', allowBlank: false, showDropDown: false,
+                formulae: ['"PENDIENTE,PAGADO,OBSERVADO,ANULADO"'],
+                showErrorMessage: true, errorTitle: 'Estado inválido', error: 'Seleccione de la lista'
+            };
+        });
+
+        // ── FILA TOTAL ────────────────────────────────────────────────────
+        const totalRow = 6 + sorted.length + 1;
+        ws.getRow(totalRow).height = 26;
+        const totalVals = ['TOTAL GENERAL', '', '', '', totalTrab, grandTotal, '100%', '', '', ''];
+        totalVals.forEach((val, ci) => {
+            const cell = ws.getRow(totalRow).getCell(ci + 1);
+            cell.value = val;
+            styleTotal(cell);
+        });
+
+        // ── LEYENDA ───────────────────────────────────────────────────────
+        const legRow = totalRow + 2;
+        ws.mergeCells(`A${legRow}:J${legRow}`);
+        const legCell  = ws.getCell(`A${legRow}`);
+        legCell.value  = '* Estado de Pago: PENDIENTE (por revisar)  ·  PAGADO (confirmado)  ·  OBSERVADO (requiere revisión)  ·  ANULADO';
+        legCell.font   = { name: 'Calibri', size: 8, italic: true, color: { argb: 'FF718096' } };
+        legCell.alignment = { horizontal: 'left' };
+
+        // ── GENERAR Y DESCARGAR ───────────────────────────────────────────
+        const buffer = await wb.xlsx.writeBuffer();
+        const blob   = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+        const nombre = `EstadoPago_${desde}_${hasta}.xlsx`;
+
+        if (window.showSaveFilePicker) {
+            try {
+                const handle   = await window.showSaveFilePicker({ suggestedName: nombre, types: [{ description: 'Excel', accept: { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] } }] });
+                const writable  = await handle.createWritable();
+                await writable.write(blob); await writable.close(); return;
+            } catch (e) { if (e.name === 'AbortError') return; }
+        }
+        const url = URL.createObjectURL(blob);
+        const a   = document.createElement('a');
+        a.href = url; a.download = nombre; a.style.display = 'none';
+        document.body.appendChild(a); a.click();
+        setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 2000);
+
+    } catch (e) {
+        alert('Error al exportar: ' + e.message);
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = '📋 Estado de Pago'; }
+    }
+};
+
+// ── GUARDAR PERÍODO: cierre en v2_facturacion_cierres ─────────────────────
+async function censoGuardarPeriodo() {
+    const btn = document.getElementById('btn-guardar-periodo');
+    if (!_periodo) return;
+    if (!confirm(`¿Guardar el período ${_periodo.label}?\n\nSe registrará el resumen de facturación en el historial.`)) return;
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Guardando…'; }
+    try {
+        const pIni = fmtISO(_periodo.ini);
+        const pFin = fmtISO(_periodo.fin);
+        const { data: asigs, error } = await supabase.from('v2_asignaciones')
+            .select('rut_huesped,nombre_huesped,numero_contrato,fecha_checkin,fecha_salida_programada,fecha_checkout,v2_empresas(nombre,turno,v2_gerencias(nombre)),v2_camas(numero_cama,v2_habitaciones(numero_hab))')
+            .lte('fecha_checkin', pFin)
+            .or(`fecha_checkout.is.null,fecha_checkout.gte.${pIni}`)
+            .not('estado_asignacion', 'eq', 'sin_checkout');
+        if (error) throw new Error(error.message);
+        const porContrato = {};
+        (asigs || []).forEach(a => {
+            const cont = a.numero_contrato || '(sin contrato)';
+            const emp  = a.v2_empresas?.nombre || 'Sin empresa';
+            const ger  = a.v2_empresas?.v2_gerencias?.nombre || '—';
+            const turno= a.v2_empresas?.turno || '—';
+            const hab  = a.v2_camas?.v2_habitaciones?.numero_hab || '—';
+            if (!porContrato[cont]) porContrato[cont] = { cont, emp, ger, turno, totalDias: 0, ruts: new Set(), detTrab: [] };
+            const ini2 = a.fecha_checkin > pIni ? a.fecha_checkin : pIni;
+            const sal  = a.fecha_salida_programada || pFin;
+            const chk  = a.fecha_checkout;
+            const real = (chk && chk < sal) ? chk : sal;
+            const fin2 = real < pFin ? real : pFin;
+            if (ini2 > fin2) return;
+            const dias = Math.round((new Date(fin2) - new Date(ini2)) / 86400000) + 1;
+            porContrato[cont].totalDias += dias;
+            porContrato[cont].ruts.add(a.rut_huesped);
+            porContrato[cont].detTrab.push({ nombre: a.nombre_huesped, rut: a.rut_huesped, hab, desde: ini2, hasta: fin2, dias });
+        });
+        const grandTotal = Object.values(porContrato).reduce((s, v) => s + v.totalDias, 0);
+        const detalle    = Object.entries(porContrato).map(([cont, v]) => ({
+            cont, emp: v.emp, ger: v.ger, turno: v.turno,
+            nTrab: v.ruts.size, totalDias: v.totalDias, trabajadores: v.detTrab
+        }));
+        const { error: insErr } = await supabase.from('v2_facturacion_cierres').insert({
+            periodo_ini: pIni, periodo_fin: pFin, periodo_label: _periodo.label,
+            total_camas_dia: grandTotal, total_contratos: detalle.length,
+            total_trab: Object.values(porContrato).reduce((s, v) => s + v.ruts.size, 0),
+            detalle_json: detalle, cerrado_por: window._currentUser?.username || 'supervisor', estado: 'guardado'
+        });
+        if (insErr) throw new Error(insErr.message);
+        alert(`✅ Período guardado\n${_periodo.label}\n${grandTotal.toLocaleString('es-CL')} camas-día · ${detalle.length} contratos`);
+        _activeTab = 'historial'; renderTab();
+    } catch (e) {
+        alert('Error al guardar: ' + e.message);
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = '💾 Guardar Período'; }
+    }
+}
+
+// ── HISTORIAL: períodos guardados ─────────────────────────────────────────
+async function renderHistorial() {
+    const body = document.getElementById('censo-body');
+    body.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-muted)">⏳ Cargando historial…</div>';
+    const { data: cierres, error } = await supabase.from('v2_facturacion_cierres')
+        .select('*').order('periodo_ini', { ascending: false }).limit(36);
+    if (error) { body.innerHTML = `<div style="color:#ef4444;padding:20px">❌ ${error.message}<br><small>Ejecuta el SQL sql_crear_facturacion_cierres.sql en Supabase primero.</small></div>`; return; }
+    if (!cierres?.length) {
+        body.innerHTML = '<div style="text-align:center;padding:60px 20px"><div style="font-size:48px">📂</div><div style="font-size:16px;font-weight:700;margin:12px 0">Sin períodos guardados</div><div style="color:var(--text-muted)">Usa <strong>💾 Guardar Período</strong> para registrar el cierre del mes.</div></div>';
+        return;
+    }
+    const ST = { guardado: { bg:'#dbeafe',c:'#1d4ed8',lbl:'💾 Guardado' }, facturado: { bg:'#dcfce7',c:'#15803d',lbl:'✅ Facturado' }, anulado: { bg:'#fee2e2',c:'#dc2626',lbl:'🚫 Anulado' } };
+    const cards = cierres.map(c => {
+        const st  = ST[c.estado] || ST.guardado;
+        const det = c.detalle_json || [];
+        const filas = det.slice(0, 5).map(d =>
+            `<tr style="border-bottom:1px solid #f1f5f9">
+              <td style="padding:5px 10px;font-family:monospace;font-size:11px;color:#6366f1;font-weight:700">${d.cont}</td>
+              <td style="padding:5px 10px;font-size:11px;font-weight:600">${d.emp}</td>
+              <td style="padding:5px 10px;font-size:11px;color:#64748b">${d.ger}</td>
+              <td style="padding:5px 10px;font-size:11px;text-align:center">${d.nTrab}</td>
+              <td style="padding:5px 10px;font-size:13px;font-weight:900;color:#10b981;text-align:right">${d.totalDias}</td>
+            </tr>`).join('');
+        const mas = det.length > 5 ? `<div style="padding:6px 10px;font-size:11px;color:#94a3b8;text-align:center">+ ${det.length-5} contratos más…</div>` : '';
+        const fGuard = c.cerrado_en ? new Date(c.cerrado_en).toLocaleString('es-CL') : '—';
+        return `
+        <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:16px;margin-bottom:14px;overflow:hidden">
+          <div style="padding:14px 18px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;border-bottom:1px solid var(--border)">
+            <div>
+              <div style="font-size:15px;font-weight:900;color:var(--text-primary)">${c.periodo_label}</div>
+              <div style="font-size:11px;color:var(--text-muted);margin-top:2px">Por ${c.cerrado_por} · ${fGuard}</div>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <span style="padding:4px 12px;border-radius:20px;background:${st.bg};color:${st.c};font-size:11px;font-weight:700">${st.lbl}</span>
+              ${c.estado==='guardado' ? `<button onclick="window._censoMarcarFacturado('${c.id}')" style="padding:6px 14px;border-radius:8px;border:none;background:#dcfce7;color:#15803d;font-size:11px;font-weight:700;cursor:pointer">✅ Marcar Facturado</button>` : ''}
+              <button onclick="window._censoExportHistorialExcel('${c.id}')" style="padding:6px 14px;border-radius:8px;border:none;background:#ede9fe;color:#6366f1;font-size:11px;font-weight:700;cursor:pointer">📥 Excel</button>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);border-bottom:1px solid var(--border)">
+            ${[['📄',c.total_contratos,'Contratos','#6366f1'],['🛏️',(c.total_camas_dia||0).toLocaleString('es-CL'),'Camas-Día','#0ea5e9'],['👷',c.total_trab,'Trabajadores','#10b981']].map(([icon,val,lbl,color])=>`
+            <div style="padding:12px;text-align:center;border-right:1px solid var(--border)">
+              <div style="font-size:18px;font-weight:900;color:${color}">${val}</div>
+              <div style="font-size:10px;color:var(--text-muted);font-weight:700;text-transform:uppercase">${icon} ${lbl}</div>
+            </div>`).join('')}
+          </div>
+          <table style="width:100%;border-collapse:collapse">
+            <thead><tr style="background:#f8fafc">
+              <th style="padding:6px 10px;font-size:10px;color:#94a3b8;font-weight:700;text-align:left">CONTRATO</th>
+              <th style="padding:6px 10px;font-size:10px;color:#94a3b8;font-weight:700;text-align:left">EMPRESA</th>
+              <th style="padding:6px 10px;font-size:10px;color:#94a3b8;font-weight:700;text-align:left">GERENCIA</th>
+              <th style="padding:6px 10px;font-size:10px;color:#94a3b8;font-weight:700;text-align:center">TRAB.</th>
+              <th style="padding:6px 10px;font-size:10px;color:#94a3b8;font-weight:700;text-align:right">CAMAS-DÍA</th>
+            </tr></thead>
+            <tbody>${filas}</tbody>
+          </table>${mas}
+        </div>`;
+    }).join('');
+    body.innerHTML = `<div style="font-size:13px;font-weight:700;color:var(--text-muted);margin-bottom:12px">📂 Historial · ${cierres.length} período${cierres.length!==1?'s':''} guardado${cierres.length!==1?'s':''}</div>${cards}`;
+    window._censoMarcarFacturado = async (id) => {
+        if (!confirm('¿Marcar como FACTURADO?')) return;
+        const { error } = await supabase.from('v2_facturacion_cierres').update({ estado:'facturado' }).eq('id', id);
+        if (error) { alert('Error: ' + error.message); return; }
+        renderHistorial();
+    };
+    window._censoExportHistorialExcel = async (id) => {
+        const cierre = cierres.find(c => c.id === id);
+        if (!cierre) return;
+        const elI = document.getElementById('billing-desde');
+        const elF = document.getElementById('billing-hasta');
+        const pI = elI?.value; const pF = elF?.value;
+        if (elI) elI.value = cierre.periodo_ini;
+        if (elF) elF.value = cierre.periodo_fin;
+        await window._censoExportEstadoPago();
+        if (elI && pI) elI.value = pI;
+        if (elF && pF) elF.value = pF;
+    };
 }

@@ -370,25 +370,31 @@ function renderResumenGerencias() {
                 </tr>`).join('');
             return `
             <div style="background:var(--bg-card,#fff);border-radius:14px;margin-bottom:10px;overflow:hidden;border:1px solid var(--border,#e2e8f0);box-shadow:0 2px 8px rgba(0,0,0,.05)">
-                <div style="background:linear-gradient(135deg,#4338ca,#7c3aed);color:white;padding:12px 16px;display:flex;justify-content:space-between;align-items:center">
+                <div onclick="(function(el){var p=el.nextElementSibling;var icon=el.querySelector('.ger-icon');var open=p.style.display==='none';p.style.display=open?'block':'none';icon.textContent=open?'▲':'▼';})(this)"
+                    style="background:linear-gradient(135deg,#4338ca,#7c3aed);color:white;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;user-select:none">
                     <div>
                         <div style="font-weight:800;font-size:14px">${esc(ger)}</div>
                         <div style="font-size:11px;opacity:.8">${rows.length} contrato${rows.length!==1?'s':''}</div>
                     </div>
-                    <span style="font-size:18px;font-weight:900;background:rgba(255,255,255,.2);border-radius:10px;padding:4px 14px">${subtotal.toLocaleString('es-CL')}</span>
+                    <div style="display:flex;align-items:center;gap:10px">
+                        <span style="font-size:18px;font-weight:900;background:rgba(255,255,255,.2);border-radius:10px;padding:4px 14px">${subtotal.toLocaleString('es-CL')}</span>
+                        <span class="ger-icon" style="font-size:13px;opacity:.9">▼</span>
+                    </div>
                 </div>
-                <table style="width:100%;border-collapse:collapse">
-                    <thead><tr style="background:#f8fafc">
-                        <th style="padding:7px 12px;text-align:left;font-size:10px;color:#94a3b8;font-weight:700;text-transform:uppercase">Empresa</th>
-                        <th style="padding:7px 12px;text-align:left;font-size:10px;color:#94a3b8;font-weight:700;text-transform:uppercase">N° Contrato</th>
-                        <th style="padding:7px 12px;text-align:right;font-size:10px;color:#94a3b8;font-weight:700;text-transform:uppercase">Cupos</th>
-                    </tr></thead>
-                    <tbody>${rowsHTML}</tbody>
-                    <tfoot><tr style="background:#ede9fe">
-                        <td colspan="2" style="padding:8px 12px;font-weight:800;font-size:12px;color:#4338ca">Subtotal — ${esc(ger)}</td>
-                        <td style="padding:8px 12px;text-align:right;font-weight:900;font-size:15px;color:#6366f1">${subtotal.toLocaleString('es-CL')}</td>
-                    </tr></tfoot>
-                </table>
+                <div style="display:none">
+                    <table style="width:100%;border-collapse:collapse">
+                        <thead><tr style="background:#f8fafc">
+                            <th style="padding:7px 12px;text-align:left;font-size:10px;color:#94a3b8;font-weight:700;text-transform:uppercase">Empresa</th>
+                            <th style="padding:7px 12px;text-align:left;font-size:10px;color:#94a3b8;font-weight:700;text-transform:uppercase">N° Contrato</th>
+                            <th style="padding:7px 12px;text-align:right;font-size:10px;color:#94a3b8;font-weight:700;text-transform:uppercase">Cupos</th>
+                        </tr></thead>
+                        <tbody>${rowsHTML}</tbody>
+                        <tfoot><tr style="background:#ede9fe">
+                            <td colspan="2" style="padding:8px 12px;font-weight:800;font-size:12px;color:#4338ca">Subtotal — ${esc(ger)}</td>
+                            <td style="padding:8px 12px;text-align:right;font-weight:900;font-size:15px;color:#6366f1">${subtotal.toLocaleString('es-CL')}</td>
+                        </tr></tfoot>
+                    </table>
+                </div>
             </div>`;
         }).join('');
 

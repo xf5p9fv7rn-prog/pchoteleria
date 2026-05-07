@@ -1860,9 +1860,9 @@
                     sin_motivo:        'Sin motivo registrado'
                 };
 
-                // Agrupar camas por habitación
+                // Agrupar camas por habitación (excluye Deshabilitadas — como si no existieran)
                 const porHab = {};
-                camas.forEach(c => {
+                camas.filter(c => c.estado !== 'Deshabilitada').forEach(c => {
                     const hid = String(c.habitacion_id);
                     if (!porHab[hid]) porHab[hid] = [];
                     porHab[hid].push(c);

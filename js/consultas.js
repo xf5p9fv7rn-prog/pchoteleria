@@ -213,11 +213,25 @@ async function cargarDatos() {
             const numPorIdCustom = {};
             todasHabs.forEach(h => { numPorIdCustom[String(h.id_custom)] = h.numero_hab; });
 
-            const todasCamas = await fetchAll('v2_camas', 'id_cama, habitacion_id');
+            const todasCamas = await fetchAll('v2_camas', 'id_cama, habitacion_id, estado');
             const habPorCama = {};
+            const activasPorHabId = {}; // camas no-Deshabilitadas por habitacion_id
             todasCamas.forEach(c => {
                 const num = numPorIdCustom[String(c.habitacion_id)];
                 if (num) habPorCama[String(c.id_cama)] = num;
+                // Contar solo camas activas para ajustar bedCount
+                if (c.estado !== 'Deshabilitada') {
+                    const hid = String(c.habitacion_id);
+                    activasPorHabId[hid] = (activasPorHabId[hid] || 0) + 1;
+                }
+            });
+            // Ajustar bedCount de cada room: solo camas activas (excluye Deshabilitadas)
+            todasHabs.forEach(h => {
+                const num   = h.numero_hab;
+                const count = activasPorHabId[String(h.id_custom)];
+                if (num && roomMap[num] && count !== undefined) {
+                    roomMap[num].bedCount = count;
+                }
             });
 
             const { data: motivosData } = await sb

@@ -95,6 +95,7 @@ async function detectarCamasPerdidas() {
                 huesped:         r.huesped  || '—',
                 total_camas:     r.total_camas,
                 ocupadas:        r.ocupadas,
+                camas_perdidas:  r.camas_perdidas || (r.total_camas - r.ocupadas), // camas libres reales en esta hab
             }));
             console.log(`[CamasPerdidas] 📊 Vista SQL: ${_perdidas.length} camas perdidas`);
             return;
@@ -120,10 +121,12 @@ async function detectarCamasPerdidas() {
     const empMap  = {}; (empresas || []).forEach(e => { empMap[e.id]          = e; });
 
     const porHab = {};
-    (camas || []).forEach(c => {
-        if (!porHab[c.habitacion_id]) porHab[c.habitacion_id] = [];
-        porHab[c.habitacion_id].push(c);
-    });
+    (camas || [])
+        .filter(c => c.estado !== 'Deshabilitada')   // cama sin instalar = no existe
+        .forEach(c => {
+            if (!porHab[c.habitacion_id]) porHab[c.habitacion_id] = [];
+            porHab[c.habitacion_id].push(c);
+        });
 
     _perdidas = [];
     Object.entries(porHab).forEach(([habId, cs]) => {
@@ -319,9 +322,10 @@ function renderPorPabellon(filtro = 'todos') {
 
 // ── Render KPIs ───────────────────────────────────────────────────────────────
 function renderKpis() {
-    const total  = _perdidas.length;
-    const bloq   = _perdidas.filter(p => p.tipo === 'BLOQUEADA').length;
-    const parc   = _perdidas.filter(p => p.tipo === 'OCUPACION PARCIAL').length;
+    // Suma camas_perdidas (puede ser >1 por hab cuando viene de vista SQL) o 1 en fallback JS
+    const total  = _perdidas.reduce((s, p) => s + (p.camas_perdidas ?? 1), 0);
+    const bloq   = _perdidas.filter(p => p.tipo === 'BLOQUEADA').reduce((s, p) => s + (p.camas_perdidas ?? 1), 0);
+    const parc   = _perdidas.filter(p => p.tipo === 'OCUPACION PARCIAL').reduce((s, p) => s + (p.camas_perdidas ?? 1), 0);
     const conMot = _perdidas.filter(p => _registros[p.id_cama_perdida]?.motivo &&
                                          _registros[p.id_cama_perdida]?.motivo !== 'sin_motivo').length;
 

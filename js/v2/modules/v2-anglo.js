@@ -7,14 +7,26 @@ import { doCheckin } from '../v2-service.js';
 const F4 = () => { const d=new Date(); d.setDate(d.getDate()+4); return d.toISOString().split('T')[0]; };
 const colorLlave = (t='') => (t.toLowerCase().includes('adm')||t.toLowerCase().includes('5x2')) ? 'verde' : 'rojo';
 
-let _timer=null, _rut=null, _nombre='', _turno='', _cola=[], _registro=[], _incidencias=[], _tab='registro';
+let _timer=null, _rut=null, _nombre='', _turno='', _cola=[], _registro=[], _incidencias=[], _tab='registro', _modo='dia';
 
 export async function renderV2Anglo(container) {
     container.innerHTML = `<div style="max-width:920px;margin:0 auto">
 
   <!-- FORMULARIO ENTRADA -->
   <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:16px;padding:20px;margin-bottom:16px">
-    <label style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;display:block;margin-bottom:10px">⛏️ Asignación Rápida Anglo</label>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+      <label style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase">⛏️ Asignación Rápida Anglo</label>
+      <div style="display:flex;border-radius:10px;overflow:hidden;border:2px solid var(--border);flex-shrink:0">
+        <button id="btn-modo-dia" onclick="window._aSetModo('dia')"
+          style="padding:7px 18px;border:none;font-weight:800;font-size:13px;cursor:pointer;background:#22c55e;color:#fff;transition:all .15s">
+          ☀️ Día
+        </button>
+        <button id="btn-modo-noche" onclick="window._aSetModo('noche')"
+          style="padding:7px 18px;border:none;font-weight:800;font-size:13px;cursor:pointer;background:var(--bg-card);color:var(--text-muted);transition:all .15s">
+          🌙 Noche
+        </button>
+      </div>
+    </div>
     <div style="display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:10px;align-items:end">
       <div>
         <label style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;display:block;margin-bottom:5px">RUT Trabajador</label>
@@ -130,6 +142,13 @@ function _bindGlobals() {
     window._aBaja    = _baja;
     window._aDevuelta= _devuelta;
     window._aQuitarCola = _quitarCola;
+    window._aSetModo = (modo) => {
+        _modo = modo;
+        const btnDia   = document.getElementById('btn-modo-dia');
+        const btnNoche = document.getElementById('btn-modo-noche');
+        if (btnDia)   { btnDia.style.background   = modo==='dia'   ? '#22c55e' : 'var(--bg-card)'; btnDia.style.color   = modo==='dia'   ? '#fff' : 'var(--text-muted)'; }
+        if (btnNoche) { btnNoche.style.background = modo==='noche' ? '#4338ca' : 'var(--bg-card)'; btnNoche.style.color = modo==='noche' ? '#fff' : 'var(--text-muted)'; }
+    };
     window._aKey = (e, campo) => {
         if (e.key==='Enter'||e.key==='ArrowDown') { e.preventDefault(); window._aAgregar(); return; }
         const order=['ar','ah','as'], cur=campo==='rut'?'ar':campo==='hab'?'ah':'as';
@@ -187,11 +206,10 @@ async function _buscar(rut) {
     }
     if (nuevoEl) nuevoEl.style.display='none';
     _rut=data.rut; _nombre=data.nombre; _turno=data.turno||'';
-    const llave=colorLlave(_turno);
     document.getElementById('a-nombre').textContent=data.nombre;
-    document.getElementById('a-llave').innerHTML=llave==='verde'
-        ?'<span style="background:#dcfce7;color:#166534;border-radius:8px;padding:2px 10px;font-size:12px;font-weight:800">🟢 Día</span>'
-        :'<span style="background:#1e293b;color:#94a3b8;border-radius:8px;padding:2px 10px;font-size:12px;font-weight:700">🌙 Noche</span>';
+    document.getElementById('a-llave').innerHTML=_modo==='dia'
+        ?'<span style="background:#dcfce7;color:#166534;border-radius:8px;padding:2px 10px;font-size:12px;font-weight:800">☀️ Día</span>'
+        :'<span style="background:#e0e7ff;color:#3730a3;border-radius:8px;padding:2px 10px;font-size:12px;font-weight:800">🌙 Noche</span>';
     document.getElementById('a-info').innerHTML=`
         <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:6px">
           <div><span style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase">Rol</span>
@@ -223,12 +241,12 @@ function _agregar() {
     const salida=document.getElementById('as').value;
     if (!hab) { _msg('⚠️ Ingresa el número de habitación',false); return; }
     if (_cola.find(c=>c.rut===_rut)) { _msg('⚠️ Este trabajador ya está en la lista',false); return; }
-    _cola.push({ rut:_rut, nombre:_nombre, turno:_turno, llave:colorLlave(_turno), hab, salida });
+    const llaveModo = _modo === 'dia' ? 'verde' : 'rojo';
+    _cola.push({ rut:_rut, nombre:_nombre, turno:_turno, llave:llaveModo, modo:_modo, hab, salida });
     _renderCola();
     // Limpiar para el siguiente
     document.getElementById('ar').value='';
     document.getElementById('ah').value='';
-    document.getElementById('as').value=F4();
     _hideCard();
     document.getElementById('a-msg').style.display='none';
     document.getElementById('ar').focus();
@@ -248,7 +266,7 @@ function _renderCola() {
       <div style="display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:8px;align-items:center;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:10px 12px">
         <div>
           <div style="font-weight:700;font-size:14px">${c.nombre}</div>
-          <div style="font-size:11px;color:var(--text-muted)">${c.rut} · ${c.llave==='verde'?'🟢 Día':'🌙 Noche'}</div>
+          <div style="font-size:11px;color:var(--text-muted);display:flex;align-items:center;gap:6px">${c.rut} · ${c.modo==='dia'?'<span style="background:#dcfce7;color:#166534;border-radius:6px;padding:1px 8px;font-size:11px;font-weight:800">☀️ Día</span>':'<span style="background:#e0e7ff;color:#3730a3;border-radius:6px;padding:1px 8px;font-size:11px;font-weight:800">🌙 Noche</span>'}</div>
         </div>
         <input value="${c.hab}" onchange="window._aEditHab(${i},this.value)"
           style="padding:8px;border-radius:8px;border:1.5px solid var(--border);background:var(--bg-card);color:var(--text-primary);font-size:14px;font-weight:700;outline:none;width:100%;box-sizing:border-box"
@@ -288,17 +306,24 @@ async function _cargarTodos() {
             const habId=habs[0].id_custom;
             // Camas en orden: el primero que llega a la HAB → cama 1, el segundo → cama 2
             // Se obtienen ordenadas por id_cama, y se toma la primera DISPONIBLE
-            const {data:camas}=await supabase.from('v2_camas').select('id_cama,estado').eq('habitacion_id',habId).order('id_cama');
+            const {data:camas}=await supabase.from('v2_camas').select('id_cama,estado,numero_cama').eq('habitacion_id',habId).order('numero_cama');
             if (!camas?.length) { err.push(`${item.nombre}: Sin camas en HAB ${item.hab}`); continue; }
-            const camaDisp=camas.find(c=>c.estado==='Disponible');
-            if (!camaDisp) { err.push(`${item.nombre}: HAB ${item.hab} sin camas disponibles`); continue; }
+            // Seleccionar cama según modo: día→cama 1, noche→cama 2; si no existe esa cama, tomar la primera disponible
+            let camaDisp = null;
+            if (item.modo === 'dia') {
+                camaDisp = camas.find(c => Number(c.numero_cama) === 1 && c.estado === 'Disponible');
+            } else {
+                camaDisp = camas.find(c => Number(c.numero_cama) === 2 && c.estado === 'Disponible');
+            }
+            if (!camaDisp) camaDisp = camas.find(c => c.estado === 'Disponible'); // fallback
+            if (!camaDisp) { err.push(`${item.nombre}: HAB ${item.hab} sin camas disponibles (modo ${item.modo})`); continue; }
             const camaId=camaDisp.id_cama;
             // Check-in
             await doCheckin({idCama:camaId,rutHuesped:item.rut,nombreHuesped:item.nombre,empresaId,fechaCheckin:hoy,fechaSalidaProgramada:item.salida||null,esPreAsignacion:false});
             await supabase.from('v2_asignaciones').update({huesped_confirmo:true}).eq('id_cama',camaId).is('fecha_checkout',null);
             await supabase.from('v2_camas').update({estado:'Ocupada'}).eq('id_cama',camaId);
             // Registro Anglo
-            await supabase.from('v2_asignaciones_anglo').upsert({rut:item.rut,numero_hab:item.hab,color_llave:item.llave,fecha_asignacion:hoy,fecha_salida_prog:item.salida||null,llave_entregada:true,activa:true},{onConflict:'rut'});
+            await supabase.from('v2_asignaciones_anglo').upsert({rut:item.rut,numero_hab:item.hab,color_llave:item.modo==='dia'?'verde':'rojo',fecha_asignacion:hoy,fecha_salida_prog:item.salida||null,llave_entregada:true,activa:true},{onConflict:'rut'});
             ok++;
         } catch(e) { err.push(`${item.nombre}: ${e.message}`); }
     }
@@ -332,7 +357,7 @@ function _renderReg(rows) {
           <div>
             <div style="font-weight:800;font-size:15px">${u.nombre||r.rut}</div>
             <div style="font-size:12px;color:var(--text-muted)">${u.cargo||''} · RUT ${r.rut}</div>
-            <div style="font-size:12px;margin-top:3px">🏠 <b>HAB ${r.numero_hab}</b> &nbsp;${llave==='verde'?'🟢 Día':'🌙 Noche'}&nbsp; 📅 ${r.fecha_asignacion||''}${r.fecha_salida_prog?' → '+r.fecha_salida_prog:''}</div>
+            <div style="font-size:12px;margin-top:3px">🏠 <b>HAB ${r.numero_hab}</b> &nbsp;${llave==='verde'?'<span style="background:#dcfce7;color:#166534;border-radius:6px;padding:1px 8px;font-size:11px;font-weight:800">☀️ Día</span>':'<span style="background:#e0e7ff;color:#3730a3;border-radius:6px;padding:1px 8px;font-size:11px;font-weight:800">🌙 Noche</span>'}&nbsp; 📅 ${r.fecha_asignacion||''}${r.fecha_salida_prog?' → '+r.fecha_salida_prog:''}</div>
           </div>
           <div style="display:flex;gap:6px;flex-wrap:wrap">
             ${!r.llave_devuelta?`<button onclick="window._aDevuelta(${r.id})" style="background:rgba(34,197,94,.15);color:#166534;border:none;border-radius:8px;padding:6px 10px;font-size:11px;font-weight:700;cursor:pointer">🗝️ Devolvió</button>`:''}

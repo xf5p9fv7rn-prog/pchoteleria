@@ -15,6 +15,9 @@ let _selEdificio = null, _selPabellon = null;
 let _camaData  = {};
 let _busqueda  = '';
 let _filtEmpresa = '', _filtNombre = '', _filtGerencia = '';
+// ⚡ Caché en memoria para no re-consultar Supabase tras cada acción
+let _camasCache   = null; // Array<Array<cama>> paralelo a _habitaciones
+let _habTagCache  = null; // { habId: { tipo, etiqueta } }
 
 export async function renderV2Infraestructura(container) {
     container.innerHTML = `
@@ -32,7 +35,9 @@ export async function renderV2Infraestructura(container) {
         ${leg('#10b981','L','Libre — clic para Check-in')}
         ${leg('#ef4444','O','Ocupada — llegada pendiente de confirmar')}
         ${leg('#22c55e','✓','Ocupada — huésped confirmó llegada')}
-        ${leg('#f59e0b','M','Mantención')}
+        ${leg('#fbbf24','⚠','Salida vencida — sin Check-out')}
+        ${leg('#f97316','↻','En rotación — entra nuevo residente')}
+        ${leg('#64748b','M','Mantención')}
       </div>
 
       <div id="v2i-loading" style="text-align:center;padding:40px;color:var(--text-muted)">Cargando edificios…</div>
@@ -138,6 +143,9 @@ function renderPabellones() {
 
 async function selectPabellon(id) {
     _selPabellon = id;
+    // Limpiar caché al cambiar de pabellón — fuerza nueva descarga
+    _camasCache  = null;
+    _habTagCache = null;
     _busqueda = ''; _filtEmpresa = ''; _filtNombre = ''; _filtGerencia = '';
     const filters = document.getElementById('v2i-filters');
     if (filters) {
@@ -178,28 +186,41 @@ async function renderGrid() {
     }
 
     grid.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:20px;color:var(--text-muted)">Cargando camas…</div>`;
-    const camasArr = await Promise.all(habs.map(h => getCamas(h.id_custom)));
-    habs.forEach((h, i) => camasArr[i].forEach(c => { _camaData[c.id_cama] = { estado: c.estado }; }));
 
-    // Cargar etiquetas de distribucion para mostrar badges en tarjetas
-    const todosHabIds = habs.map(h => h.id_custom);
-    let habTagMap = {}; // habId -> { tipo, etiqueta }
-    if (todosHabIds.length) {
-        // Obtener todas las camas de estas habs con sus distribuciones
-        const { data: distTags } = await supabase
-            .from('v2_distribucion_camas')
-            .select('id_cama, tipo, etiqueta')
-            .in('id_cama', habs.flatMap((h,i) => camasArr[i].map(c => c.id_cama)).slice(0,1000));
-        (distTags || []).forEach(d => {
-            // Asociar al habId via camasArr
-            for (let i = 0; i < habs.length; i++) {
-                if (camasArr[i].some(c => c.id_cama === d.id_cama)) {
-                    if (!habTagMap[habs[i].id_custom]) habTagMap[habs[i].id_custom] = d;
-                    break;
+    // ⚡ Usar caché si existe (evita re-consultar Supabase tras checkout/checkin)
+    let camasArr, habTagMap;
+    if (_camasCache && _habTagCache) {
+        // Usar datos en memoria — render instantáneo
+        camasArr  = _camasCache;
+        habTagMap = _habTagCache;
+        // Limpiar el mensaje de carga de inmediato
+        grid.innerHTML = '';
+    } else {
+        // Primera carga o cambio de pabellón — descargar desde Supabase
+        camasArr = await Promise.all(habs.map(h => getCamas(h.id_custom)));
+        _camasCache = camasArr;
+
+        // Etiquetas de distribucion
+        habTagMap = {};
+        const allCamaIds = habs.flatMap((h,i) => camasArr[i].map(c => c.id_cama)).slice(0,1000);
+        if (allCamaIds.length) {
+            const { data: distTags } = await supabase
+                .from('v2_distribucion_camas')
+                .select('id_cama, tipo, etiqueta')
+                .in('id_cama', allCamaIds);
+            (distTags || []).forEach(d => {
+                for (let i = 0; i < habs.length; i++) {
+                    if (camasArr[i].some(c => c.id_cama === d.id_cama)) {
+                        if (!habTagMap[habs[i].id_custom]) habTagMap[habs[i].id_custom] = d;
+                        break;
+                    }
                 }
-            }
-        });
+            });
+        }
+        _habTagCache = habTagMap;
     }
+
+    habs.forEach((h, i) => camasArr[i].forEach(c => { _camaData[c.id_cama] = { estado: c.estado }; }));
 
     // Filtros por empresa / nombre / gerencia (sobre datos de camas cargadas)
     let filtIdx = habs.map((_, i) => i); // índices de habs a mostrar
@@ -222,6 +243,7 @@ async function renderGrid() {
 
     let total = 0, ocup = 0, disp = 0, mant = 0;
     habsFilt.forEach((_, i) => camasFilt[i].forEach(c => {
+        if (c.estado === 'Deshabilitada') return; // ← no contar camas sin instalar
         total++;
         if (c.estado === 'Ocupada') ocup++;
         else if (c.estado === 'Mantencion') mant++;
@@ -257,6 +279,7 @@ async function renderGrid() {
         const hc = cs.filter(c=>c.estado==='Ocupada' &&  c.huesped_confirmo).length;
         const hd = cs.filter(c=>c.estado==='Disponible').length;
         const hm = cs.filter(c=>c.estado==='Mantencion').length;
+        const hdis = cs.filter(c=>c.estado==='Deshabilitada').length;
         return `<div data-cama-card style="background:var(--bg-card);border:1px solid var(--border);border-radius:14px;padding:14px;position:relative;overflow:visible">
           <div style="font-size:18px;font-weight:800;color:var(--text-primary)">${h.numero_hab}</div>
           <div style="font-size:10px;font-family:monospace;color:var(--text-muted);margin-bottom:10px">${h.id_custom}</div>
@@ -272,29 +295,42 @@ async function renderGrid() {
           })()}
           <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px">
             ${cs.map(c => {
+              const hoy         = new Date().toISOString().split('T')[0];
+              const deshabilitada = c.estado === 'Deshabilitada';
               const confirmo    = c.estado==='Ocupada' && c.huesped_confirmo;
               const ocupada     = c.estado==='Ocupada';
               const enRotacion  = ocupada && c.tieneRotacion;
-              const bg  = enRotacion ? '#f97316'
-                        : ocupada ? (confirmo ? '#22c55e' : '#ef4444')
-                        : c.estado==='Mantencion' ? '#f59e0b' : '#10b981';
-              const lbl = enRotacion ? '↻'
-                        : ocupada ? (confirmo ? '✓' : 'O')
+              const vencida     = ocupada && c.fecha_salida_programada && c.fecha_salida_programada < hoy;
+              const bg  = deshabilitada ? '#cbd5e1'
+                        : enRotacion ? '#f97316'
+                        : vencida   ? '#fbbf24'
+                        : ocupada   ? (confirmo ? '#22c55e' : '#ef4444')
+                        : c.estado==='Mantencion' ? '#64748b' : '#10b981';
+              const lbl = deshabilitada ? 'D'
+                        : enRotacion ? '↻'
+                        : vencida   ? '⚠'
+                        : ocupada   ? (confirmo ? '✓' : 'O')
                         : c.estado==='Mantencion' ? 'M' : 'L';
               const titleExtra = enRotacion && c.entrante
-                ? ` · Entra: ${c.entrante.nombre} el ${c.entrante.fecha}` : '';
+                ? ` · Entra: ${c.entrante.nombre} el ${c.entrante.fecha}`
+                : vencida ? ` · ⚠ Salida vencida el ${c.fecha_salida_programada}` : '';
               const infoHTML = ocupada && (c.empresa || c.numero_contrato)
                 ? `<div style="display:flex;flex-direction:column;line-height:1.3">
                      ${c.empresa ? `<span style="font-size:11px;font-weight:700;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:130px">${c.empresa}</span>` : ''}
                      ${c.numero_contrato ? `<span style="font-size:10px;font-family:monospace;color:#6366f1">${c.numero_contrato}</span>` : ''}
+                     ${vencida ? `<span style="font-size:9px;color:#d97706;font-weight:700">⚠ Venció ${c.fecha_salida_programada}</span>` : ''}
                      ${enRotacion && c.entrante ? `<span style="font-size:9px;color:#f97316;font-weight:700">↻ ${c.entrante.nombre?.split(' ')[0]||''} entra ${c.entrante.fecha}</span>` : ''}
                    </div>`
                 : '';
               return `<div style="display:flex;align-items:center;gap:8px">
-                <button onclick="window._v2iOpenCama(event,'${c.id_cama}')" title="${c.id_cama} — ${c.estado}${confirmo?' · Llegada confirmada':''}${titleExtra}"
-                  style="width:28px;height:28px;min-width:28px;border-radius:7px;border:none;background:${bg};color:#fff;font-size:11px;font-weight:800;cursor:pointer;transition:transform 0.1s"
-                  onmouseover="this.style.transform='scale(1.18)'" onmouseout="this.style.transform='scale(1)'">${lbl}</button>
-                ${infoHTML}
+                ${deshabilitada
+                  ? `<button disabled title="${c.id_cama} — Sin cama instalada"
+                       style="width:28px;height:28px;min-width:28px;border-radius:7px;border:2px dashed #94a3b8;background:#f1f5f9;color:#94a3b8;font-size:10px;font-weight:800;cursor:not-allowed">D</button>
+                     <span style="font-size:10px;color:#94a3b8;font-style:italic">sin instalar</span>`
+                  : `<button onclick="window._v2iOpenCama(event,'${c.id_cama}')" title="${c.id_cama} — ${c.estado}${confirmo?' · Llegada confirmada':''}${titleExtra}"
+                       style="width:28px;height:28px;min-width:28px;border-radius:7px;border:none;background:${bg};color:${vencida ? '#1a1a1a' : '#fff'};font-size:11px;font-weight:800;cursor:pointer;transition:transform 0.1s"
+                       onmouseover="this.style.transform='scale(1.18)'" onmouseout="this.style.transform='scale(1)'">${lbl}</button>
+                     ${infoHTML}`}
               </div>`;
             }).join('')}
           </div>
@@ -303,6 +339,7 @@ async function renderGrid() {
             ${hc>0?`<span style="color:#22c55e">🟢 ${hc} conf.</span>`:''}
             ${ho>0?`<span style="color:#ef4444">🔴 ${ho} s/conf</span>`:''}
             ${hm>0?`<span style="color:#f59e0b">🟡 ${hm}</span>`:''}
+            ${hdis>0?`<span style="color:#94a3b8">⬜ ${hdis} deshab.</span>`:''}
           </div>
         </div>`;
 
@@ -315,9 +352,13 @@ async function openCamaModal(ev, idCama) {
     if (!card) return;
     const info   = _camaData[idCama] || {};
     const estado = info.estado || 'Disponible';
-    await abrirPopover(card, idCama, estado, (tipo) => {
-        // Refresca la vista después de check-in o checkout
-        if (_selPabellon) selectPabellon(_selPabellon);
+    await abrirPopover(card, idCama, estado, async (tipo) => {
+        // Refresca la vista después de check-in o checkout SIN perder posición
+        if (_selPabellon) {
+            const scrollY = window.scrollY;
+            await selectPabellon(_selPabellon);
+            requestAnimationFrame(() => window.scrollTo({ top: scrollY, behavior: 'instant' }));
+        }
     });
 }
 
@@ -359,18 +400,41 @@ async function handleCheckin(idCama) {
             esPreAsignacion
         });
         msg(esPreAsignacion ? '🔄 Pre-asignación registrada (entra el ' + llegada + ')' : '✅ Check-in registrado','#10b981');
-        if (_camaData[idCama]) _camaData[idCama].estado = 'Ocupada';
-        setTimeout(() => { closeModal(); selectPabellon(_selPabellon); }, 1400);
+        // Actualizar caché en memoria — render instantáneo sin re-consultar Supabase
+        _actualizarCamaEnCache(idCama, { estado: 'Ocupada', nombre_huesped: nombre, empresa: _empresas.find(e=>e.id===empId)?.nombre||'', numero_contrato: contrato||null });
+        setTimeout(async () => {
+            closeModal();
+            if (_selPabellon) {
+                const scrollY = window.scrollY;
+                await renderGrid();
+                requestAnimationFrame(() => window.scrollTo({ top: scrollY, behavior: 'instant' }));
+            }
+        }, 1400);
     } catch(e) { msg('❌ '+e.message,'#ef4444'); }
 }
 
 async function handleCheckout(asigId, idCama) {
     try {
         await doCheckout(asigId);
-        if (_camaData[idCama]) _camaData[idCama].estado = 'Disponible';
+        // Actualizar caché en memoria — render instantáneo sin "Cargando camas"
+        _actualizarCamaEnCache(idCama, { estado: 'Disponible', nombre_huesped: null, empresa: null, numero_contrato: null });
         closeModal();
-        selectPabellon(_selPabellon);
+        if (_selPabellon) {
+            const scrollY = window.scrollY;
+            await renderGrid();
+            requestAnimationFrame(() => window.scrollTo({ top: scrollY, behavior: 'instant' }));
+        }
     } catch(e) { alert('❌ '+e.message); }
+}
+
+// Actualiza un cama dentro de _camasCache sin limpiar todo el caché
+function _actualizarCamaEnCache(idCama, cambios) {
+    if (!_camasCache) return;
+    if (_camaData[idCama]) _camaData[idCama].estado = cambios.estado;
+    for (const arr of _camasCache) {
+        const idx = arr.findIndex(c => c.id_cama === idCama);
+        if (idx !== -1) { Object.assign(arr[idx], cambios); return; }
+    }
 }
 
 // ─── UTILS ──────────────────────────────────────────────────────────────────

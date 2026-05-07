@@ -279,13 +279,16 @@ ul {
 }
 
 .nav-item.active {
-    background: var(--bg-sidebar-active);
-    color: #ff8080;
-    font-weight: 600;
+    background: linear-gradient(135deg, rgba(99,102,241,0.22) 0%, rgba(139,92,246,0.14) 100%);
+    color: #ffffff;
+    font-weight: 700;
+    border-left: 3px solid #818cf8;
+    padding-left: 7px;
+    box-shadow: 0 2px 12px rgba(99,102,241,0.18);
 }
 
 .nav-item.active .nav-icon {
-    color: var(--red-400);
+    filter: brightness(1.4);
 }
 
 .nav-icon {

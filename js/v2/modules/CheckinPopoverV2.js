@@ -74,6 +74,14 @@ export async function abrirPopover(card, idCama, estado, onSuccess) {
     card.style.overflow  = 'visible';
     card.appendChild(pop);
 
+    // ── Botón X: cerrar popover ───────────────────────────────────────────────
+    document.getElementById(ID + '-close')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        cerrarPopover();
+    });
+
+
+
     // ── Cerrar al hacer clic FUERA del popover (sin backdrop) ────────────────
     // Usamos mousedown en document para detectar el clic antes de que cambie el foco
     const _outsideClick = (e) => {
@@ -95,8 +103,8 @@ export async function abrirPopover(card, idCama, estado, onSuccess) {
     } else if (estado === 'Disponible') {
         await renderCheckin(pop, idCama, onSuccess);
     } else {
-        document.getElementById(ID + '-body').innerHTML =
-            '<p style="color:#6b7280;text-align:center;padding:16px">🔧 Cama en mantención.</p>';
+        // Mantencion
+        renderMantencion(pop, idCama, onSuccess);
     }
 }
 
@@ -109,7 +117,7 @@ async function renderCheckout(pop, idCama, onSuccess) {
     // Fetch asignación activa desde v2_asignaciones
     const { data: asig, error } = await supabase
         .from('v2_asignaciones')
-        .select('id, rut_huesped, nombre_huesped, fecha_checkin, fecha_salida_programada, numero_contrato, telefono, empresa_id, v2_empresas(nombre, turno, v2_gerencias(nombre))')
+        .select('id, rut_huesped, nombre_huesped, fecha_checkin, fecha_salida_programada, numero_contrato, telefono, empresa_id, huesped_confirmo, v2_empresas(nombre, turno, v2_gerencias(nombre))')
         .eq('id_cama', idCama)
         .is('fecha_checkout', null)
         .maybeSingle();
@@ -136,20 +144,31 @@ async function renderCheckout(pop, idCama, onSuccess) {
       <div id="${ID}-msg" style="min-height:16px;font-size:12px;font-weight:600;margin-bottom:8px"></div>
 
       <!-- Botones de acción -->
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+      <div style="display:grid;grid-template-columns:${['supervisor','superadmin'].includes(window._currentUser?.role) ? '1fr 1fr' : '1fr'};gap:8px;margin-bottom:8px">
         <button id="${ID}-btn-transferir"
           style="background:linear-gradient(135deg,#6366f1,#4f46e5);color:white;border:none;border-radius:12px;padding:12px;font-size:13px;font-weight:700;cursor:pointer">
           🔄 Transferir cama
         </button>
+        ${['supervisor','superadmin'].includes(window._currentUser?.role) ? `
         <button id="${ID}-btn-eliminar"
           style="background:linear-gradient(135deg,#f59e0b,#d97706);color:white;border:none;border-radius:12px;padding:12px;font-size:13px;font-weight:700;cursor:pointer">
           🗑️ Eliminar asig.
-        </button>
+        </button>` : ''}
       </div>
       <button id="${ID}-btn-checkout"
         style="width:100%;background:linear-gradient(135deg,#ef4444,#dc2626);color:white;border:none;border-radius:12px;padding:13px;font-size:14px;font-weight:700;cursor:pointer">
-        🚪 Registrar Check-out
+        🚩 Registrar Check-out
       </button>
+
+      ${!asig.huesped_confirmo ? `
+      <button id="${ID}-btn-confirmar-llegada"
+        style="width:100%;background:linear-gradient(135deg,#10b981,#059669);color:white;border:none;border-radius:12px;padding:13px;font-size:14px;font-weight:700;cursor:pointer;margin-top:8px;display:flex;align-items:center;justify-content:center;gap:8px">
+        ✅ Confirmar Llegada
+      </button>` : `
+      <div style="display:flex;align-items:center;gap:8px;justify-content:center;padding:10px;background:#dcfce7;border-radius:12px;margin-top:8px">
+        <span style="font-size:18px">✅</span>
+        <span style="color:#15803d;font-weight:700;font-size:13px">Llegada confirmada</span>
+      </div>`}
 
       ${ (asig.v2_empresas?.nombre || '').toLowerCase().includes('anglo') ? `
       <!-- Botones Anglo -->
@@ -215,6 +234,26 @@ async function renderCheckout(pop, idCama, onSuccess) {
         setTimeout(() => { cerrarPopover(); onSuccess?.('checkout', idCama); }, 1000);
     });
 
+    // ── Confirmar Llegada ────────────────────────────────────────────────────
+    const btnConfLlegada = document.getElementById(ID + '-btn-confirmar-llegada');
+    if (btnConfLlegada) {
+        btnConfLlegada.addEventListener('click', async () => {
+            btnConfLlegada.disabled = true;
+            btnConfLlegada.textContent = '⏳ Confirmando…';
+            const { error: errConf } = await supabase.from('v2_asignaciones')
+                .update({ huesped_confirmo: true })
+                .eq('id', asig.id);
+            if (errConf) {
+                setMsg('❌ ' + errConf.message, '#ef4444');
+                btnConfLlegada.disabled = false;
+                btnConfLlegada.textContent = '✅ Confirmar Llegada';
+                return;
+            }
+            setMsg('✅ Llegada confirmada — cama en verde', '#10b981');
+            setTimeout(() => { cerrarPopover(); onSuccess?.('confirmar', idCama); }, 900);
+        });
+    }
+
     // ── Botones Anglo ────────────────────────────────────────────────────────
     const btnSinLlave = document.getElementById(ID + '-btn-sinllave');
     const btnBaja     = document.getElementById(ID + '-btn-baja');
@@ -243,23 +282,24 @@ async function renderCheckout(pop, idCama, onSuccess) {
         });
     }
 
-    // ── Eliminar ────────────────────────────────────────────────────────────
-    document.getElementById(ID + '-btn-eliminar').addEventListener('click', () => {
-        document.getElementById(ID + '-transfer-panel').style.display = 'none';
-        document.getElementById(ID + '-delete-panel').style.display = 'block';
-    });
-    document.getElementById(ID + '-btn-cancelar-delete').addEventListener('click', () => {
-        document.getElementById(ID + '-delete-panel').style.display = 'none';
-    });
-    document.getElementById(ID + '-btn-confirmar-delete').addEventListener('click', async () => {
-        setMsg('Eliminando…', '#6b7280');
-        const { error: errDel } = await supabase.from('v2_asignaciones').delete().eq('id', asig.id);
-        if (errDel) { setMsg('❌ ' + errDel.message, '#ef4444'); return; }
-        // Liberar la cama
-        await supabase.from('v2_camas').update({ estado: 'Disponible' }).eq('id_cama', idCama);
-        setMsg('✅ Asignación eliminada', '#10b981');
-        setTimeout(() => { cerrarPopover(); onSuccess?.('delete', idCama); }, 1000);
-    });
+    // ── Eliminar (solo supervisores) ─────────────────────────────────────────
+    if (['supervisor','superadmin'].includes(window._currentUser?.role)) {
+        document.getElementById(ID + '-btn-eliminar').addEventListener('click', () => {
+            document.getElementById(ID + '-transfer-panel').style.display = 'none';
+            document.getElementById(ID + '-delete-panel').style.display = 'block';
+        });
+        document.getElementById(ID + '-btn-cancelar-delete').addEventListener('click', () => {
+            document.getElementById(ID + '-delete-panel').style.display = 'none';
+        });
+        document.getElementById(ID + '-btn-confirmar-delete').addEventListener('click', async () => {
+            setMsg('Eliminando…', '#6b7280');
+            const { error: errDel } = await supabase.from('v2_asignaciones').delete().eq('id', asig.id);
+            if (errDel) { setMsg('❌ ' + errDel.message, '#ef4444'); return; }
+            await supabase.from('v2_camas').update({ estado: 'Disponible' }).eq('id_cama', idCama);
+            setMsg('✅ Asignación eliminada', '#10b981');
+            setTimeout(() => { cerrarPopover(); onSuccess?.('delete', idCama); }, 1000);
+        });
+    }
 
     // ── Transferir ─────────────────────────────────────────────────────────
     document.getElementById(ID + '-btn-transferir').addEventListener('click', async () => {
@@ -415,6 +455,12 @@ async function renderCheckin(pop, idCama, onSuccess) {
           style="width:100%;background:${sinEmpresas ? '#9ca3af' : 'linear-gradient(135deg,#10b981,#059669)'};color:white;border:none;border-radius:12px;padding:14px;font-size:15px;font-weight:700;cursor:${sinEmpresas ? 'not-allowed' : 'pointer'};box-shadow:${sinEmpresas ? 'none' : '0 4px 14px rgba(16,185,129,0.35)'}">
           ✅ Confirmar Check-in → v2_asignaciones
         </button>
+
+        <!-- Botón Mantención: solo si el supervisor puede usarlo -->
+        <button id="${ID}-btn-mant"
+          style="width:100%;background:transparent;border:1.5px solid #64748b;color:#64748b;border-radius:12px;padding:10px;font-size:13px;font-weight:600;cursor:pointer;margin-top:6px">
+          🔧 Poner en Mantención
+        </button>
       </div>`;
 
     // Set default date
@@ -455,8 +501,19 @@ async function renderCheckin(pop, idCama, onSuccess) {
         }
     });
 
+    // ── Poner en Mantención ──────────────────────────────────────────────────
+    document.getElementById(ID + '-btn-mant')?.addEventListener('click', async () => {
+        if (!confirm(`¿Poner la cama ${idCama} en Mantención?`)) return;
+        const { error } = await supabase.from('v2_camas')
+            .update({ estado: 'Mantencion' }).eq('id_cama', idCama);
+        if (error) { setMsg('❌ ' + error.message, '#ef4444'); return; }
+        setMsg('🔧 Cama en mantención', '#64748b');
+        setTimeout(() => { cerrarPopover(); onSuccess?.('mantencion', idCama); }, 800);
+    });
+
     // Submit — INSERT en v2_asignaciones (EXCLUSIVO V2)
     document.getElementById(`${ID}-btn-submit`).addEventListener('click', async (e) => {
+
         e.stopPropagation();
         const btn = e.target;
         const msg = document.getElementById(`${ID}-msg`);
@@ -601,3 +658,47 @@ function setMsg(text, color) {
     const el = document.getElementById(ID + '-msg');
     if (el) { el.textContent = text; el.style.color = color; }
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+//  MANTENCION VIEW
+// ════════════════════════════════════════════════════════════════════════════
+function renderMantencion(pop, idCama, onSuccess) {
+    const body = document.getElementById(ID + '-body');
+    body.innerHTML = `
+      <div style="text-align:center;padding:8px 0 16px">
+        <div style="width:56px;height:56px;border-radius:16px;background:#e2e8f0;display:flex;align-items:center;justify-content:center;font-size:28px;margin:0 auto 12px">🔧</div>
+        <div style="font-size:15px;font-weight:800;color:#334155;margin-bottom:4px">Cama en Mantención</div>
+        <div style="font-size:12px;color:#64748b">${idCama}</div>
+      </div>
+
+      <div style="background:#f8fafc;border:1.5px solid #e2e8f0;border-radius:12px;padding:14px;margin-bottom:16px;font-size:13px;color:#475569;text-align:center">
+        Esta cama no está disponible para check-in.<br>
+        <span style="font-size:11px;color:#94a3b8">Quítala de mantención para habilitarla.</span>
+      </div>
+
+      <div id="${ID}-msg" style="min-height:16px;font-size:13px;font-weight:600;margin-bottom:8px"></div>
+
+      <button id="${ID}-btn-quitar-mant"
+        style="width:100%;background:linear-gradient(135deg,#10b981,#059669);color:white;border:none;border-radius:12px;padding:13px;font-size:14px;font-weight:700;cursor:pointer">
+        ✅ Quitar Mantención — Dejar Disponible
+      </button>`;
+
+    document.getElementById(ID + '-btn-quitar-mant').addEventListener('click', async () => {
+        const btn = document.getElementById(ID + '-btn-quitar-mant');
+        btn.textContent = '⏳ Actualizando…';
+        btn.disabled = true;
+        const { error } = await supabase.from('v2_camas')
+            .update({ estado: 'Disponible' }).eq('id_cama', idCama);
+        if (error) {
+            const msg = document.getElementById(ID + '-msg');
+            if (msg) { msg.textContent = '❌ ' + error.message; msg.style.color = '#ef4444'; }
+            btn.textContent = '✅ Quitar Mantención — Dejar Disponible';
+            btn.disabled = false;
+            return;
+        }
+        const msg = document.getElementById(ID + '-msg');
+        if (msg) { msg.textContent = '✅ Cama disponible'; msg.style.color = '#10b981'; }
+        setTimeout(() => { cerrarPopover(); onSuccess?.('disponible', idCama); }, 800);
+    });
+}
+

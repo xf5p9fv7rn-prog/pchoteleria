@@ -16,6 +16,8 @@ import { renderV2CamasPerdidas } from './v2/modules/v2-camas-perdidas.js';
 import { renderV2Cupos }      from './v2/modules/v2-cupos.js';
 import { renderV2Censo }      from './v2/modules/v2-censo.js';
 import { renderV2Distribucion } from './v2/modules/v2-distribucion.js';
+import { renderV2Historial }    from './v2/modules/v2-historial.js';
+import { renderV2Cama3 }       from './v2/modules/v2-cama3.js';
 
 // ── Supervisores autorizados (Cupos por Gerencia + Censo Admin) ──────────────
 const SUPERVISOR_EMAILS = [
@@ -45,7 +47,8 @@ let currentRoute = 'v2dashboard';
 const ROUTES = {
     // ── V2 (Sistema Principal) ────────────────────────────────
     v2dashboard:      { label: 'Dashboard',               icon: '📊', render: renderV2Dashboard },
-    v2anglo:          { label: 'Asignación Anglo',          icon: '⛏️🗝️', render: renderV2Anglo },
+    v2anglo:          { label: 'Asignación Anglo',          icon: '🗝️', render: renderV2Anglo },
+
     v2infraestructura:{ label: 'Infraestructura',          icon: '🏛️', render: renderV2Infraestructura },
     v2censo:          { label: 'Censo Administrativo',     icon: '📅', render: renderV2Censo },
     v2checkin:        { label: 'Check-in / Check-out',     icon: '🛎️', render: renderV2Checkin },
@@ -55,6 +58,8 @@ const ROUTES = {
     v2camasperdidas:  { label: 'Camas Perdidas',           icon: '🛏️', render: renderV2CamasPerdidas },
     v2cupos:          { label: 'Cupos por Gerencia',       icon: '📊', render: renderV2Cupos,        supervisorOnly: true },
     v2distribucion:   { label: 'Distribución Habitaciones',icon: '🏨', render: renderV2Distribucion, supervisorOnly: true },
+    v2historial:      { label: 'Historial',                 icon: '📋', render: renderV2Historial,   supervisorOnly: true },
+    v2cama3:          { label: 'Gestión Cama 3',            icon: '🛏️', render: renderV2Cama3,      supervisorOnly: true },
     // ── Superadmin ────────────────────────────────────────────
     cupos:      { label: 'Cupos por Gerencia',          icon: '🎯', render: renderCupos,      superadminOnly: true, hidden: true },
     asistencia: { label: 'Control Asistencia',           icon: '✅', render: renderAsistencia, superadminOnly: true, hidden: true },

@@ -9,6 +9,21 @@ const DB_VERSION = 3;
 
 let _db = null;
 
+// ── Caché de datos con TTL de 90 segundos ────────────────────────────────────
+let _datosCache    = null;
+let _datosCacheTs  = 0;
+const CACHE_TTL    = 90_000; // 90 segundos
+
+export function invalidarCache() {
+    _datosCache = null;
+    _datosCacheTs = 0;
+    console.log('[Constanza] 🔄 Caché invalidada — próxima consulta cargará datos frescos');
+}
+
+export function getDataTimestamp() {
+    return _datosCacheTs;
+}
+
 // ── Abrir IndexedDB (respaldo offline) ────────────────────────────────
 function openDB() {
     if (_db) return Promise.resolve(_db);
@@ -67,12 +82,18 @@ async function getSupabase() {
     return _supabase;
 }
 
-// ── Cargar datos V2 con paginación completa ─────────────────────────────────
+// ── Cargar datos V2 con paginación completa + caché 90s ────────────────────
 async function cargarDatos() {
+    // Devolver caché si sigue vigente
+    const ahora = Date.now();
+    if (_datosCache && (ahora - _datosCacheTs) < CACHE_TTL) {
+        console.log(`[Constanza] ⚡ Usando caché (${Math.round((ahora-_datosCacheTs)/1000)}s de antigüedad)`);
+        return _datosCache;
+    }
     try {
         const sb = await getSupabase();
         if (!sb) throw new Error('No supabase client');
-        console.log('[Constanza] ☁️ Cargando datos desde V2 (paginado)…');
+        console.log('[Constanza] ☁️ Cargando datos frescos desde V2 (paginado)…');
 
         // Labels para motivos de camas perdidas
         const MOTIVOS_LABEL = {
@@ -100,6 +121,27 @@ async function cargarDatos() {
             return all;
         }
 
+        // Helper: normaliza RUT a solo dígitos+K — unifica "12.345.678-9" y "12345678-9" y "123456789"
+        const normRut = r => String(r||'').replace(/[^0-9kK]/g,'').toUpperCase();
+
+        // ── Pre-cargar género de solicitudes B2B para cruzar con asignaciones ──────
+        const rutToSexo = {};
+        try {
+            const { data: solSexo } = await sb.from('v2_solicitudes_b2b')
+                .select('rut_trabajador,genero').not('rut_trabajador','is',null).not('genero','is',null);
+            (solSexo||[]).forEach(s => {
+                if (s.rut_trabajador && s.genero) {
+                    const g = String(s.genero).toUpperCase().trim();
+                    const k = normRut(s.rut_trabajador);
+                    if (k) rutToSexo[k] = (g === 'F' || g.startsWith('FEM')) ? 'F' : 'M';
+                }
+            });
+            console.log(`[Constanza] ✅ ${Object.keys(rutToSexo).length} géneros cargados (B2B)`);
+        } catch(eS) {
+            console.warn('[Constanza] Género B2B no disponible:', eS.message);
+        }
+
+
         // ── 1. Asignaciones ACTIVAS paginadas ─────────────────────────────
         const asignaciones = await fetchAll(
             'v2_asignaciones',
@@ -112,7 +154,7 @@ async function cargarDatos() {
         );
         console.log(`[Constanza] ✅ ${asignaciones.length} asignaciones activas`);
 
-        // ── 2. Construir rooms + buildings desde asignaciones ─────────────
+        // ── 2. Construir rooms + buildings desde asignaciones + mapa RUT→sexo ───────
         const SLOTS = ['day', 'night', 'extra', 'extra2', 'extra3'];
         const buildingMap = {};
         const roomMap     = {};
@@ -139,6 +181,7 @@ async function cargarDatos() {
 
             const numCama = parseInt(a.v2_camas?.numero_cama || 1);
             const slotKey = SLOTS[numCama - 1] || `extra${numCama}`;
+            const rutNorm = normRut(a.rut_huesped); // normalizado sin puntos ni guión
             roomMap[habKey].beds[slotKey] = {
                 occupant:      a.nombre_huesped        || '—',
                 rut:           a.rut_huesped           || '—',
@@ -146,8 +189,8 @@ async function cargarDatos() {
                 gerencia:      a.v2_empresas?.v2_gerencias?.nombre || '—',
                 shift:         a.v2_empresas?.turno                || '—',
                 arrivalDate:   a.fecha_checkin                     || '—',
-                departureDate: a.fecha_salida_programada           || '—',  // fecha PROGRAMADA de salida
-                gender:        '—',
+                departureDate: a.fecha_salida_programada           || '—',
+                gender:        rutToSexo[rutNorm] || '—', // cruza con RUT normalizado
             };
         });
 
@@ -183,28 +226,48 @@ async function cargarDatos() {
 
         console.log(`[Constanza] ✅ ${rooms.length} hab · ${buildings.length} pabellones`);
 
-        // ── 4. Cupos gerencia ────────────────────────────────────────────
+        // ── 4. Cupos gerencia — ocupados calculados en tiempo real ────────────────
         let quotas = [];
         try {
+            // Calcular REAL-TIME ocupados por gerencia desde las asignaciones activas
+            // (asignaciones ya están filtradas por fecha_checkout IS NULL)
+            const ocupadosPorGerencia = {};  // { "Gerencia Mina LB": 145, ... }
+            const ocupadosPorEmpresa  = {};  // { "ARAMARK": 252, ... }
+            asignaciones.forEach(a => {
+                const ger = a.v2_empresas?.v2_gerencias?.nombre || null;
+                const emp = a.v2_empresas?.nombre || null;
+                if (ger) ocupadosPorGerencia[ger] = (ocupadosPorGerencia[ger] || 0) + 1;
+                if (emp) ocupadosPorEmpresa[emp]  = (ocupadosPorEmpresa[emp]  || 0) + 1;
+            });
+
             const { data: cuposData } = await sb
                 .from('v2_cupos_gerencias')
-                .select('id, numero_contrato, contrato_sap, empresa, gerencia, nombre_contrato, operacion, cupos_totales, cupos_ocupados')
+                .select('id, numero_contrato, contrato_sap, empresa, gerencia, nombre_contrato, operacion, cupos_totales')
                 .order('gerencia').order('empresa');
-            quotas = (cuposData || []).map(c => ({
-                company:         c.empresa          || '—',
-                gerencia:        c.gerencia         || '—',
-                limit:           c.cupos_totales    || 0,
-                cupos_ocupados:  c.cupos_ocupados   || 0,
-                cupos_totales:   c.cupos_totales    || 0,
-                numero_contrato: c.numero_contrato  || null,
-                nombre_contrato: c.nombre_contrato  || null,
-                operacion:       c.operacion        || null,
-                id:              c.id,
-            }));
-            console.log(`[Constanza] ✅ ${quotas.length} cupos gerencia`);
+
+            quotas = (cuposData || []).map(c => {
+                // Intentar cruzar con el real-time: primero por gerencia, luego por empresa
+                const realOcupados = ocupadosPorGerencia[c.gerencia]
+                    ?? ocupadosPorEmpresa[c.empresa]
+                    ?? 0;
+                return {
+                    company:          c.empresa          || '—',
+                    gerencia:         c.gerencia         || '—',
+                    limit:            c.cupos_totales    || 0,
+                    cupos_ocupados:   realOcupados,        // ← TIEMPO REAL desde asignaciones activas
+                    cupos_totales:    c.cupos_totales    || 0,
+                    numero_contrato:  c.numero_contrato  || null,
+                    nombre_contrato:  c.nombre_contrato  || null,
+                    operacion:        c.operacion        || null,
+                    id:               c.id,
+                };
+            });
+            console.log(`[Constanza] ✅ ${quotas.length} cupos gerencia — ocupados calculados en tiempo real`);
+            console.log('[Constanza] Ocupados por gerencia:', ocupadosPorGerencia);
         } catch(eQ) {
             console.warn('[Constanza] Cupos no disponibles:', eQ.message);
         }
+
 
         // ── 5. Motivos de camas perdidas ─────────────────────────────────
         try {
@@ -295,10 +358,43 @@ async function cargarDatos() {
             console.warn('[Constanza] Anglo stats no disponibles:', eA.message);
         }
 
-        return { rooms, buildings, requests: [], census: [], quotas, angloStats };
+        // ── 7. Solicitudes B2B reales ───────────────────────────────────────
+        let requests = [];
+        try {
+            const { data: solData } = await sb.from('v2_solicitudes_b2b')
+                .select('id,empresa,rut_trabajador,nombre_trabajador,status,fecha_llegada,fecha_salida,hab_solicitada,n_contrato,created_at')
+                .order('created_at', { ascending: false })
+                .limit(500);
+            requests = (solData||[]).map(s => ({
+                id:           s.id,
+                empresa:      s.empresa      || '—',
+                rut:          s.rut_trabajador || '—',
+                nombre:       s.nombre_trabajador || '—',
+                status:       s.status        || 'pendiente',
+                fechaLlegada: s.fecha_llegada || '—',
+                fechaSalida:  s.fecha_salida  || '—',
+                hab:          s.hab_solicitada|| '—',
+                contrato:     s.n_contrato    || '—',
+                createdAt:    s.created_at    || '',
+            }));
+            console.log(`[Constanza] ✅ ${requests.length} solicitudes B2B cargadas`);
+        } catch(eR) {
+            console.warn('[Constanza] Solicitudes no disponibles:', eR.message);
+        }
+
+        const resultado = { rooms, buildings, requests, census: [], quotas, angloStats };
+        // Guardar en caché
+        _datosCache   = resultado;
+        _datosCacheTs = Date.now();
+        return resultado;
 
     } catch(e) {
         console.warn('[Constanza] Error:', e.message);
+        // Si hay caché aunque sea vencida, úsala como fallback
+        if (_datosCache) {
+            console.warn('[Constanza] ⚠️ Error de red — usando caché anterior como fallback');
+            return _datosCache;
+        }
         return { rooms: [], buildings: [], requests: [], census: [], quotas: [] };
     }
 }
@@ -356,18 +452,39 @@ function normalizar(str) {
 function detectarIntencion(pregunta) {
     const q = normalizar(pregunta);
 
+    // ── PRIORIDAD 0: Edificio R-220 — debe ganar SIEMPRE antes que "hab 220" ───
+    // Detectar: "R-220", "r220", "refugio 220", "edificio 220", "r 220"
+    const esEdificio220 = /\br.?220\b/.test(q) || q.includes('refugio 220') || q.includes('edificio 220');
+    if (esEdificio220) {
+        return { id: 'EDIFICIO_DETALLE', edificioFiltro: '220', empresaFiltro: null, habNumero: null };
+    }
+
     // ── Detección de habitación específica (número en la pregunta) ──────────
+    // Excluir '220' para que no confunda con el Edificio R-220
     const matchHab = q.match(/\b(hab(?:itacion)?[\s#\-]*(\d{3,5})|cuarto[\s#\-]*(\d{3,5})|(\d{3,5})[\s]*(hab|cuarto|pieza|room))\b/);
+    const rawNum   = /\b(\d{3,5})\b/.test(q) && !q.includes('cama') && !q.includes('%')
+        ? q.match(/\b(\d{3,5})\b/)?.[1]
+        : null;
+    // No tratar '220' como habitación (es el edificio R-220)
     const habNumero = matchHab
         ? (matchHab[2] || matchHab[3] || matchHab[4])
-        : (/\b(\d{3,5})\b/.test(q) && !q.includes('cama') && !q.includes('%') ? q.match(/\b(\d{3,5})\b/)?.[1] : null);
+        : (rawNum && rawNum !== '220' ? rawNum : null);
+
+    // ── PRIORIDAD 1: cupos + gerencia/empresa/contrato ────────────────────────
+    if (q.includes('cupo') && (q.includes('gerencia') || q.includes('empresa') || q.includes('contrato') || q.includes('disponible') || q.includes('libre') || q.includes('ocupado'))) {
+        return { id: 'CUPOS_GERENCIA', edificioFiltro: null, empresaFiltro: null, habNumero: null };
+    }
+    // trabajadores de X empresa
+    if ((q.includes('trabajador') || q.includes('personal') || q.includes('gente') || q.includes('emplead')) && q.includes('empresa')) {
+        return { id: 'TRABAJADORES_EMPRESA', edificioFiltro: null, empresaFiltro: null, habNumero: null };
+    }
+
 
     const intenciones = [
-        { id: 'RESUMEN_GENERAL', palabras: ['resumen', 'general', 'overview', 'todo', 'completo', 'informe', 'estado actual', 'situacion', 'como esta el campa', 'reporte'] },
-        { id: 'CAMAS_PERDIDAS', palabras: ['camas perdidas', 'cama perdida', 'perdida', 'perdidas', 'desperdicio', 'desperdiciada', 'sola', 'solo en la habitacion', 'habitacion con uno', 'media habitacion', 'medio llena', 'subutilizada', 'subutilizado', 'inefici'] },
-        { id: 'HABITACIONES_LIBRES', palabras: ['libre', 'disponible', 'vacia', 'vacias', 'sin ocupar', 'desocupada'] },
-        { id: 'HABITACIONES_OCUPADAS', palabras: ['ocupad', 'full', 'completa', 'llena', 'con gente'] },
-        { id: 'CUPOS_GERENCIA', palabras: [
+        { id: 'RESUMEN_GENERAL',      palabras: ['resumen', 'general', 'overview', 'todo', 'completo', 'informe', 'estado actual', 'situacion', 'como esta el campa', 'reporte'] },
+        { id: 'CAMAS_PERDIDAS',       palabras: ['camas perdidas', 'cama perdida', 'perdida', 'perdidas', 'desperdicio', 'desperdiciada', 'sola', 'solo en la habitacion', 'habitacion con uno', 'media habitacion', 'medio llena', 'subutilizada', 'subutilizado', 'inefici'] },
+        // ← CUPOS_GERENCIA antes de HABITACIONES_LIBRES para que 'cupo' no pierda ante 'disponible'
+        { id: 'CUPOS_GERENCIA',       palabras: [
             'cupo', 'cupos por gerencia', 'limite gerencia', 'disponibles por gerencia',
             'camas gerencia', 'cuantas camas tiene', 'cupos disponibles', 'cupos libres',
             'cupos ocupados', 'contrato', 'contratos', 'contratos sap', 'sap',
@@ -375,16 +492,18 @@ function detectarIntencion(pregunta) {
             'cupos de la gerencia', 'cuantos cupos', 'limite de cupos', 'cupos habilitados',
             'cupos restantes', 'cupos asignados', 'empresa tiene cupos', 'gerencia tiene cupos'
         ] },
-        { id: 'GERENCIAS_DETALLE', palabras: ['gerencia', 'gerencias', 'por gerencia', 'todas las gerencias', 'desglose gerencia', 'empresas por gerencia', 'que gerencias hay', 'ver gerencias'] },
-
-        { id: 'TURNO_DIA_NOCHE', palabras: ['camas dia', 'camas de dia', 'camas noche', 'camas de noche', 'turno dia', 'turno noche', 'disponibles de dia', 'disponibles de noche', 'pabellon noche', 'pabellon dia', 'camas por turno', 'turno', 'dia disponible', 'noche disponible'] },
-        { id: 'CAMAS_CAPACIDAD', palabras: ['capacidad', 'espacio', 'cuantas camas', 'total camas', 'camas disponibles', 'camas libres'] },
+        { id: 'HABITACIONES_LIBRES',  palabras: ['libre', 'disponible', 'vacia', 'vacias', 'sin ocupar', 'desocupada'] },
+        { id: 'HABITACIONES_OCUPADAS',palabras: ['ocupad', 'full', 'completa', 'llena', 'con gente'] },
+        { id: 'GERENCIAS_DETALLE',    palabras: ['gerencia', 'gerencias', 'por gerencia', 'todas las gerencias', 'desglose gerencia', 'empresas por gerencia', 'que gerencias hay', 'ver gerencias'] },
+        { id: 'TURNO_DIA_NOCHE',      palabras: ['camas dia', 'camas de dia', 'camas noche', 'camas de noche', 'turno dia', 'turno noche', 'disponibles de dia', 'disponibles de noche', 'pabellon noche', 'pabellon dia', 'camas por turno', 'turno', 'dia disponible', 'noche disponible'] },
+        { id: 'CAMAS_CAPACIDAD',      palabras: ['capacidad', 'espacio', 'cuantas camas', 'total camas', 'camas disponibles', 'camas libres'] },
         { id: 'TRABAJADORES_EMPRESA', palabras: ['trabajador', 'personal', 'emplead', 'gente', 'quien esta', 'quien hay', 'cuantos son', 'anglo', 'aramark', 'constructora', 'empresa'] },
-        { id: 'SOLICITUDES', palabras: ['solicitud', 'reserva', 'pedido', 'solicitudes', 'b2b', 'pendiente', 'aprobad', 'rechazad'] },
-        { id: 'EDIFICIO_DETALLE', palabras: ['pabellon', 'edificio', 'p-1', 'p-2', 'p-3', 'p-4', 'p-5', 'p-6', 'p-7', 'p-8', '220', 'pab'] },
-        { id: 'GENERO_BREAKDOWN', palabras: ['mujer', 'hombre', 'femenin', 'masculin', 'genero', 'sexo', 'dama'] },
-        { id: 'ALERTAS', palabras: ['alerta', 'problema', 'error', 'issue', 'bloqueada', 'mantenimiento', 'sin asignar'] },
+        { id: 'SOLICITUDES',          palabras: ['solicitud', 'reserva', 'pedido', 'solicitudes', 'b2b', 'pendiente', 'aprobad', 'rechazad'] },
+        { id: 'EDIFICIO_DETALLE',     palabras: ['pabellon', 'edificio', 'p-1', 'p-2', 'p-3', 'p-4', 'p-5', 'p-6', 'p-7', 'p-8', '220', 'pab'] },
+        { id: 'GENERO_BREAKDOWN',     palabras: ['mujer', 'hombre', 'femenin', 'masculin', 'genero', 'sexo', 'dama'] },
+        { id: 'ALERTAS',              palabras: ['alerta', 'problema', 'error', 'issue', 'bloqueada', 'mantenimiento', 'sin asignar'] },
     ];
+
 
     // Si detectamos un número de habitación concreto, priorizar ese intent
     if (habNumero && (q.includes('hab') || q.includes('cuarto') || q.includes('pieza') || q.includes('room') || /^[\s\d]+$/.test(q.trim()) || q.match(/\b\d{3,5}\b/))) {
@@ -712,70 +831,213 @@ function generarResumenGeneral(datos) {
             </div>` : ''}
         </div>
 
+        <!-- ── Detalle desplegable: Edificios ── -->
+        ${(copcHTML || r220HTML) ? collapsiblePanel(
+            '🏗️ Desglose por Pabellón',
+            `<div class="table-wrap"><table class="informe-table">
+                <thead><tr><th>Pabellón</th><th>Total Hab.</th><th>Libres</th><th>Ocupadas</th><th>Camas</th><th>Ocupación</th></tr></thead>
+                <tbody>${copcHTML}${r220HTML}</tbody>
+                <tfoot><tr style="background:#f1f5f9;font-weight:800">
+                    <td style="padding:8px 12px">TOTAL</td>
+                    <td style="text-align:center;padding:8px 12px">${stats.total}</td>
+                    <td style="text-align:center;padding:8px 12px;color:#16a34a">${totLib}</td>
+                    <td style="text-align:center;padding:8px 12px;color:#c0392b">${totOcu}</td>
+                    <td style="text-align:center;padding:8px 12px">${totCam}</td>
+                    <td style="text-align:center;padding:8px 12px"><span style="background:#e0f2fe;color:#0369a1;padding:2px 10px;border-radius:99px;font-size:12px;font-weight:700">${pctOcup}%</span></td>
+                </tr></tfoot>
+            </table></div>`,
+            `${stats.total} pabellones`,
+            '#6366f1',
+            false  // cerrado por defecto
+        ) : ''}
 
-
-        ${empresas.length > 0 ? `
-        <h3 class="section-title">🏢 Trabajadores por Empresa</h3>
-        <div class="empresas-list">${empresasHTML}</div>` : ''}
+        <!-- ── Detalle desplegable: Empresas ── -->
+        ${empresas.length > 0 ? collapsiblePanel(
+            '🏢 Trabajadores por Empresa',
+            `<div class="empresas-list">${empresasHTML}</div>`,
+            `${empresas.length} empresas · ${trabajadores.length} personas`,
+            '#c0392b',
+            true  // primera abierta
+        ) : ''}
     </div>`;
 }
 
+
 function generarHabitacionesLibres(datos, edificioFiltro) {
-    const { rooms, buildings } = datos;
+    const { rooms, buildings, requests } = datos;
     const buildingMap = {};
     buildings.forEach(b => buildingMap[b.id] = { name: b.name || b.code, code: b.code });
 
-    let habitaciones = rooms.filter(r => r.status === 'free');
-    if (edificioFiltro) {
-        habitaciones = habitaciones.filter(r => {
+    const filtrarEdificio = list => edificioFiltro
+        ? list.filter(r => {
             const b = buildingMap[r.buildingId];
-            return b && (normalizar(b.code).includes(normalizar(edificioFiltro)) || normalizar(b.name).includes(normalizar(edificioFiltro)));
-        });
-    }
+            return b && (normalizar(b.code).includes(normalizar(edificioFiltro)) ||
+                         normalizar(b.name).includes(normalizar(edificioFiltro)));
+          })
+        : list;
 
+    // ── 1. Habitaciones actualmente libres ───────────────────────────────────
+    const libresAhora = filtrarEdificio(rooms.filter(r => r.status === 'free'));
+    const camasLibres = libresAhora.reduce((s, r) => s + (r.bedCount || 2), 0);
+
+    // ── 2. Habitaciones que se liberarán (ocupadas con fecha de salida) ───────
+    const hoy = new Date(); hoy.setHours(0,0,0,0);
+    const porLiberarse = filtrarEdificio(rooms.filter(r => r.status === 'occupied'))
+        .map(r => {
+            const camas = Object.values(r.beds || {}).filter(b => b?.occupant && b.occupant !== '—');
+            if (camas.length === 0) return null;
+            // Fecha en que se libera = max(fecha_salida_programada de todos los ocupantes)
+            const fechas = camas.map(b => b.departureDate).filter(d => d && d !== '—').sort();
+            if (fechas.length === 0) return null;
+            const liberacion = fechas[fechas.length - 1]; // última salida
+            return { room: r, liberacion, camas };
+        })
+        .filter(Boolean)
+        .filter(x => {
+            // Solo mostrar habitaciones que se liberan en los próximos 30 días
+            const d = new Date(x.liberacion); d.setHours(0,0,0,0);
+            return d >= hoy;
+        })
+        .sort((a, b) => a.liberacion.localeCompare(b.liberacion));
+
+    // ── 3. Mapa de solicitudes pendientes por fecha de llegada ──────────────
+    const pendientes = (requests || []).filter(r =>
+        r.status === 'pendiente' || r.status === 'pending' || r.status === 'sinAsignar'
+    );
+    const reqPorFecha = {};
+    pendientes.forEach(req => {
+        const d = req.fechaLlegada || req.fecha_llegada;
+        if (d && d !== '—') {
+            if (!reqPorFecha[d]) reqPorFecha[d] = [];
+            reqPorFecha[d].push(req);
+        }
+    });
+
+    // ── KPIs ─────────────────────────────────────────────────────────────────
+    const totalCoinciencias = porLiberarse.filter(x => (reqPorFecha[x.liberacion]||[]).length > 0).length;
+
+    // ── Panel 1: Libres ahora ─────────────────────────────────────────────────
     const porEdificio = {};
-    habitaciones.forEach(r => {
+    libresAhora.forEach(r => {
         const b = buildingMap[r.buildingId];
         const bnom = b?.name || `Ed.${r.buildingId}`;
         if (!porEdificio[bnom]) porEdificio[bnom] = [];
         porEdificio[bnom].push(r);
     });
 
-    let html = `
-    <div class="informe-section">
-        <div class="kpi-grid">
-            <div class="kpi-card kpi-green">
-                <div class="kpi-icon">🟢</div>
-                <div class="kpi-value">${habitaciones.length}</div>
-                <div class="kpi-label">Habitaciones Libres${edificioFiltro ? ` — ${edificioFiltro}` : ''}</div>
-            </div>
-            <div class="kpi-card kpi-blue">
-                <div class="kpi-icon">🛏️</div>
-                <div class="kpi-value">${habitaciones.reduce((s, r) => s + (r.bedCount || 2), 0)}</div>
-                <div class="kpi-label">Camas Disponibles</div>
-            </div>
-        </div>`;
-
+    let panelLibres = '';
     let firstBuilding = true;
     Object.entries(porEdificio).sort((a, b) => a[0].localeCompare(b[0])).forEach(([nombre, habs]) => {
         const chips = habs
             .sort((a, b) => String(a.number).localeCompare(String(b.number), undefined, { numeric: true }))
             .map(r => `<div class="room-chip free">Hab. ${r.number} <span>${r.bedCount || 2} camas</span></div>`)
             .join('');
-
-        html += collapsiblePanel(
+        panelLibres += collapsiblePanel(
             `🏢 ${nombre}`,
             `<div class="chips-grid">${chips}</div>`,
             `${habs.length} libres`,
             '#16a34a',
-            firstBuilding // primer edificio abierto, el resto cerrado
+            firstBuilding
         );
         firstBuilding = false;
     });
 
-    html += `</div>`;
-    return html;
+    // ── Panel 2: Próximas liberaciones ────────────────────────────────────────
+    let filasProximas = '';
+    porLiberarse.slice(0, 60).forEach(({ room, liberacion, camas }) => {
+        const bnom = buildingMap[room.buildingId]?.name || room.buildingId;
+        const match = reqPorFecha[liberacion] || [];
+        const diasRestantes = Math.round((new Date(liberacion) - hoy) / 86400000);
+        const urgencia = diasRestantes <= 2 ? '#ef4444' : diasRestantes <= 7 ? '#f59e0b' : '#16a34a';
+
+        // Badge de urgencia
+        const urgeBadge = diasRestantes === 0
+            ? `<span style="background:#fef2f2;color:#ef4444;padding:2px 8px;border-radius:99px;font-size:10px;font-weight:800">HOY</span>`
+            : diasRestantes === 1
+            ? `<span style="background:#fff7ed;color:#f59e0b;padding:2px 8px;border-radius:99px;font-size:10px;font-weight:800">MAÑANA</span>`
+            : `<span style="background:#f0fdf4;color:#16a34a;padding:2px 8px;border-radius:99px;font-size:10px;font-weight:700">en ${diasRestantes}d</span>`;
+
+        // Occupants summary
+        const ocupantesHTML = camas.map(b =>
+            `<div style="font-size:11px;color:#475569">👷 ${b.occupant.split('(')[0].trim()} · ${b.company||'—'}</div>`
+        ).join('');
+
+        // Match con solicitudes pendientes
+        const matchHTML = match.length > 0
+            ? `<div style="background:#fefce8;border:1px solid #fbbf24;border-radius:8px;padding:6px 10px;margin-top:6px">
+                <div style="font-size:10px;font-weight:800;color:#b45309;margin-bottom:3px">✅ COINCIDE CON ${match.length} SOLICITUD${match.length>1?'ES':''} PENDIENTE${match.length>1?'S':''}</div>
+                ${match.slice(0,3).map(s => `<div style="font-size:11px;color:#92400e">👤 ${s.nombre||s.worker_name||'—'} · ${s.empresa||'—'} · llega ${s.fechaLlegada||'—'}</div>`).join('')}
+               </div>`
+            : '';
+
+        filasProximas += `
+        <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:12px 14px;margin-bottom:8px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+                <div style="font-weight:800;font-size:14px">Hab. ${room.number}
+                    <span style="font-size:11px;font-weight:500;color:#94a3b8;margin-left:6px">${bnom}</span>
+                </div>
+                <div style="display:flex;gap:6px;align-items:center">
+                    ${urgeBadge}
+                    <span style="font-size:12px;font-weight:700;color:${urgencia}">📅 ${liberacion}</span>
+                </div>
+            </div>
+            ${ocupantesHTML}
+            ${matchHTML}
+        </div>`;
+    });
+
+    const sinProximas = porLiberarse.length === 0
+        ? `<p style="text-align:center;color:#94a3b8;padding:20px">No hay habitaciones con fecha de salida programada en los próximos 30 días.</p>`
+        : '';
+
+    return `
+    <div class="informe-section">
+
+        <!-- KPIs -->
+        <div class="kpi-grid" style="margin-bottom:16px">
+            <div class="kpi-card kpi-green">
+                <div class="kpi-icon">🟢</div>
+                <div class="kpi-value">${libresAhora.length}</div>
+                <div class="kpi-label">Libres Ahora${edificioFiltro ? ` — ${edificioFiltro}` : ''}</div>
+            </div>
+            <div class="kpi-card kpi-blue">
+                <div class="kpi-icon">🛏️</div>
+                <div class="kpi-value">${camasLibres}</div>
+                <div class="kpi-label">Camas Disponibles</div>
+            </div>
+            <div class="kpi-card kpi-orange">
+                <div class="kpi-icon">🗓️</div>
+                <div class="kpi-value">${porLiberarse.length}</div>
+                <div class="kpi-label">Se liberan pronto</div>
+            </div>
+            ${totalCoinciencias > 0 ? `<div class="kpi-card" style="background:#fefce8;border:1.5px solid #fbbf24">
+                <div class="kpi-icon">✅</div>
+                <div class="kpi-value" style="color:#b45309">${totalCoinciencias}</div>
+                <div class="kpi-label" style="color:#b45309">Coinciden con solicitud</div>
+            </div>` : ''}
+        </div>
+
+        <!-- Libres ahora -->
+        ${libresAhora.length > 0
+            ? collapsiblePanel('🟢 Habitaciones Libres Ahora', panelLibres || '<p style="padding:20px;color:#94a3b8;text-align:center">Sin habitaciones libres</p>',
+                `${libresAhora.length} hab · ${camasLibres} camas`, '#16a34a', true)
+            : `<div style="background:#f0fdf4;border-radius:12px;padding:16px;text-align:center;color:#16a34a;font-weight:700;margin-bottom:12px">
+                ✅ No hay habitaciones completamente libres en este momento</div>`
+        }
+
+        <!-- Próximas liberaciones -->
+        ${collapsiblePanel(
+            '🗓️ Próximas Liberaciones (fechas de salida programadas)',
+            filasProximas + sinProximas,
+            `${porLiberarse.length} hab · ${totalCoinciencias} coincidencias`,
+            '#f59e0b',
+            true
+        )}
+
+    </div>`;
 }
+
+
 
 function generarHabitacionesOcupadas(datos, edificioFiltro) {
     const { rooms, buildings } = datos;
@@ -941,73 +1203,151 @@ function generarTrabajadoresPorEmpresa(datos, empresaFiltro) {
                 <div class="kpi-value">${trabajadores.length}</div>
                 <div class="kpi-label">${titulo}</div>
             </div>
-            <div class="kpi-card kpi-blue">
-                <div class="kpi-icon">♂</div>
-                <div class="kpi-value">${hombres}</div>
-                <div class="kpi-label">Hombres ${porcentaje(hombres, trabajadores.length)}</div>
-            </div>
-            <div class="kpi-card kpi-purple">
-                <div class="kpi-icon">♀</div>
-                <div class="kpi-value">${mujeres}</div>
-                <div class="kpi-label">Mujeres ${porcentaje(mujeres, trabajadores.length)}</div>
-            </div>
         </div>
+
         <h3 class="section-title">📋 ${empresaFiltro ? 'Lista de Trabajadores' : 'Trabajadores por Empresa'}</h3>
         ${cuerpo}
     </div>`;
 }
 
 
-function generarSolicitudes(datos) {
-    const { requests } = datos;
+function generarSolicitudes(datos, empresaFiltro = null) {
+    let { requests } = datos;
 
-    const ESTADO_LABEL = {
-        pending: { label: 'Pendiente', color: '#b45309', bg: '#fef3c7' },
-        accepted: { label: 'Aceptada', color: '#1d4ed8', bg: '#dbeafe' },
-        assigned: { label: 'Asignada', color: '#16a34a', bg: '#dcfce7' },
-        rejected: { label: 'Rechazada', color: '#be123c', bg: '#ffe4e6' },
-        completed: { label: 'Completada', color: '#7c3aed', bg: '#ede9fe' },
+    if (!requests || requests.length === 0) {
+        return `<div class="informe-section"><p style="color:#64748b;text-align:center;padding:40px;">
+            📭 No hay solicitudes B2B registradas.</p></div>`;
+    }
+
+    // Filtrar por empresa si se especificó
+    const filtroNorm = normalizar(empresaFiltro || '');
+    if (filtroNorm.length >= 3) {
+        const filtradas = requests.filter(r => normalizar(r.empresa).includes(filtroNorm));
+        if (filtradas.length > 0) requests = filtradas;
+    }
+
+
+    // ── Mapeo de estados (español = lo que guarda la BD) ─────────────────────
+    const ESTADO = {
+        pendiente:   { label: 'Pendiente',   color: '#b45309', bg: '#fef3c7' },
+        aceptada:    { label: 'Aceptada',    color: '#1d4ed8', bg: '#dbeafe' },
+        asignada:    { label: 'Asignada',    color: '#16a34a', bg: '#dcfce7' },
+        rechazada:   { label: 'Rechazada',   color: '#be123c', bg: '#ffe4e6' },
+        completada:  { label: 'Completada',  color: '#7c3aed', bg: '#ede9fe' },
+        // alias inglés por compatibilidad
+        pending:     { label: 'Pendiente',   color: '#b45309', bg: '#fef3c7' },
+        accepted:    { label: 'Aceptada',    color: '#1d4ed8', bg: '#dbeafe' },
+        assigned:    { label: 'Asignada',    color: '#16a34a', bg: '#dcfce7' },
+        rejected:    { label: 'Rechazada',   color: '#be123c', bg: '#ffe4e6' },
+        completed:   { label: 'Completada',  color: '#7c3aed', bg: '#ede9fe' },
     };
 
-    const countByStatus = {};
+    // ── KPIs globales ────────────────────────────────────────────────────────
+    const totalTrab    = requests.length;
+    const pendientes   = requests.filter(r => ['pendiente','pending'].includes(r.status)).length;
+    const aceptadas    = requests.filter(r => ['aceptada','asignada','accepted','assigned','completada','completed'].includes(r.status)).length;
+    const rechazadas   = requests.filter(r => ['rechazada','rejected'].includes(r.status)).length;
+    const conHab       = requests.filter(r => r.hab && r.hab !== '—').length;
+
+    // ── Agrupar por empresa ──────────────────────────────────────────────────
+    const porEmpresa = {};
     requests.forEach(r => {
-        countByStatus[r.status] = (countByStatus[r.status] || 0) + 1;
+        const emp = r.empresa || '—';
+        if (!porEmpresa[emp]) porEmpresa[emp] = [];
+        porEmpresa[emp].push(r);
     });
 
-    let rows = '';
-    [...requests].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')).forEach(r => {
-        const est = ESTADO_LABEL[r.status] || { label: r.status, color: '#64748b', bg: '#f1f5f9' };
-        const totalW = r.workers?.length || 0;
-        const asignados = r.workers?.filter(w => w.assignedRoomStr)?.length || 0;
-        rows += `
-        <tr>
-            <td style="padding:10px 12px;font-weight:700;">${r.company || '—'}</td>
-            <td style="padding:10px 12px;">${r.createdAt ? r.createdAt.slice(0, 10) : '—'}</td>
-            <td style="padding:10px 12px;text-align:center;">${totalW}</td>
-            <td style="padding:10px 12px;text-align:center;">${asignados}/${totalW}</td>
-            <td style="padding:10px 12px;">
-                <span style="background:${est.bg};color:${est.color};padding:3px 10px;border-radius:99px;font-size:12px;font-weight:700;">${est.label}</span>
-            </td>
-        </tr>`;
-    });
+    // ── Panel colapsable por empresa ─────────────────────────────────────────
+    let paneles = '';
+    Object.entries(porEmpresa)
+        .sort((a, b) => b[1].length - a[1].length)
+        .forEach(([emp, lista], idx) => {
+            const pend = lista.filter(r => ['pendiente','pending'].includes(r.status)).length;
+            const acep = lista.filter(r => ['aceptada','asignada','accepted','assigned','completada','completed'].includes(r.status)).length;
+            const rech = lista.filter(r => ['rechazada','rejected'].includes(r.status)).length;
+
+            const filas = lista.slice(0, 200).map((r, i) => {
+                const est = ESTADO[r.status] || { label: r.status||'—', color: '#64748b', bg: '#f1f5f9' };
+                return `<tr style="${i%2===0?'background:#fafafa;':''}">
+                    <td style="padding:7px 12px;font-weight:600;font-size:13px">${r.nombre || '—'}</td>
+                    <td style="padding:7px 12px;font-size:12px;color:#64748b">${r.rut || '—'}</td>
+                    <td style="padding:7px 12px;font-size:12px">${r.fechaLlegada || '—'}</td>
+                    <td style="padding:7px 12px;font-size:12px">${r.fechaSalida  || '—'}</td>
+                    <td style="padding:7px 12px;font-size:12px">${r.hab && r.hab!=='—' ? '🏠 '+r.hab : '—'}</td>
+                    <td style="padding:7px 12px">
+                        <span style="background:${est.bg};color:${est.color};padding:2px 9px;border-radius:99px;font-size:11px;font-weight:700">${est.label}</span>
+                    </td>
+                </tr>`;
+            }).join('');
+
+            const extraRow = lista.length > 200
+                ? `<tr><td colspan="6" style="text-align:center;padding:10px;color:#94a3b8;font-size:12px">... y ${lista.length-200} más</td></tr>`
+                : '';
+
+            const tablaHTML = `
+                <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+                    <span style="background:#fef3c7;color:#b45309;padding:3px 10px;border-radius:99px;font-size:12px;font-weight:700">⏳ ${pend} pendientes</span>
+                    <span style="background:#dcfce7;color:#16a34a;padding:3px 10px;border-radius:99px;font-size:12px;font-weight:700">✅ ${acep} aceptadas</span>
+                    ${rech > 0 ? `<span style="background:#ffe4e6;color:#be123c;padding:3px 10px;border-radius:99px;font-size:12px;font-weight:700">❌ ${rech} rechazadas</span>` : ''}
+                </div>
+                <div class="table-wrap"><table class="informe-table">
+                    <thead><tr><th>Nombre</th><th>RUT</th><th>Llegada</th><th>Salida</th><th>Hab.</th><th>Estado</th></tr></thead>
+                    <tbody>${filas}${extraRow}</tbody>
+                </table></div>`;
+
+            paneles += collapsiblePanel(
+                `🏢 ${emp}`,
+                tablaHTML,
+                `${lista.length} trabajadores`,
+                '#c0392b',
+                idx === 0
+            );
+        });
 
     return `
     <div class="informe-section">
-        <div class="kpi-grid">
-            <div class="kpi-card kpi-blue"><div class="kpi-icon">📩</div><div class="kpi-value">${requests.length}</div><div class="kpi-label">Total Solicitudes</div></div>
-            <div class="kpi-card kpi-yellow"><div class="kpi-icon">⏳</div><div class="kpi-value">${countByStatus['pending'] || 0}</div><div class="kpi-label">Pendientes</div></div>
-            <div class="kpi-card kpi-green"><div class="kpi-icon">✅</div><div class="kpi-value">${(countByStatus['assigned'] || 0) + (countByStatus['completed'] || 0)}</div><div class="kpi-label">Asignadas/Completadas</div></div>
-            <div class="kpi-card kpi-red"><div class="kpi-icon">❌</div><div class="kpi-value">${countByStatus['rejected'] || 0}</div><div class="kpi-label">Rechazadas</div></div>
+
+        <!-- ── KPIs resumen ── -->
+        <div class="kpi-grid" style="margin-bottom:20px">
+            <div class="kpi-card kpi-blue">
+                <div class="kpi-icon">📩</div>
+                <div class="kpi-value">${totalTrab}</div>
+                <div class="kpi-label">Total Trabajadores Solicitados</div>
+            </div>
+            <div class="kpi-card kpi-yellow">
+                <div class="kpi-icon">⏳</div>
+                <div class="kpi-value">${pendientes}</div>
+                <div class="kpi-label">Pendientes de Asignar</div>
+            </div>
+            <div class="kpi-card kpi-green">
+                <div class="kpi-icon">✅</div>
+                <div class="kpi-value">${aceptadas}</div>
+                <div class="kpi-label">Aceptadas / Asignadas</div>
+            </div>
+            <div class="kpi-card kpi-red">
+                <div class="kpi-icon">❌</div>
+                <div class="kpi-value">${rechazadas}</div>
+                <div class="kpi-label">Rechazadas</div>
+            </div>
+            <div class="kpi-card kpi-purple">
+                <div class="kpi-icon">🏠</div>
+                <div class="kpi-value">${conHab}</div>
+                <div class="kpi-label">Con Habitación Asignada</div>
+            </div>
+            <div class="kpi-card" style="background:#f8fafc;border:1px solid #e2e8f0">
+                <div class="kpi-icon">🏢</div>
+                <div class="kpi-value" style="color:#475569">${Object.keys(porEmpresa).length}</div>
+                <div class="kpi-label" style="color:#64748b">Empresas</div>
+            </div>
         </div>
-        <h3 class="section-title">📋 Listado de Solicitudes</h3>
-        <div class="table-wrap">
-            <table class="informe-table">
-                <thead><tr><th>Empresa</th><th>Fecha</th><th>Trabajadores</th><th>Asignados</th><th>Estado</th></tr></thead>
-                <tbody>${rows || '<tr><td colspan="5" style="text-align:center;padding:20px;color:#94a3b8;">Sin solicitudes registradas</td></tr>'}</tbody>
-            </table>
-        </div>
+
+        <!-- ── Detalle por empresa (desplegable) ── -->
+        <h3 class="section-title">📋 Detalle por Empresa <span style="font-size:12px;font-weight:500;color:#94a3b8">(haz clic para expandir)</span></h3>
+        ${paneles}
     </div>`;
 }
+
+
 
 function generarEdificioDetalle(datos, edificioFiltro) {
     const { rooms, buildings } = datos;
@@ -1107,15 +1447,20 @@ function generarGeneroBreakdown(datos) {
             <div class="kpi-card kpi-blue"><div class="kpi-icon">♂</div><div class="kpi-value">${hombres.length}</div><div class="kpi-label">Hombres (${porcentaje(hombres.length, trabajadores.length)})</div></div>
             <div class="kpi-card kpi-purple"><div class="kpi-icon">♀</div><div class="kpi-value">${mujeres.length}</div><div class="kpi-label">Mujeres (${porcentaje(mujeres.length, trabajadores.length)})</div></div>
         </div>
-        <h3 class="section-title">📊 Desglose por Edificio y Género</h3>
-        <div class="table-wrap">
-            <table class="informe-table">
+
+        ${edGenderHTML ? collapsiblePanel(
+            '📊 Desglose por Edificio y Género',
+            `<div class="table-wrap"><table class="informe-table">
                 <thead><tr><th>Edificio</th><th>♂ Hombres</th><th>♀ Mujeres</th><th>Total</th></tr></thead>
                 <tbody>${edGenderHTML}</tbody>
-            </table>
-        </div>
+            </table></div>`,
+            `${Object.keys(stats.porEdificio).length} edificios`,
+            '#6366f1',
+            true
+        ) : ''}
     </div>`;
 }
+
 
 function generarCapacidadCamas(datos) {
     const { rooms, buildings } = datos;
@@ -1145,15 +1490,20 @@ function generarCapacidadCamas(datos) {
             <div class="kpi-card kpi-orange"><div class="kpi-icon">🔴</div><div class="kpi-value">${stats.camasOcupadas}</div><div class="kpi-label">Camas Ocupadas</div></div>
             <div class="kpi-card kpi-green"><div class="kpi-icon">✅</div><div class="kpi-value">${stats.totalCamas - stats.camasOcupadas}</div><div class="kpi-label">Camas Disponibles</div></div>
         </div>
-        <h3 class="section-title">🛏️ Capacidad por Edificio</h3>
-        <div class="table-wrap">
-            <table class="informe-table">
+
+        ${collapsiblePanel(
+            '🛏️ Capacidad por Edificio',
+            `<div class="table-wrap"><table class="informe-table">
                 <thead><tr><th>Edificio</th><th>Total Camas</th><th>Ocupadas</th><th>Libres</th><th>Ocupación</th></tr></thead>
                 <tbody>${edHTML}</tbody>
-            </table>
-        </div>
+            </table></div>`,
+            `${Object.keys(stats.porEdificio).length} edificios`,
+            '#6366f1',
+            true
+        )}
     </div>`;
 }
+
 
 // ── Camas Perdidas ─────────────────────────────────────────────────────
 // Definición: habitación con capacidad ≥ 2 camas que tiene exactamente
@@ -1406,9 +1756,9 @@ function generarHabitacionDetalle(datos, habNumero) {
     </div>`;
 }
 
-// ── Cupos por Gerencia disponibles (V2 — lee de v2_cupos_gerencias) ───────────
-function generarCuposGerencia(datos) {
-    const { quotas } = datos;
+// ── Cupos por Gerencia — igual que la pantalla de la app ──────────────────────
+function generarCuposGerencia(datos, filtro = null) {
+    let { quotas } = datos;
 
     if (!quotas || quotas.length === 0) {
         return `<div class="informe-section"><p style="text-align:center;padding:40px;color:#94a3b8;">
@@ -1417,69 +1767,188 @@ function generarCuposGerencia(datos) {
         </p></div>`;
     }
 
-    // Agrupar por gerencia para los KPIs
-    const gerSet = new Set(quotas.map(q => q.gerencia));
-    const totalCupos    = quotas.reduce((s, q) => s + (q.cupos_totales  || 0), 0);
-    const totalOcupados = quotas.reduce((s, q) => s + (q.cupos_ocupados || 0), 0);
-    const totalLibres   = Math.max(0, totalCupos - totalOcupados);
+    // Aplicar filtro de empresa o gerencia si se especificó
+    const filtroNorm = normalizar(filtro || '');
+    if (filtroNorm.length >= 3) {
+        const filtradas = quotas.filter(q =>
+            normalizar(q.company).includes(filtroNorm) ||
+            normalizar(q.gerencia).includes(filtroNorm)
+        );
+        if (filtradas.length > 0) quotas = filtradas;
+    }
 
-    // Tabla de contratos
-    let rows = '';
+    // ── KPIs globales (idénticos a la pantalla de la app) ────────────────────
+    const totalContratos = quotas.length;
+    const gerSet         = new Set(quotas.map(q => q.gerencia));
+    const totalCupos     = quotas.reduce((s, q) => s + (q.cupos_totales  || 0), 0);
+    const totalOcupados  = quotas.reduce((s, q) => s + (q.cupos_ocupados || 0), 0);
+    const totalLibres    = Math.max(0, totalCupos - totalOcupados);
+    const pctGlobal      = totalCupos > 0 ? Math.min(100, Math.round(totalOcupados / totalCupos * 100)) : 0;
+
+    // ── Agrupar por gerencia ──────────────────────────────────────────────────
+    const porGerencia = {};
     quotas.forEach(q => {
-        const ocupados   = q.cupos_ocupados  || 0;
-        const totales    = q.cupos_totales   || 0;
-        const libres     = Math.max(0, totales - ocupados);
-        const pct        = totales > 0 ? Math.min(100, Math.round((ocupados / totales) * 100)) : 0;
-        const barColor   = pct >= 100 ? '#e53e3e' : pct >= 80 ? '#dd6b20' : '#38a169';
-        const badgeBg    = pct >= 100 ? '#fff5f5' : pct >= 80 ? '#fffbeb' : '#f0fff4';
-        const badgeCol   = pct >= 100 ? '#c0392b' : pct >= 80 ? '#92400e' : '#16a34a';
-        const statusTxt  = totales === 0 ? '⚪ Sin definir'
-                         : pct >= 100    ? '🔴 Agotado'
-                         : pct >= 80     ? '🟠 Casi lleno'
-                         :                 '🟢 Disponible';
-        rows += `
-        <tr>
-            <td style="padding:10px 12px;font-weight:700;font-family:monospace;font-size:12px;color:#6366f1">${q.numero_contrato||'—'}</td>
-            <td style="padding:10px 12px;font-weight:700">${q.company}</td>
-            <td style="padding:10px 12px">
-                <span style="background:#e0f2fe;color:#0369a1;padding:2px 10px;border-radius:99px;font-size:11px;font-weight:700">${q.gerencia}</span>
-            </td>
-            <td style="padding:10px 12px;font-size:12px;color:#64748b;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${q.nombre_contrato||''}">${q.nombre_contrato||'—'}</td>
-            <td style="padding:10px 12px;text-align:center;font-weight:800;color:#c0392b">${ocupados}</td>
-            <td style="padding:10px 12px;text-align:center;font-weight:700;color:#64748b">${totales || '∞'}</td>
-            <td style="padding:10px 12px;text-align:center;font-weight:800;color:${badgeCol}">${totales > 0 ? libres : '∞'}</td>
-            <td style="padding:10px 12px">
-                <div style="display:flex;align-items:center;gap:8px">
-                    <div style="flex:1;background:#e2e8f0;border-radius:99px;height:8px;overflow:hidden;min-width:60px">
-                        <div style="height:100%;width:${pct}%;background:${barColor};border-radius:99px;transition:width 0.8s ease"></div>
-                    </div>
-                    <span style="font-size:11px;font-weight:700;background:${badgeBg};color:${badgeCol};padding:2px 8px;border-radius:99px;white-space:nowrap">${statusTxt}</span>
-                </div>
-            </td>
-        </tr>`;
+        const g = q.gerencia || 'Sin Gerencia';
+        if (!porGerencia[g]) porGerencia[g] = [];
+        porGerencia[g].push(q);
     });
+
+    // Ordenar gerencias: más críticas primero (mayor % ocupación)
+    const gerOrdenadas = Object.entries(porGerencia).sort((a, b) => {
+        const pctA = a[1].reduce((s,q)=>s+(q.cupos_totales||0),0) > 0
+            ? a[1].reduce((s,q)=>s+(q.cupos_ocupados||0),0) / a[1].reduce((s,q)=>s+(q.cupos_totales||0),0)
+            : 0;
+        const pctB = b[1].reduce((s,q)=>s+(q.cupos_totales||0),0) > 0
+            ? b[1].reduce((s,q)=>s+(q.cupos_ocupados||0),0) / b[1].reduce((s,q)=>s+(q.cupos_totales||0),0)
+            : 0;
+        return pctB - pctA;
+    });
+
+    // ── Panel por gerencia ────────────────────────────────────────────────────
+    let paneles = '';
+    gerOrdenadas.forEach(([gerencia, contratos], idx) => {
+        const gerCupos = contratos.reduce((s,q) => s+(q.cupos_totales||0), 0);
+        const gerOcup  = contratos.reduce((s,q) => s+(q.cupos_ocupados||0), 0);
+        const gerLib   = Math.max(0, gerCupos - gerOcup);
+        const gerPct   = gerCupos > 0 ? Math.min(999, Math.round(gerOcup/gerCupos*100)) : 0;
+        const gerColor = gerPct >= 100 ? '#e53e3e' : gerPct >= 80 ? '#dd6b20' : '#38a169';
+        const gerBadge = gerPct >= 100
+            ? `<span style="background:#fff5f5;color:#c0392b;padding:2px 8px;border-radius:99px;font-size:10px;font-weight:800">🔴 CUPOS LLENOS</span>`
+            : gerPct >= 80
+            ? `<span style="background:#fffbeb;color:#92400e;padding:2px 8px;border-radius:99px;font-size:10px;font-weight:700">🟠 ${gerPct}%</span>`
+            : `<span style="background:#f0fff4;color:#16a34a;padding:2px 8px;border-radius:99px;font-size:10px;font-weight:700">🟢 ${gerPct}%</span>`;
+
+        // Tabla de contratos de esta gerencia
+        const filas = contratos.map((q, i) => {
+            const ocup   = q.cupos_ocupados || 0;
+            const tot    = q.cupos_totales  || 0;
+            const lib    = Math.max(0, tot - ocup);
+            const pct    = tot > 0 ? Math.min(999, Math.round(ocup/tot*100)) : 0;
+            const barCol = pct >= 100 ? '#e53e3e' : pct >= 80 ? '#dd6b20' : '#38a169';
+            const badgeB = pct >= 100 ? '#fff5f5' : pct >= 80 ? '#fffbeb' : '#f0fff4';
+            const badgeC = pct >= 100 ? '#c0392b' : pct >= 80 ? '#92400e' : '#16a34a';
+            const status = tot === 0   ? '⚪ Sin def.'
+                         : pct >= 100  ? '🔴 LLENO'
+                         : pct >= 80   ? '🟠 Casi lleno'
+                         :               '🟢 Disponible';
+            return `<tr style="${i%2===0?'background:#fafafa;':''}">
+                <td style="padding:8px 12px;font-weight:700;font-family:monospace;font-size:12px;color:#6366f1">${q.numero_contrato||'—'}</td>
+                <td style="padding:8px 12px;font-size:12px;color:#64748b">${q.numero_contrato ? q.numero_contrato.replace(/[^0-9]/g,'').slice(-4) || '—' : '—'}</td>
+                <td style="padding:8px 12px;font-weight:700;font-size:13px">${q.company}</td>
+                <td style="padding:8px 12px;font-size:12px;color:#64748b;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${q.nombre_contrato||''}">${q.nombre_contrato||'—'}</td>
+                <td style="padding:8px 12px;min-width:160px">
+                    <div style="display:flex;align-items:center;gap:6px">
+                        <div style="flex:1;background:#e2e8f0;border-radius:99px;height:7px;overflow:hidden;min-width:50px">
+                            <div style="height:100%;width:${Math.min(pct,100)}%;background:${barCol};border-radius:99px"></div>
+                        </div>
+                        <span style="font-size:11px;font-weight:700;color:${barCol};min-width:28px">${pct}%</span>
+                    </div>
+                    <div style="font-size:10px;color:#94a3b8;margin-top:2px">${ocup} ocup. · ${lib} libres</div>
+                    ${pct >= 100 ? '<div style="font-size:10px;color:#c0392b;font-weight:700">🚫 CUPOS LLENOS</div>' : ''}
+                </td>
+                <td style="padding:8px 12px;text-align:center;font-weight:800;color:#475569">${tot||'∞'}</td>
+                <td style="padding:8px 12px">
+                    <span style="background:${badgeB};color:${badgeC};padding:2px 9px;border-radius:99px;font-size:11px;font-weight:700">${status}</span>
+                </td>
+            </tr>`;
+        }).join('');
+
+        const tablaHTML = `
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:8px;margin-bottom:12px">
+                <div style="background:#f8fafc;border-radius:10px;padding:10px;text-align:center;border-top:3px solid #6366f1">
+                    <div style="font-size:18px;font-weight:800;color:#6366f1">${contratos.length}</div>
+                    <div style="font-size:10px;color:#64748b;font-weight:600;text-transform:uppercase">Contratos</div>
+                </div>
+                <div style="background:#f8fafc;border-radius:10px;padding:10px;text-align:center;border-top:3px solid #7c3aed">
+                    <div style="font-size:18px;font-weight:800;color:#7c3aed">${gerCupos}</div>
+                    <div style="font-size:10px;color:#64748b;font-weight:600;text-transform:uppercase">Cupos Total</div>
+                </div>
+                <div style="background:#f8fafc;border-radius:10px;padding:10px;text-align:center;border-top:3px solid ${gerColor}">
+                    <div style="font-size:18px;font-weight:800;color:${gerColor}">${gerOcup}</div>
+                    <div style="font-size:10px;color:#64748b;font-weight:600;text-transform:uppercase">Ocupados</div>
+                </div>
+                <div style="background:#f8fafc;border-radius:10px;padding:10px;text-align:center;border-top:3px solid #16a34a">
+                    <div style="font-size:18px;font-weight:800;color:#16a34a">${gerLib}</div>
+                    <div style="font-size:10px;color:#64748b;font-weight:600;text-transform:uppercase">Libres</div>
+                </div>
+            </div>
+            <div class="table-wrap"><table class="informe-table">
+                <thead><tr>
+                    <th>N° Contrato</th><th>SAP</th><th>Empresa</th><th>Nombre Contrato</th>
+                    <th>Ocupación</th><th>Cupos</th><th>Estado</th>
+                </tr></thead>
+                <tbody>${filas}</tbody>
+            </table></div>`;
+
+        paneles += collapsiblePanel(
+            `${gerBadge} ${gerencia}`,
+            tablaHTML,
+            `${contratos.length} contratos · ${gerOcup}/${gerCupos} ocupados`,
+            gerPct >= 100 ? '#c0392b' : gerPct >= 80 ? '#dd6b20' : '#38a169',
+            idx === 0
+        );
+    });
+
+    // Barra global de ocupación
+    const barGlobalCol = pctGlobal >= 100 ? '#e53e3e' : pctGlobal >= 80 ? '#dd6b20' : '#38a169';
 
     return `
     <div class="informe-section">
-        <div class="kpi-grid">
-            <div class="kpi-card kpi-red"><div class="kpi-icon">📋</div><div class="kpi-value">${quotas.length}</div><div class="kpi-label">Contratos</div></div>
-            <div class="kpi-card kpi-blue"><div class="kpi-icon">🏢</div><div class="kpi-value">${gerSet.size}</div><div class="kpi-label">Gerencias</div></div>
-            <div class="kpi-card kpi-purple"><div class="kpi-icon">🛏️</div><div class="kpi-value">${totalCupos}</div><div class="kpi-label">Cupos Totales</div></div>
-            <div class="kpi-card kpi-orange"><div class="kpi-icon">👷</div><div class="kpi-value">${totalOcupados}</div><div class="kpi-label">Cupos Ocupados</div></div>
-            <div class="kpi-card kpi-green"><div class="kpi-icon">✅</div><div class="kpi-value">${totalLibres}</div><div class="kpi-label">Cupos Libres</div></div>
+
+        <!-- ── KPIs idénticos a la pantalla de la app ── -->
+        <div class="kpi-grid" style="margin-bottom:16px">
+            <div class="kpi-card kpi-red">
+                <div class="kpi-icon">📋</div>
+                <div class="kpi-value">${totalContratos.toLocaleString('es-CL')}</div>
+                <div class="kpi-label">Contratos</div>
+            </div>
+            <div class="kpi-card kpi-blue">
+                <div class="kpi-icon">🏗️</div>
+                <div class="kpi-value">${gerSet.size}</div>
+                <div class="kpi-label">Gerencias</div>
+            </div>
+            <div class="kpi-card kpi-purple">
+                <div class="kpi-icon">🛏️</div>
+                <div class="kpi-value">${totalCupos.toLocaleString('es-CL')}</div>
+                <div class="kpi-label">Cupos Total</div>
+            </div>
+            <div class="kpi-card" style="background:#fff5f5;border:1px solid #fecaca">
+                <div class="kpi-icon">✅</div>
+                <div class="kpi-value" style="color:#c0392b">${totalOcupados.toLocaleString('es-CL')}</div>
+                <div class="kpi-label" style="color:#c0392b">Ocupados</div>
+            </div>
+            <div class="kpi-card kpi-green">
+                <div class="kpi-icon">🟢</div>
+                <div class="kpi-value">${totalLibres.toLocaleString('es-CL')}</div>
+                <div class="kpi-label">Libres</div>
+            </div>
         </div>
-        <h3 class="section-title">🎯 Cupos por Contrato / Gerencia</h3>
-        <div class="table-wrap">
-            <table class="informe-table">
-                <thead><tr>
-                    <th>N° Contrato</th><th>Empresa</th><th>Gerencia</th>
-                    <th>Nombre Contrato</th><th>Ocupados</th><th>Cupos</th><th>Libres</th><th>Estado</th>
-                </tr></thead>
-                <tbody>${rows}</tbody>
-            </table>
+
+        <!-- Barra global de ocupación -->
+        <div style="background:#f8fafc;border-radius:12px;padding:12px 16px;margin-bottom:20px;border:1px solid #e2e8f0">
+            <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:700;color:#475569;margin-bottom:6px">
+                <span>📊 Ocupación global del campamento</span>
+                <span style="color:${barGlobalCol}">${pctGlobal}%</span>
+            </div>
+            <div style="background:#e2e8f0;border-radius:99px;height:10px;overflow:hidden">
+                <div style="height:100%;width:${Math.min(pctGlobal,100)}%;background:${barGlobalCol};border-radius:99px;transition:width 1s ease"></div>
+            </div>
+            <div style="font-size:11px;color:#94a3b8;margin-top:4px">${totalOcupados} personas ocupando ${totalCupos} cupos habilitados</div>
         </div>
+
+        <!-- ── Desglose por gerencia (desplegable) ── -->
+        <h3 class="section-title">🎯 Desglose por Gerencia
+            <span style="font-size:12px;font-weight:500;color:#94a3b8">(ordenado por criticidad · haz clic para expandir)</span>
+        </h3>
+        ${paneles}
     </div>`;
 }
+
+
+
+
+
+
 
 // ── Camas por turno Día / Noche ───────────────────────────────────────────────
 // Lógica: si un edificio tiene mainShift='night', TODAS sus camas son de noche.
@@ -1611,26 +2080,85 @@ function generarCamasPorTurno(datos, edificioFiltro) {
     </div>`;
 }
 
-
 export async function procesarConsulta(pregunta) {
     if (!pregunta || !pregunta.trim()) {
         return `<p style="text-align:center;color:#94a3b8;padding:40px;">✏️ Escribe una pregunta para comenzar...</p>`;
     }
 
-    const { id: intencion, edificioFiltro, empresaFiltro, habNumero } = detectarIntencion(pregunta);
+    const { id: intencion, edificioFiltro, habNumero } = detectarIntencion(pregunta);
     const datos = await cargarDatos();
 
+    // ── Detección dinámica de empresa/gerencia desde datos reales ─────────────
+    // (funciona con CUALQUIER empresa: Besalco, Equans, CMPC, etc.)
+    const q = normalizar(pregunta);
+    let empresaFiltro = null;
+    let gerenciaFiltro = null;
+
+    // Recopilar nombres reales desde datos
+    const empresasReales = new Set();
+    const gerenciasReales = new Set();
+
+    // Desde trabajadores en habitaciones
+    datos.rooms.forEach(r => Object.values(r.beds||{}).forEach(b => {
+        if (b?.company && b.company !== '—') empresasReales.add(b.company);
+        if (b?.gerencia && b.gerencia !== '—') gerenciasReales.add(b.gerencia);
+    }));
+    // Desde solicitudes B2B
+    (datos.requests||[]).forEach(r => {
+        if (r.empresa && r.empresa !== '—') empresasReales.add(r.empresa);
+    });
+    // Desde cupos
+    (datos.quotas||[]).forEach(c => {
+        if (c.company && c.company !== '—') empresasReales.add(c.company);
+        if (c.gerencia && c.gerencia !== '—') gerenciasReales.add(c.gerencia);
+    });
+
+    // Buscar coincidencia (al menos 4 chars para evitar falsos positivos)
+    for (const emp of empresasReales) {
+        const empNorm = normalizar(emp);
+        if (empNorm.length >= 4 && q.includes(empNorm)) { empresaFiltro = emp; break; }
+        // Coincidencia parcial (primeras 5 letras)
+        const empShort = empNorm.slice(0, 5);
+        if (empShort.length >= 4 && q.includes(empShort)) { empresaFiltro = emp; break; }
+    }
+    for (const ger of gerenciasReales) {
+        const gerNorm = normalizar(ger);
+        if (gerNorm.length >= 4 && q.includes(gerNorm)) { gerenciaFiltro = ger; break; }
+        const gerShort = gerNorm.slice(0, 6);
+        if (gerShort.length >= 4 && q.includes(gerShort)) { gerenciaFiltro = ger; break; }
+    }
+
+
+
     const fecha = new Date().toLocaleString('es-CL', { dateStyle: 'full', timeStyle: 'short' });
+    const edadCache = _datosCacheTs ? Math.round((Date.now()-_datosCacheTs)/1000) : null;
+    const frescura = edadCache !== null
+        ? (edadCache < 10 ? `<span style="color:#16a34a;font-weight:700">⚡ datos en vivo</span>`
+           : edadCache < 60 ? `<span style="color:#16a34a">✅ datos de hace ${edadCache}s</span>`
+           : `<span style="color:#b45309">⏰ datos de hace ${Math.round(edadCache/60)}min</span>`)
+        : '';
     const headerHTML = `
     <div class="informe-header">
         <div class="informe-meta">
             <span>📅 ${fecha}</span>
             <span>🔍 "${pregunta}"</span>
+            ${frescura ? `<span>${frescura}</span>` : ''}
         </div>
     </div>`;
 
+
     let cuerpo = '';
-    switch (intencion) {
+
+    // Si detectaron empresa/gerencia específica y la intención es genérica → redirigir
+    let intencionFinal = intencion;
+    if (empresaFiltro && ['RESUMEN_GENERAL','ALERTAS'].includes(intencion)) {
+        intencionFinal = 'TRABAJADORES_EMPRESA';
+    }
+    if (gerenciaFiltro && !empresaFiltro && ['RESUMEN_GENERAL','ALERTAS'].includes(intencion)) {
+        intencionFinal = 'CUPOS_GERENCIA';
+    }
+
+    switch (intencionFinal) {
         case 'RESUMEN_GENERAL':
             cuerpo = generarResumenGeneral(datos);
             break;
@@ -1644,13 +2172,14 @@ export async function procesarConsulta(pregunta) {
             cuerpo = generarTrabajadoresPorEmpresa(datos, empresaFiltro);
             break;
         case 'SOLICITUDES':
-            cuerpo = generarSolicitudes(datos);
+            // Si hay empresa específica, filtrar solo sus solicitudes
+            cuerpo = generarSolicitudes(datos, empresaFiltro || null);
             break;
         case 'EDIFICIO_DETALLE':
             cuerpo = generarEdificioDetalle(datos, edificioFiltro || pregunta);
             break;
         case 'GENERO_BREAKDOWN':
-            cuerpo = generarGeneroBreakdown(datos);
+            cuerpo = generarGeneroBreakdown(datos, empresaFiltro);
             break;
         case 'CAMAS_PERDIDAS':
             cuerpo = generarCamasPerdidas(datos, edificioFiltro);
@@ -1659,10 +2188,11 @@ export async function procesarConsulta(pregunta) {
             cuerpo = generarCapacidadCamas(datos);
             break;
         case 'CUPOS_GERENCIA':
-            cuerpo = generarCuposGerencia(datos);
+            // Pasar el filtro de gerencia o empresa para filtrar cupos
+            cuerpo = generarCuposGerencia(datos, gerenciaFiltro || empresaFiltro || null);
             break;
         case 'GERENCIAS_DETALLE':
-            cuerpo = generarGerenciasDetalle(datos);
+            cuerpo = generarGerenciasDetalle(datos, gerenciaFiltro);
             break;
         case 'HABITACION_DETALLE':
             cuerpo = generarHabitacionDetalle(datos, habNumero);
@@ -1676,6 +2206,8 @@ export async function procesarConsulta(pregunta) {
         default:
             cuerpo = generarResumenGeneral(datos);
     }
+
+
 
     return headerHTML + cuerpo;
 }

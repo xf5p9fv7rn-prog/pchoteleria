@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Manual PC Hotelería</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',Arial,sans-serif;color:#1e293b;background:#fff}
+@media print{.no-print{display:none}.page-break{page-break-before:always}}
+.cover{background:linear-gradient(135deg,#c0392b,#7b241c);color:#fff;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:60px 40px}
+.cover h1{font-size:64px;font-weight:900;margin-bottom:16px;letter-spacing:-2px}
+.cover h2{font-size:24px;font-weight:400;opacity:.9;margin-bottom:32px}
+.cover .meta{font-size:16px;opacity:.7;margin-top:auto;padding-top:60px}
+.section{padding:60px 80px;max-width:960px;margin:0 auto}
+.section h2{font-size:32px;font-weight:800;color:#c0392b;border-bottom:3px solid #c0392b;padding-bottom:12px;margin-bottom:28px}
+.section h3{font-size:20px;font-weight:700;color:#1e293b;margin:28px 0 12px}
+.section p{font-size:15px;line-height:1.8;color:#475569;margin-bottom:16px}
+.step-box{background:#f8fafc;border-left:4px solid #c0392b;padding:16px 20px;margin:16px 0;border-radius:0 8px 8px 0}
+.step-box b{color:#c0392b}
+.tip{background:#fef9c3;border:1px solid #fde68a;border-radius:8px;padding:14px 18px;margin:16px 0;font-size:14px}
+.warn{background:#fee2e2;border:1px solid #fca5a5;border-radius:8px;padding:14px 18px;margin:16px 0;font-size:14px}
+.badge{display:inline-block;background:#c0392b;color:#fff;padding:2px 10px;border-radius:99px;font-size:12px;font-weight:700;margin:0 4px}
+table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14px}
+th{background:#c0392b;color:#fff;padding:10px 14px;text-align:left}
+td{padding:9px 14px;border-bottom:1px solid #e2e8f0}
+tr:nth-child(even) td{background:#f8fafc}
+.toc{background:#f8fafc;border-radius:12px;padding:32px 40px;margin:40px 80px}
+.toc h3{font-size:20px;font-weight:800;color:#c0392b;margin-bottom:16px}
+.toc ol{padding-left:20px}
+.toc li{padding:6px 0;font-size:15px;color:#475569}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin:16px 0}
+.card{background:#f8fafc;border-radius:12px;padding:20px;border:1px solid #e2e8f0}
+.card h4{font-size:15px;font-weight:700;color:#c0392b;margin-bottom:8px}
+.card p{font-size:13px;color:#64748b;line-height:1.6;margin:0}
+.num{display:inline-flex;width:28px;height:28px;background:#c0392b;color:#fff;border-radius:50%;align-items:center;justify-content:center;font-weight:800;font-size:13px;margin-right:8px;flex-shrink:0}
+.step-row{display:flex;align-items:flex-start;margin:12px 0}
+</style>
+</head>
+<body>
+
+<!-- PORTADA -->
+<div class="cover">
+  <div style="font-size:80px;margin-bottom:24px">🏨</div>
+  <h1>PC Hotelería</h1>
+  <h2>Manual de Usuario<br>Sistema de Gestión de Alojamiento Industrial</h2>
+  <div style="background:rgba(255,255,255,.15);border-radius:12px;padding:16px 32px;margin-top:24px;font-size:16px">
+    Campamento Los Bronces · AngloAmerican · Aramark
+  </div>
+  <div class="meta">Versión 2.0 · 2026 · Confidencial</div>
+</div>
+
+<!-- TABLA DE CONTENIDOS -->
+<div class="toc no-print">
+  <h3>📋 Tabla de Contenidos</h3>
+  <ol>
+    <li>Acceso e Inicio de Sesión</li>
+    <li>Dashboard Principal</li>
+    <li>Buscador de Habitaciones</li>
+    <li>Portal B2B — Solicitudes de Empresa</li>
+    <li>Gestión de Solicitudes Pendientes</li>
+    <li>Censo de Habitaciones</li>
+    <li>Camas Perdidas</li>
+    <li>Cierre de Sesión</li>
+  </ol>
+</div>
+
+<!-- 1. ACCESO -->
+<div class="page-break"></div>
+<div class="section">
+  <h2>1. Acceso e Inicio de Sesión</h2>
+  <p>PC Hotelería es una PWA (aplicación web progresiva) accesible desde cualquier dispositivo con navegador. No requiere instalación.</p>
+  <h3>🌐 URL de acceso</h3>
+  <div class="step-box"><b>https://pchoteleria.netlify.app</b></div>
+  <h3>📋 Pasos para iniciar sesión</h3>
+  <div class="step-row"><span class="num">1</span><p>Abre el navegador y ve a la URL del sistema.</p></div>
+  <div class="step-row"><span class="num">2</span><p>Ingresa tu <b>Usuario / Email</b> y <b>Contraseña</b> en los campos correspondientes.</p></div>
+  <div class="step-row"><span class="num">3</span><p>Haz clic en <span class="badge">Iniciar Sesión ›</span></p></div>
+  <div class="tip">💡 <b>Tip:</b> Si olvidas tu contraseña, contacta al administrador del sistema.</div>
+  <div class="warn">⚠️ <b>Importante:</b> No compartas tus credenciales. Cada sesión queda registrada con tu identidad.</div>
+</div>
+
+<!-- 2. DASHBOARD -->
+<div class="page-break"></div>
+<div class="section">
+  <h2>2. Dashboard Principal</h2>
+  <p>Al ingresar, verás el <b>Dashboard</b> con los indicadores clave del campamento en tiempo real.</p>
+  <h3>📊 Indicadores KPI</h3>
+  <div class="cols">
+    <div class="card"><h4>🛏 Total Camas</h4><p>Número total de camas del campamento, excluyendo las deshabilitadas.</p></div>
+    <div class="card"><h4>🔴 Ocupadas</h4><p>Camas con huéspedes activos en este momento.</p></div>
+    <div class="card"><h4>🟢 Disponibles</h4><p>Camas libres y listas para asignar.</p></div>
+    <div class="card"><h4>📈 Tasa de Ocupación</h4><p>Porcentaje de camas ocupadas sobre el total activo.</p></div>
+  </div>
+  <h3>🗂 Menú lateral</h3>
+  <p>En el lado izquierdo encontrarás la navegación principal:</p>
+  <table>
+    <tr><th>Módulo</th><th>Descripción</th></tr>
+    <tr><td>📊 Dashboard</td><td>Resumen general de ocupación</td></tr>
+    <tr><td>🔍 Buscador</td><td>Buscar habitaciones o huéspedes</td></tr>
+    <tr><td>📋 Solicitudes B2B</td><td>Gestión de solicitudes de empresas</td></tr>
+    <tr><td>🏠 Censo</td><td>Estado detallado de habitaciones</td></tr>
+    <tr><td>💤 Camas Perdidas</td><td>Reporte de camas sin uso</td></tr>
+  </table>
+</div>
+
+<!-- 3. BUSCADOR -->
+<div class="page-break"></div>
+<div class="section">
+  <h2>3. Buscador de Habitaciones</h2>
+  <p>El buscador permite encontrar rápidamente cualquier habitación o huésped en el campamento.</p>
+  <h3>🔎 Cómo usar el buscador</h3>
+  <div class="step-row"><span class="num">1</span><p>Escribe en el campo de búsqueda el <b>número de habitación</b>, <b>nombre del huésped</b> o <b>RUT</b>.</p></div>
+  <div class="step-row"><span class="num">2</span><p>Los resultados aparecen en tiempo real mientras escribes.</p></div>
+  <div class="step-row"><span class="num">3</span><p>Haz clic en una habitación para ver su detalle: camas, ocupantes y estado.</p></div>
+  <div class="tip">💡 También puedes buscar por <b>edificio</b> (ej: "R-220") o <b>pabellón</b> (ej: "43").</div>
+</div>
+
+<!-- 4. PORTAL B2B -->
+<div class="page-break"></div>
+<div class="section">
+  <h2>4. Portal B2B — Solicitudes de Empresa</h2>
+  <p>Las empresas colaboradoras acceden a un portal público independiente para solicitar alojamiento para sus trabajadores.</p>
+  <h3>🌐 URL del portal de empresas</h3>
+  <div class="step-box"><b>https://pchoteleria.netlify.app/solicitud-empresa.html</b></div>
+
+  <h3>📥 Paso 1 — Descargar la plantilla Excel</h3>
+  <div class="step-row"><span class="num">1</span><p>La empresa ingresa sus datos: <b>Nombre de empresa</b>, <b>N° Contrato</b>, <b>Gerencia</b>, <b>Contacto</b> y <b>Email</b>.</p></div>
+  <div class="step-row"><span class="num">2</span><p>Elige la plantilla según el tipo de turno:<br>
+    <span class="badge">Turno 7x7 / 8x6 / 14x14</span> o <span class="badge">Turno 4x3</span></p></div>
+  <div class="step-row"><span class="num">3</span><p>Se descarga un archivo <b>.xlsx</b> con 350 filas disponibles para completar.</p></div>
+  <div class="tip">💡 La plantilla incluye menús desplegables en las columnas TURNO, SISTEMA, TIPO, ESTADO y SEXO.</div>
+
+  <h3>✏️ Paso 2 — Completar la plantilla</h3>
+  <p>La empresa completa los datos de cada trabajador en la plantilla Excel:</p>
+  <table>
+    <tr><th>Columna</th><th>Descripción</th><th>Obligatorio</th></tr>
+    <tr><td>NOMBRE COMPLETO HUÉSPED</td><td>Nombre completo del trabajador</td><td>✅ Sí</td></tr>
+    <tr><td>RUT (ej: 12345678-9)</td><td>RUT chileno con dígito verificador</td><td>✅ Sí</td></tr>
+    <tr><td>EMPRESA</td><td>Nombre de la empresa</td><td>✅ Sí</td></tr>
+    <tr><td>GERENCIA</td><td>Área o gerencia del trabajador</td><td>Recomendado</td></tr>
+    <tr><td>TURNO</td><td>7x7 / 8x6 / 14x14 / 4x3</td><td>✅ Sí</td></tr>
+    <tr><td>FECHA INICIO / TÉRMINO</td><td>Período de estadía</td><td>✅ Sí</td></tr>
+    <tr><td>SEXO (F/M)</td><td>Género del trabajador</td><td>Recomendado</td></tr>
+  </table>
+  <div class="tip">💡 Puedes <b>copiar y pegar</b> hasta 350 filas desde otro Excel. No hay celdas combinadas que interfieran.</div>
+  <div class="warn">⚠️ El RUT debe tener el formato <b>12345678-9</b> (con guión). Sin puntos.</div>
+
+  <h3>📤 Paso 3 — Subir el archivo</h3>
+  <div class="step-row"><span class="num">1</span><p>De vuelta en el portal, arrastra el Excel completado al área de carga, o haz clic en <span class="badge">Seleccionar archivo</span>.</p></div>
+  <div class="step-row"><span class="num">2</span><p>El sistema muestra una <b>vista previa</b> con el conteo de trabajadores detectados.</p></div>
+  <div class="step-row"><span class="num">3</span><p>Verifica que el número de trabajadores sea correcto.</p></div>
+  <div class="step-row"><span class="num">4</span><p>Haz clic en <span class="badge">🚀 Enviar Solicitud de Alojamiento</span>.</p></div>
+  <div class="tip">💡 Los trabajadores sin RUT son omitidos automáticamente y se informa cuántos fueron excluidos.</div>
+</div>
+
+<!-- 5. GESTIÓN DE SOLICITUDES -->
+<div class="page-break"></div>
+<div class="section">
+  <h2>5. Gestión de Solicitudes Pendientes (Admin)</h2>
+  <p>Los administradores del sistema gestionan las solicitudes recibidas desde el módulo <b>Solicitudes B2B</b>.</p>
+
+  <h3>📋 Vista de solicitudes agrupadas</h3>
+  <p>Las solicitudes se agrupan por empresa. Cada grupo muestra:</p>
+  <div class="cols">
+    <div class="card"><h4>👥 Total trabajadores</h4><p>Cuántos trabajadores tiene la solicitud del grupo.</p></div>
+    <div class="card"><h4>🏠 Con/sin habitación</h4><p>Cuántos tienen habitación asignada y cuántos no.</p></div>
+    <div class="card"><h4>⏳ Estado</h4><p>Pendiente o Procesada según asignaciones.</p></div>
+    <div class="card"><h4>📅 Fechas</h4><p>Período de llegada y salida del grupo.</p></div>
+  </div>
+
+  <h3>✅ Aceptar grupo (asignación automática)</h3>
+  <div class="step-row"><span class="num">1</span><p>Abre el grupo haciendo clic en su cabecera.</p></div>
+  <div class="step-row"><span class="num">2</span><p>Haz clic en <span class="badge">✅ Aceptar grupo</span> para iniciar la asignación automática.</p></div>
+  <div class="step-row"><span class="num">3</span><p>El motor asigna camas considerando: habitación solicitada, género, empresa, y <b>rotación de turno</b> (si alguien sale el mismo día, esa cama queda disponible).</p></div>
+
+  <h3>🔍 Botón Sugerir (asignación manual)</h3>
+  <p>Para trabajadores con <span class="badge" style="background:#92400e">Sin asignar</span>:</p>
+  <div class="step-row"><span class="num">1</span><p>Haz clic en el botón <span class="badge" style="background:#7c3aed">🔍 Sugerir</span> en la fila del trabajador.</p></div>
+  <div class="step-row"><span class="num">2</span><p>Se abre un panel con un <b>campo de búsqueda libre</b>.</p></div>
+  <div class="step-row"><span class="num">3</span><p>Escribe el área deseada, por ejemplo:</p>
+  <table>
+    <tr><th>Lo que escribes</th><th>Resultado</th></tr>
+    <tr><td>R-220</td><td>Solo habitaciones del Residencial 220</td></tr>
+    <tr><td>43</td><td>Solo pabellón 43</td></tr>
+    <tr><td>Piso 2</td><td>Solo segundo piso (R-220)</td></tr>
+    <tr><td>4308</td><td>Habitación específica 4308</td></tr>
+  </table></div>
+  <div class="step-row"><span class="num">4</span><p>Haz clic en el botón verde <b>🛏 [ID de cama]</b> para asignar esa cama al trabajador.</p></div>
+  <div class="tip">💡 Las camas con 🔄 están disponibles por <b>rotación de turno</b>: el ocupante actual sale el mismo día que llega el nuevo trabajador.</div>
+
+  <h3>⚠️ Modal "Trabajadores sin asignar"</h3>
+  <p>Aparece automáticamente si algunos trabajadores no pudieron ser asignados (habitación solicitada llena).</p>
+  <div class="step-row"><span class="num">1</span><p>El modal carga las camas disponibles automáticamente.</p></div>
+  <div class="step-row"><span class="num">2</span><p>Usa el campo de búsqueda para filtrar por edificio o pabellón.</p></div>
+  <div class="step-row"><span class="num">3</span><p>Haz clic en un botón verde para asignar. El trabajador desaparece del modal al ser asignado.</p></div>
+</div>
+
+<!-- 6. CENSO -->
+<div class="page-break"></div>
+<div class="section">
+  <h2>6. Censo de Habitaciones</h2>
+  <p>El módulo de <b>Censo</b> muestra el estado de todas las habitaciones del campamento en detalle.</p>
+  <div class="cols">
+    <div class="card"><h4>🟢 Disponible</h4><p>La habitación tiene al menos una cama libre.</p></div>
+    <div class="card"><h4>🔴 Llena</h4><p>Todas las camas de la habitación están ocupadas.</p></div>
+    <div class="card"><h4>🟡 Parcial</h4><p>La habitación tiene camas ocupadas y libres.</p></div>
+    <div class="card"><h4>⚫ Deshabilitada</h4><p>La habitación está fuera de servicio (no cuenta en estadísticas).</p></div>
+  </div>
+  <h3>📥 Exportar a Excel</h3>
+  <p>Desde el Censo puedes exportar el estado actual de todas las habitaciones a un archivo Excel para reportes.</p>
+</div>
+
+<!-- 7. CAMAS PERDIDAS -->
+<div class="page-break"></div>
+<div class="section">
+  <h2>7. Camas Perdidas</h2>
+  <p>El módulo de <b>Camas Perdidas</b> identifica habitaciones con camas que no están siendo aprovechadas, ya sea por estar desocupadas siendo del género opuesto al pabellón, u otras razones operativas.</p>
+  <div class="warn">⚠️ Las camas <b>Deshabilitadas</b> no se incluyen en el cálculo de camas perdidas.</div>
+</div>
+
+<!-- 8. CERRAR SESIÓN -->
+<div class="section">
+  <h2>8. Cierre de Sesión</h2>
+  <p>Para cerrar tu sesión de forma segura:</p>
+  <div class="step-row"><span class="num">1</span><p>En el menú lateral inferior, encuentra tu nombre de usuario.</p></div>
+  <div class="step-row"><span class="num">2</span><p>Haz clic en el ícono de puerta <b>🚪</b> junto a tu nombre.</p></div>
+  <div class="step-row"><span class="num">3</span><p>Confirma el cierre de sesión.</p></div>
+  <div class="tip">💡 Siempre cierra sesión al terminar, especialmente en dispositivos compartidos.</div>
+</div>
+
+<!-- PIE -->
+<div style="background:#1e293b;color:#94a3b8;text-align:center;padding:32px;margin-top:60px;font-size:13px">
+  <div style="font-size:24px;margin-bottom:8px">🏨</div>
+  <b style="color:#fff">PC Hotelería v2.0</b><br>
+  Campamento Los Bronces · AngloAmerican · Aramark<br>
+  Documento confidencial — 2026
+</div>
+
+</body>
+</html>

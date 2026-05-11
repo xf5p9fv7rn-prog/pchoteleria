@@ -315,6 +315,126 @@ export async function crearGerencia(nombre) {
 }
 
 // ─────────────────────────────────────────────────────────────────
+//  VALIDACIONES DE INTEGRIDAD ANTES DEL CHECK-IN
+// ─────────────────────────────────────────────────────────────────
+
+/**
+ * Normaliza un RUT eliminando puntos, guiones y espacios.
+ * Ejemplo: "12.345.678-9" → "123456789"
+ */
+function normRutSvc(rut = '') {
+    return String(rut).replace(/[\.\-\s]/g, '').toUpperCase();
+}
+
+/**
+ * Busca el sexo de una persona en v2_solicitudes_b2b por RUT.
+ * Devuelve 'M', 'F' o null si no se encuentra.
+ */
+export async function getSexoPorRut(rut) {
+    const rutNorm = normRutSvc(rut);
+    if (!rutNorm) return null;
+    const { data } = await supabase
+        .from('v2_solicitudes_b2b')
+        .select('sexo')
+        .ilike('rut_trabajador', `%${rutNorm}%`)
+        .limit(1)
+        .maybeSingle();
+    return data?.sexo || null;
+}
+
+/**
+ * REGLA 1 — Sin RUT duplicado en fechas solapadas.
+ * Verifica si el RUT ya tiene una asignación activa que se superponga
+ * con el rango [fechaCheckin, fechaSalida].
+ *
+ * @returns {{ ok: boolean, razon?: string }}
+ */
+export async function checkRutDuplicado(rutHuesped, fechaCheckin, fechaSalida) {
+    const rutNorm = normRutSvc(rutHuesped);
+    const { data, error } = await supabase
+        .from('v2_asignaciones')
+        .select('id, nombre_huesped, fecha_checkin, fecha_salida_programada, v2_camas(habitacion_id)')
+        .ilike('rut_huesped', `%${rutNorm}%`)
+        .is('fecha_checkout', null)
+        .in('estado_asignacion', ['activa', 'pre_asignado']);
+
+    if (error) return { ok: true }; // Si falla la query, no bloqueamos
+    const rows = data || [];
+    if (rows.length === 0) return { ok: true };
+
+    const entrada = new Date(fechaCheckin);
+    const salida  = fechaSalida ? new Date(fechaSalida) : null;
+
+    for (const r of rows) {
+        const existeEntrada = new Date(r.fecha_checkin);
+        const existeSalida  = r.fecha_salida_programada ? new Date(r.fecha_salida_programada) : null;
+
+        // Solapamiento: los rangos [A,B] y [C,D] se superponen si A < D y C < B
+        const nuevoTermina  = salida || new Date('2099-12-31');
+        const existeTermina = existeSalida || new Date('2099-12-31');
+
+        if (entrada < existeTermina && existeEntrada < nuevoTermina) {
+            return {
+                ok: false,
+                razon: `🚫 RUT DUPLICADO: ${r.nombre_huesped} (mismo RUT) ya está asignado en el campamento con fechas solapadas (${r.fecha_checkin} → ${r.fecha_salida_programada || 'sin fecha salida'}). No se puede asignar el mismo RUT dos veces en el mismo período.`
+            };
+        }
+    }
+    return { ok: true };
+}
+
+/**
+ * REGLA 2 — Sin mezcla de géneros en la misma habitación.
+ * Verifica que los ocupantes actuales de la habitación sean del mismo
+ * género que la persona que se intenta asignar.
+ *
+ * @param {string} habitacionId  - ID o número de habitación
+ * @param {string} rutNuevo      - RUT del nuevo huésped
+ * @returns {{ ok: boolean, razon?: string }}
+ */
+export async function checkGeneroHabitacion(habitacionId, rutNuevo) {
+    if (!habitacionId || !rutNuevo) return { ok: true };
+
+    // Obtener el sexo de la persona nueva
+    const sexoNuevo = await getSexoPorRut(rutNuevo);
+    if (!sexoNuevo) return { ok: true }; // No tenemos datos de género, no bloqueamos
+
+    // Obtener RUTs de los ocupantes actuales de la habitación
+    const { data: camasHab } = await supabase
+        .from('v2_camas')
+        .select('id_cama')
+        .eq('habitacion_id', habitacionId);
+
+    if (!camasHab || camasHab.length === 0) return { ok: true };
+
+    const idsCamas = camasHab.map(c => c.id_cama);
+
+    const { data: ocupantes } = await supabase
+        .from('v2_asignaciones')
+        .select('rut_huesped, nombre_huesped')
+        .in('id_cama', idsCamas)
+        .is('fecha_checkout', null)
+        .in('estado_asignacion', ['activa', 'pre_asignado']);
+
+    if (!ocupantes || ocupantes.length === 0) return { ok: true };
+
+    // Verificar el género de cada ocupante actual
+    for (const ocup of ocupantes) {
+        const sexoOcup = await getSexoPorRut(ocup.rut_huesped);
+        if (sexoOcup && sexoNuevo && sexoOcup !== sexoNuevo) {
+            const genNuevo = sexoNuevo === 'F' ? 'Mujer ♀' : 'Hombre ♂';
+            const genOcup  = sexoOcup  === 'F' ? 'Mujer ♀' : 'Hombre ♂';
+            return {
+                ok: false,
+                razon: `🚫 MEZCLA DE GÉNEROS: La habitación ya tiene a ${ocup.nombre_huesped} (${genOcup}) y estás intentando asignar a un/a ${genNuevo}. No se permite mezclar hombres y mujeres en la misma habitación.`
+            };
+        }
+    }
+
+    return { ok: true };
+}
+
+// ─────────────────────────────────────────────────────────────────
 //  ASIGNACIONES (CHECK-IN / CHECK-OUT)
 // ─────────────────────────────────────────────────────────────────
 export async function doCheckin({ idCama, rutHuesped, nombreHuesped, empresaId, fechaCheckin, fechaSalidaProgramada, numeroContrato, telefono, esPreAsignacion }) {
@@ -334,6 +454,8 @@ export async function doCheckin({ idCama, rutHuesped, nombreHuesped, empresaId, 
     });
     if (error) throw new Error('[v2-service] checkin: ' + error.message);
 }
+
+
 
 export async function doCheckout(asigId) {
     const { error } = await supabase

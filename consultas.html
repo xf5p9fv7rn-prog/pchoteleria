@@ -624,6 +624,10 @@
     <div class="header-badge" style="display:flex;align-items:center;gap:6px;"><img src="Mirian.png" style="width:20px;height:20px;border-radius:50%;object-fit:cover;"> CONSTANZA · ASISTENTE IA</div>
     <div class="header-right">
         <div class="status-dot" id="status-label">Sistema listo</div>
+        <div id="update-badge" style="display:none;align-items:center;gap:5px;font-size:11px;color:#16a34a;font-weight:700;background:#dcfce7;border:1px solid #bbf7d0;border-radius:99px;padding:3px 10px;animation:pulse 2s infinite">
+            ⚡ En vivo
+        </div>
+        <div id="last-update" style="font-size:11px;color:#94a3b8;font-weight:500"></div>
         <button class="export-btn" onclick="window.print()" title="Imprimir informe">🖨️ Imprimir</button>
     </div>
 </header>
@@ -782,7 +786,7 @@
 </div>
 
 <script type="module">
-    import { procesarConsulta, cargarDatos } from './js/consultas.js?v=3';
+    import { procesarConsulta, cargarDatos, invalidarCache, getDataTimestamp } from './js/consultas.js?v=4';
 
     const inputEl = document.getElementById('chat-input');
     const sendBtn = document.getElementById('send-btn');
@@ -828,6 +832,118 @@
     }
 
     checkDB();
+    // Siempre cargar datos frescos al abrir Constanza
+    invalidarCache();
+
+
+    // ── Indicador de última actualización (en vivo) ──────────────────────
+    const lastUpdateEl = document.getElementById('last-update');
+    setInterval(() => {
+        const ts = getDataTimestamp();
+        if (!ts || !lastUpdateEl) return;
+        const sec = Math.round((Date.now() - ts) / 1000);
+        if (sec < 60)  lastUpdateEl.textContent = `Actualizado hace ${sec}s`;
+        else if (sec < 3600) lastUpdateEl.textContent = `Actualizado hace ${Math.round(sec/60)}min`;
+        else lastUpdateEl.textContent = 'Datos antiguos — recarga';
+    }, 5000);
+
+    // ── Toast de notificación ──────────────────────────────────────────
+    function showToast(msg) {
+        let t = document.getElementById('rt-toast');
+        if (!t) {
+            t = document.createElement('div');
+            t.id = 'rt-toast';
+            t.style.cssText = 'position:fixed;bottom:90px;left:50%;transform:translateX(-50%) translateY(20px);'
+                + 'background:#0f172a;color:#fff;padding:10px 20px;border-radius:12px;font-size:13px;font-weight:700;'
+                + 'z-index:9999;opacity:0;transition:all .3s;pointer-events:none;display:flex;align-items:center;gap:8px;'
+                + 'box-shadow:0 4px 20px rgba(0,0,0,.35)';
+            document.body.appendChild(t);
+        }
+        t.innerHTML = msg;
+        t.style.opacity = '1';
+        t.style.transform = 'translateX(-50%) translateY(0)';
+        clearTimeout(t._to);
+        t._to = setTimeout(() => {
+            t.style.opacity = '0';
+            t.style.transform = 'translateX(-50%) translateY(20px)';
+        }, 4000);
+    }
+
+    // ── Supabase Realtime — escuchar cambios en tiempo real ───────────────
+    (async () => {
+        try {
+            const mod = await import('./js/supabaseClient.js');
+            const sb = mod.supabase;
+            if (!sb?.channel) return;
+
+            const updateBadge = document.getElementById('update-badge');
+
+            const onCambio = (payload) => {
+                console.log('[Constanza ⚡ Realtime]', payload.eventType, payload.table);
+                invalidarCache();
+                if (updateBadge) updateBadge.style.display = 'flex';
+                const ev = payload.eventType;
+                const tabla = payload.table === 'v2_asignaciones' ? 'asignación' : 'cama';
+                const icono = ev === 'INSERT' ? '🟢 Nueva' : ev === 'DELETE' ? '🔴 Baja' : '🟡 Cambio';
+                showToast(`${icono} en ${tabla} — datos actualizados automáticamente`);
+            };
+
+            sb.channel('constanza-realtime')
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'v2_asignaciones' }, onCambio)
+                .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'v2_camas' }, onCambio)
+                .subscribe((status) => {
+                    console.log('[Constanza Realtime] Estado:', status);
+                    if (status === 'SUBSCRIBED') {
+                        statusLabel.textContent = '⚡ Conectada en tiempo real';
+                        statusLabel.style.color = '#16a34a';
+                        setTimeout(() => {
+                            statusLabel.textContent = 'Sistema listo';
+                            statusLabel.style.color = '';
+                        }, 3000);
+                    }
+                });
+        } catch(e) {
+            console.warn('[Constanza Realtime] No disponible:', e.message);
+        }
+    })();
+
+    // ── Sistema de aprendizaje — preguntas frecuentes ─────────────────────
+    const LEARN_KEY = 'constanza_freq_v1';
+    function aprenderPregunta(pregunta) {
+        try {
+            const data = JSON.parse(localStorage.getItem(LEARN_KEY) || '{}');
+            const key = pregunta.trim().toLowerCase();
+            data[key] = (data[key] || 0) + 1;
+            localStorage.setItem(LEARN_KEY, JSON.stringify(data));
+            actualizarSugerenciasFrecuentes();
+        } catch(e) {}
+    }
+    function actualizarSugerenciasFrecuentes() {
+        try {
+            const data = JSON.parse(localStorage.getItem(LEARN_KEY) || '{}');
+            const top5 = Object.entries(data)
+                .sort((a,b) => b[1]-a[1])
+                .slice(0,5)
+                .map(([q]) => q);
+            if (!top5.length) return;
+            let panel = document.getElementById('freq-panel');
+            if (!panel) {
+                panel = document.createElement('div');
+                panel.id = 'freq-panel';
+                const aside = document.querySelector('.suggestions-panel');
+                if (aside) aside.insertBefore(panel, aside.firstChild);
+            }
+            panel.innerHTML = `
+                <div class="panel-label" style="color:#7c3aed">🧠 Preguntas frecuentes</div>
+                ${top5.map(q => `
+                <button class="suggestion-btn" onclick="enviarPregunta('${q.replace(/'/g,"\\'")}')">
+                    <span class="sug-icon">⭐</span>${q.charAt(0).toUpperCase()+q.slice(1)}
+                </button>`).join('')}
+                <div style="font-size:10px;color:#94a3b8;padding:4px 4px 8px;border-bottom:1px solid #f1f5f9">Basado en tu historial de uso</div>
+            `;
+        } catch(e) {}
+    }
+    actualizarSugerenciasFrecuentes(); // Mostrar al cargar
 
     // ── Auto-resize textarea ─────────────────────────────
     inputEl.addEventListener('input', () => {
@@ -859,6 +975,7 @@
         sendBtn.disabled = true;
         statusLabel.textContent = 'Analizando...';
         statusLabel.style.color = '';
+        aprenderPregunta(pregunta); // 🧠 Aprendizaje automático
 
         // Mostrar chat, ocultar bienvenida
         welcomeScreen.style.display = 'none';

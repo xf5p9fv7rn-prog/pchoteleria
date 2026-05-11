@@ -3,8 +3,8 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm';
 
 const supabaseUrl = 'https://pnkajjduvadcxealodcp.supabase.co';
-// service_role key — bypasea RLS en todas las tablas V2 (sistema interno corporativo)
-const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBua2FqamR1dmFkY3hlYWxvZGNwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTI0NDUzMiwiZXhwIjoyMDkwODIwNTMyfQ.kGksbnrqwx1ETq2RNcDozEQ1JZLem1H7VrUdkNT5724';
+// anon/public key — segura para el frontend, RLS controla el acceso por rol
+const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBua2FqamR1dmFkY3hlYWxvZGNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUyNDQ1MzIsImV4cCI6MjA5MDgyMDUzMn0.NsL16NP16MVEwTSN-1ggAtwzTA-2tDPF7Ndbcsdl-Ro';
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 

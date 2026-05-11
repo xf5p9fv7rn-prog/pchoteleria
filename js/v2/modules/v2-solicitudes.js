@@ -709,7 +709,7 @@ function grupoCardHTML(empresa, rows) {
             <td style="padding:7px 10px;font-size:12px;color:#64748b">${fmt(r.fecha_llegada)} → ${fmt(r.fecha_salida)}</td>
             <td style="padding:7px 10px;text-align:center">
                 ${!r.hab_solicitada ? `
-                <button onclick="event.stopPropagation();window._solSugerirCama('${r.id}','${rutB64}','${r.genero||''}','${nombreB64}')"
+                <button onclick="event.stopPropagation();window._solSugerirCama('${r.id}','${rutB64}','${r.genero||''}','${nombreB64}','${gKey}')"
                     title="Ver sugerencias de cama disponible"
                     style="padding:4px 10px;border:none;border-radius:7px;background:linear-gradient(135deg,#7c3aed,#a78bfa);color:#fff;font-weight:700;font-size:11px;cursor:pointer">
                     🔍 Sugerir
@@ -795,15 +795,18 @@ function grupoCardHTML(empresa, rows) {
 
 // ── Sugerir cama disponible (abre panel bajo la tabla) ───────────────────────
 
-window._solSugerirCama = async function(solicitudId, rutB64, genero, nombreB64) {
+window._solSugerirCama = async function(solicitudId, rutB64, genero, nombreB64, gKey) {
     const nombre = decodeURIComponent(escape(atob(nombreB64)));
     const rut    = decodeURIComponent(escape(atob(rutB64)));
 
-    // Encontrar el panel en el DOM
-    const allBtns = document.querySelectorAll(`button[onclick*="_solSugerirCama('${solicitudId}'"]`);
-    const btn = allBtns[0];
-    const panel = btn?.closest('[id^="pend-table-"]')?.querySelector('[id^="suger-panel-"]');
-    if(!panel) return;
+    // Encontrar el panel directamente por ID (más robusto que DOM traversal)
+    const panelId = 'suger-panel-' + gKey;
+    const panel = document.getElementById(panelId);
+    if(!panel) { console.error('[Sugerir] panel no encontrado:', panelId); return; }
+
+    // Asegurar que la sección padre esté visible
+    const seccion = document.getElementById('pend-table-' + gKey);
+    if(seccion && seccion.style.display === 'none') seccion.style.display = 'block';
 
     panel.innerHTML = `<div style="padding:20px;background:#f5f3ff;border-top:2px solid #c4b5fd;text-align:center">
         <div style="font-size:24px">⏳</div>
@@ -884,54 +887,63 @@ window._solSugerirCama = async function(solicitudId, rutB64, genero, nombreB64) 
             if(!habMap[hid]) {
                 const info = habInfo[hid] || {};
                 const numHab = String(info.numero_hab || hid).trim();
-                // Edificio: COPC vs R-220
+                // Edificio: R-220 vs COPC
                 const edificio = hid.startsWith('R-220') ? 'R-220' : 'COPC';
-                // Pabellón: primeros 2 dígitos del numero_hab (ej: 1302 → "13")
+                // Pabellón: primeros 2 dígitos del numero_hab (ej: 4303 → "43")
                 const pabellon = numHab.match(/^(\d{2})/)?.[1] || '?';
-                habMap[hid] = { camas:[], numHab, edificio, pabellon, tieneRotacion: false };
+                // Piso: para R-220 extraer del id_custom (ej: R-220-P2-... → "Piso 2")
+                //       para COPC usar el 3er dígito del número (ej: 4303 → piso del pab. 43)
+                let piso = '';
+                if(hid.startsWith('R-220')) {
+                    const m = hid.match(/[Pp](?:iso)?[\s\-]?(\d)/i) || numHab.match(/[Pp](\d)/);
+                    piso = m ? 'Piso ' + m[1] : '';
+                }
+                // Texto de búsqueda completo (edificio + pabellon + numHab + piso)
+                const searchText = [edificio, pabellon, numHab, piso].join(' ').toLowerCase();
+                habMap[hid] = { camas:[], numHab, edificio, pabellon, piso, searchText, tieneRotacion: false };
             }
             habMap[hid].camas.push(c.id_cama);
             if(c._rotacion) habMap[hid].tieneRotacion = true;
         }
 
-        // ── Obtener listas únicas para filtros ────────────────────────────────
-        const edificios = [...new Set(Object.values(habMap).map(h=>h.edificio))].sort();
-        const pabellones = [...new Set(Object.values(habMap).map(h=>h.pabellon))].sort((a,b)=>Number(a)-Number(b));
-
         const pid = `sp-${solicitudId.replace(/-/g,'_')}`;
 
         // ── Renderizar tarjetas de habitación ─────────────────────────────────
-        function renderHabs(filtEdif='', filtPab='', filtDisp='') {
+        function renderHabs(query) {
+            const q = (query || '').toLowerCase().trim();
             const items = Object.entries(habMap)
-                .filter(([hid, h]) => {
-                    if(filtEdif && h.edificio !== filtEdif) return false;
-                    if(filtPab && h.pabellon !== filtPab) return false;
-                    if(filtDisp === '2' && h.camas.length < 2) return false;
-                    if(filtDisp === '1' && h.camas.length !== 1) return false;
-                    return true;
-                })
-                .sort(([,a],[,b]) => Number(a.numHab)-Number(b.numHab));
+                .filter(([hid, h]) => !q || h.searchText.includes(q))
+                .sort(([,a],[,b]) => {
+                    // R-220 primero si el filtro lo pide, luego por número
+                    if(a.edificio !== b.edificio) return a.edificio.localeCompare(b.edificio);
+                    return Number(a.numHab) - Number(b.numHab);
+                });
 
             const gridEl = document.getElementById(`${pid}-grid`);
             if(!gridEl) return;
 
             if(!items.length) {
-                gridEl.innerHTML = `<div style="padding:32px;text-align:center;color:#94a3b8;font-size:13px">Sin habitaciones con esos filtros</div>`;
+                gridEl.innerHTML = `<div style="padding:32px;text-align:center;color:#94a3b8;font-size:13px">
+                    Sin habitaciones que coincidan con "<b>${query}</b>"<br>
+                    <span style="font-size:11px">Prueba: "R-220", "Piso 2", "43", "COPC"…</span>
+                </div>`;
                 return;
             }
 
             gridEl.innerHTML = items.map(([hid, h]) => {
-                const camasBtns = h.camas.slice(0,4).map(cId=>`
+                const camasBtns = h.camas.map(cId=>`
                     <button onclick="window._solAsignarSugerida('${solicitudId}','${rutB64}','${cId}')"
                         style="padding:5px 10px;border:none;border-radius:7px;background:linear-gradient(135deg,#16a34a,#22c55e);color:#fff;font-weight:800;font-size:11px;cursor:pointer;margin:2px;transition:transform .1s"
                         onmouseover="this.style.transform='scale(1.07)'" onmouseout="this.style.transform=''">
                         🛏 ${cId}
                     </button>`).join('');
-                const extras = h.camas.length > 4 ? `<span style="font-size:10px;color:#94a3b8">+${h.camas.length-4}</span>` : '';
                 const dispColor = h.camas.length >= 2 ? '#dcfce7' : '#fef9c3';
                 const dispText  = h.camas.length >= 2 ? '#15803d' : '#92400e';
                 const rotBadge  = h.tieneRotacion
                     ? `<span style="background:#fff7ed;color:#c2410c;padding:2px 8px;border-radius:99px;font-size:10px;font-weight:700;margin-left:6px">🔄 Rotación</span>`
+                    : '';
+                const pisoBadge = h.piso
+                    ? `<span style="background:#eff6ff;color:#1d4ed8;padding:2px 8px;border-radius:99px;font-size:10px;font-weight:700;margin-left:4px">${h.piso}</span>`
                     : '';
                 return `
                 <div style="background:#fff;border:1.5px solid ${h.tieneRotacion?'#fed7aa':'#e2e8f0'};border-radius:12px;padding:12px 14px;transition:border-color .15s"
@@ -939,71 +951,56 @@ window._solSugerirCama = async function(solicitudId, rutB64, genero, nombreB64) 
                     <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
                         <div>
                             <div style="font-weight:900;font-size:16px;color:#0f172a">Hab. ${h.numHab}${rotBadge}</div>
-                            <div style="font-size:11px;color:#64748b">${h.edificio} · Pab. ${h.pabellon}</div>
+                            <div style="font-size:11px;color:#64748b">${h.edificio} · Pab. ${h.pabellon}${pisoBadge}</div>
                         </div>
                         <span style="background:${dispColor};color:${dispText};padding:3px 10px;border-radius:99px;font-size:11px;font-weight:700">
                             ${h.camas.length} libre${h.camas.length!==1?'s':''}
                         </span>
                     </div>
-                    <div style="display:flex;flex-wrap:wrap;gap:4px">${camasBtns}${extras}</div>
+                    <div style="display:flex;flex-wrap:wrap;gap:4px">${camasBtns}</div>
                 </div>`;
             }).join('');
         }
 
         panel.innerHTML = `
-        <div style="padding:18px 20px;background:#f5f3ff;border-top:2px solid #c4b5fd">
+        <div style="padding:18px 20px;background:#f5f3ff;border-top:2px solid #c4b5fd" id="${pid}">
             <!-- Header -->
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
                 <div>
-                    <div style="font-weight:900;font-size:14px;color:#4c1d95">🔍 Asignación manual — <span style="color:#7c3aed">${nombre}</span>${genero?` <span style="font-size:12px;color:#6b7280">(${genero})</span>`:''}</div>
-                    <div style="font-size:11px;color:#7c3aed;margin-top:2px">${camasLibres.length} camas libres · Filtra y haz clic en una cama para asignar</div>
+                    <div style="font-weight:900;font-size:14px;color:#4c1d95">🔍 Asignación — <span style="color:#7c3aed">${nombre}</span>${genero?` <span style="font-size:12px;color:#6b7280">(${genero})</span>`:''}</div>
+                    <div style="font-size:11px;color:#7c3aed;margin-top:2px">📅 Llegada: <b>${fechaLlegadaSol}</b> · ${camasLibres.length} camas disponibles (incluye rotaciones de turno)</div>
                 </div>
-                <button onclick="document.getElementById('${pid}').innerHTML=''"
+                <button onclick="document.getElementById('${panelId}').innerHTML=''"
                     style="border:none;background:#fee2e2;color:#b91c1c;border-radius:8px;padding:5px 14px;cursor:pointer;font-weight:700;font-size:12px">✕ Cerrar</button>
             </div>
 
-            <!-- Filtros -->
-            <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
-                <select id="${pid}-edif" onchange="window['${pid}Render']()"
-                    style="padding:8px 12px;border:1.5px solid #c4b5fd;border-radius:10px;font-size:13px;font-weight:700;color:#4c1d95;background:#fff;cursor:pointer;min-width:130px">
-                    <option value="">🏢 Todos los edificios</option>
-                    ${edificios.map(e=>`<option value="${e}">${e}</option>`).join('')}
-                </select>
-                <select id="${pid}-pab" onchange="window['${pid}Render']()"
-                    style="padding:8px 12px;border:1.5px solid #c4b5fd;border-radius:10px;font-size:13px;font-weight:700;color:#4c1d95;background:#fff;cursor:pointer;min-width:140px">
-                    <option value="">🏠 Todos los pabellones</option>
-                    ${pabellones.map(p=>`<option value="${p}">Pabellón ${p}</option>`).join('')}
-                </select>
-                <select id="${pid}-disp" onchange="window['${pid}Render']()"
-                    style="padding:8px 12px;border:1.5px solid #c4b5fd;border-radius:10px;font-size:13px;font-weight:700;color:#4c1d95;background:#fff;cursor:pointer;min-width:160px">
-                    <option value="">✅ Cualquier disponibilidad</option>
-                    <option value="2">🛏🛏 2 camas libres</option>
-                    <option value="1">🛏 Solo 1 cama libre</option>
-                </select>
+            <!-- Buscador de texto libre -->
+            <div style="margin-bottom:14px">
+                <input id="${pid}-buscar" type="text" placeholder="🔎 Buscar por edificio, pabellón, piso o habitación… ej: R-220, Piso 2, 43, COPC"
+                    oninput="window['${pid}Render'](this.value)"
+                    style="width:100%;box-sizing:border-box;padding:10px 14px;border:2px solid #c4b5fd;border-radius:12px;font-size:13px;font-weight:600;color:#4c1d95;background:#fff;outline:none;transition:border-color .2s"
+                    onfocus="this.style.borderColor='#7c3aed'" onblur="this.style.borderColor='#c4b5fd'">
+                <div style="font-size:10px;color:#94a3b8;margin-top:5px">
+                    💡 Escribe "R-220" para Residencial 220 · "43" para Pabellón 43 · "Piso 2" para segundo piso · Enter a buscar
+                </div>
             </div>
 
             <!-- Grilla de habitaciones -->
-            <div id="${pid}-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;max-height:380px;overflow-y:auto;padding-right:4px"></div>
+            <div id="${pid}-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px;max-height:400px;overflow-y:auto;padding-right:4px"></div>
         </div>`;
 
-        // Guardar función de render en window para que los selects la llamen
-        window[`${pid}Render`] = () => {
-            const e = document.getElementById(`${pid}-edif`)?.value || '';
-            const p = document.getElementById(`${pid}-pab`)?.value  || '';
-            const d = document.getElementById(`${pid}-disp`)?.value || '';
-            renderHabs(e, p, d);
-        };
+        // Función de render disponible globalmente para el input
+        window[`${pid}Render`] = (q) => renderHabs(q);
 
-        // Panel ID para cerrar
-        const panelEl = panel;
-        panelEl.id = pid;
-
-        renderHabs(); // render inicial sin filtros
+        renderHabs(''); // render inicial sin filtro (muestra todo)
+        // Enfocar el buscador
+        setTimeout(() => document.getElementById(`${pid}-buscar`)?.focus(), 100);
 
     } catch(e) {
         panel.innerHTML = `<div style="padding:16px;color:#ef4444;font-weight:700">Error: ${e.message}</div>`;
     }
 };
+
 
 // ── Asignar desde sugerencia (asigna cama directamente a la solicitud) ─────────
 window._solAsignarSugerida = async function(solicitudId, rutB64, camaId) {
@@ -1016,7 +1013,9 @@ window._solAsignarSugerida = async function(solicitudId, rutB64, camaId) {
         const empresaId = empRows?.[0]?.id || null;
         // Insertar asignación
         const {error:eA} = await supabase.from('v2_asignaciones').insert({
-            id_cama: camaId, rut_huesped: rut, empresa_id: empresaId,
+            id_cama: camaId, rut_huesped: rut,
+            nombre_huesped: sol.nombre_trabajador || rut,
+            empresa_id: empresaId,
             fecha_checkin:           sol.fecha_llegada||new Date().toISOString().split('T')[0],
             fecha_salida_programada: sol.fecha_salida||null,
             fecha_checkout: null, numero_contrato: sol.n_contrato||null
@@ -1156,38 +1155,239 @@ export async function renderV2Solicitudes(container) {
             const sinA = res.sinAsignar || [];
             const fall = res.fallidos  || [];
 
-            // Si hay trabajadores sin asignar → mostrar reporte completo
+            // Si hay trabajadores sin asignar → mostrar modal interactivo con buscador
             if(sinA.length > 0) {
                 const modal = document.createElement('div');
-                modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px';
-                const listHTML = sinA.map(s=>`
-                    <div style="background:#fff;border:1.5px solid #fed7aa;border-radius:10px;padding:12px 14px;margin-bottom:8px">
-                        <div style="font-weight:800;font-size:14px;color:#1e293b">👤 ${s.nombre}</div>
-                        <div style="font-size:12px;color:#64748b;margin:2px 0">${s.rut||'—'}</div>
-                        <div style="font-size:13px;color:#b45309;margin-top:4px">❌ ${s.razon}</div>
-                        ${s.sugerencias?.length ? `<div style="font-size:12px;color:#0369a1;margin-top:6px">
-                            💡 Sugerencias disponibles: <strong>${s.sugerencias.join(' · ')}</strong>
-                        </div>` : ''}
-                    </div>`).join('');
-                modal.innerHTML=`
-                    <div style="background:#f8fafc;border-radius:16px;padding:24px;max-width:560px;width:100%;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.25)">
-                        <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
-                            <div style="font-size:28px">⚠️</div>
-                            <div>
-                                <div style="font-weight:900;font-size:16px;color:#0f172a">Trabajadores sin asignar — ${res.empresa}</div>
-                                <div style="font-size:13px;color:#64748b">✅ ${res.asignados} asignados · ⏸ ${sinA.length} pendientes (hab. solicitada no disponible)</div>
-                            </div>
-                        </div>
-                        <div style="overflow-y:auto;flex:1;margin-bottom:16px">${listHTML}</div>
-                        <div style="font-size:12px;color:#94a3b8;margin-bottom:12px">
-                            Estos trabajadores quedan en <strong>Pendientes</strong>. Asígnalos manualmente usando una de las habitaciones sugeridas.
-                        </div>
-                        <button onclick="this.closest('div[style*=fixed]').remove();window._renderV2Solicitudes?.();refreshBadge();"
-                            style="background:#3b82f6;color:#fff;border:none;border-radius:10px;padding:12px 24px;font-weight:800;font-size:14px;cursor:pointer;width:100%">
-                            Entendido — los asignaré manualmente
-                        </button>
+                modal.id = 'modal-sinasignar';
+                modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px';
+
+                // Carga inicial del modal mientras cargamos camas
+                modal.innerHTML = `
+                    <div style="background:#f8fafc;border-radius:16px;padding:32px;text-align:center;min-width:280px;box-shadow:0 20px 60px rgba(0,0,0,.25)">
+                        <div style="font-size:36px">⏳</div>
+                        <div style="font-weight:800;margin-top:12px">Cargando camas disponibles…</div>
                     </div>`;
                 document.body.appendChild(modal);
+
+                // Cargar camas disponibles + rotaciones de turno
+                (async () => {
+                    try {
+                        // ── Fecha de llegada del grupo ────────────────────────
+                        const fechaLlegada = rows[0]?.fecha_llegada || new Date().toISOString().split('T')[0];
+
+                        // ── Camas con estado Disponible ───────────────────────
+                        let todasCamas = [], pg2 = 0;
+                        while(true) {
+                            const {data:cp} = await supabase.from('v2_camas')
+                                .select('id_cama,habitacion_id,estado')
+                                .eq('estado','Disponible')
+                                .range(pg2*1000, pg2*1000+999);
+                            if(!cp?.length) break;
+                            todasCamas = todasCamas.concat(cp);
+                            if(cp.length < 1000) break;
+                            pg2++;
+                        }
+
+                        // ── Asignaciones activas + rotaciones ────────────────
+                        const {data:asigActivas2} = await supabase.from('v2_asignaciones')
+                            .select('id_cama,fecha_salida_programada').is('fecha_checkout',null);
+                        const camasRot = new Set((asigActivas2||[])
+                            .filter(a => a.fecha_salida_programada && a.fecha_salida_programada <= fechaLlegada)
+                            .map(a => String(a.id_cama)));
+                        const asigOcup = new Set((asigActivas2||[])
+                            .filter(a => !camasRot.has(String(a.id_cama)))
+                            .map(a => String(a.id_cama)));
+
+                        let camasRotRows = [];
+                        if(camasRot.size > 0) {
+                            const {data:cr} = await supabase.from('v2_camas')
+                                .select('id_cama,habitacion_id,estado').in('id_cama',[...camasRot]);
+                            camasRotRows = (cr||[]).map(c => ({...c, _rot:true}));
+                        }
+
+                        const camasLibres = [
+                            ...todasCamas.filter(c => !asigOcup.has(String(c.id_cama))),
+                            ...camasRotRows
+                        ];
+
+                        // ── Habitaciones (números legibles) ───────────────────
+                        let todasHabs2 = [], hp2 = 0;
+                        while(true) {
+                            const {data:hh} = await supabase.from('v2_habitaciones')
+                                .select('id_custom,numero_hab').range(hp2*1000, hp2*1000+999);
+                            if(!hh?.length) break;
+                            todasHabs2 = todasHabs2.concat(hh);
+                            if(hh.length < 1000) break;
+                            hp2++;
+                        }
+                        const habIdx2 = {};
+                        for(const h of todasHabs2) if(h.id_custom) habIdx2[h.id_custom] = h.numero_hab;
+
+                        // ── Mapa de camas libres: { id_cama → {habitacion_id, numHab, edificio, pabellon, searchText, rot} }
+                        const camasMapa = {};
+                        for(const c of camasLibres) {
+                            const hid = c.habitacion_id;
+                            const numHab = String(habIdx2[hid] || hid).trim();
+                            const edificio = hid.startsWith('R-220') ? 'R-220' : 'COPC';
+                            const pabellon = numHab.match(/^(\d{2})/)?.[1] || '?';
+                            let piso = '';
+                            if(hid.startsWith('R-220')) {
+                                const m = hid.match(/[Pp](?:iso)?[\s\-]?(\d)/i) || numHab.match(/[Pp](\d)/);
+                                piso = m ? 'P' + m[1] : '';
+                            }
+                            const searchText = [edificio, pabellon, numHab, piso, hid].join(' ').toLowerCase();
+                            camasMapa[String(c.id_cama)] = { hid, numHab, edificio, pabellon, piso, searchText, rot: !!c._rot };
+                        }
+
+                        // ── Función para obtener camas filtradas por query ────
+                        function camasFiltradas(query) {
+                            const q = (query||'').toLowerCase().trim();
+                            return Object.entries(camasMapa)
+                                .filter(([,info]) => !q || info.searchText.includes(q))
+                                .sort(([,a],[,b]) => {
+                                    if(a.edificio !== b.edificio) return a.edificio.localeCompare(b.edificio);
+                                    return Number(a.numHab) - Number(b.numHab);
+                                });
+                        }
+
+                        // ── Asignar cama desde modal ──────────────────────────
+                        window._modalAsignar = async (rowId, camaId, nombre, btnEl) => {
+                            if(!confirm(`¿Asignar cama ${camaId} a ${nombre}?`)) return;
+                            btnEl.disabled = true;
+                            btnEl.textContent = '⏳';
+                            try {
+                                const {data:sol} = await supabase.from('v2_solicitudes_b2b')
+                                    .select('*').eq('id', rowId).single();
+                                if(!sol) throw new Error('Solicitud no encontrada');
+                                const {data:empRows} = await supabase.from('v2_empresas')
+                                    .select('id').ilike('nombre', sol.empresa||'').limit(1);
+                                const empresaId2 = empRows?.[0]?.id || null;
+                                const {error:eA} = await supabase.from('v2_asignaciones').insert({
+                                    id_cama: camaId,
+                                    rut_huesped: sol.rut_trabajador,
+                                    nombre_huesped: sol.nombre_trabajador || sol.rut_trabajador,
+                                    empresa_id: empresaId2,
+                                    fecha_checkin: sol.fecha_llegada || new Date().toISOString().split('T')[0],
+                                    fecha_salida_programada: sol.fecha_salida || null,
+                                    fecha_checkout: null,
+                                    numero_contrato: sol.n_contrato || null
+                                });
+                                if(eA) throw new Error(eA.message);
+                                await supabase.from('v2_camas').update({estado:'Ocupada'}).eq('id_cama', camaId);
+                                await supabase.from('v2_solicitudes_b2b')
+                                    .update({status:'aceptada', hab_solicitada: String(camaId)}).eq('id', rowId);
+                                if(sol.n_contrato) await _ajustarCupo(sol.n_contrato, +1);
+
+                                // Quitar al trabajador del modal
+                                const card = document.getElementById('sinA-card-' + rowId);
+                                if(card) {
+                                    card.style.transition = 'opacity .3s';
+                                    card.style.opacity = '0';
+                                    setTimeout(() => card.remove(), 300);
+                                }
+                                // Si no quedan trabajadores, cerrar modal
+                                setTimeout(() => {
+                                    const remaining = document.querySelectorAll('[id^="sinA-card-"]');
+                                    if(!remaining.length) {
+                                        document.getElementById('modal-sinasignar')?.remove();
+                                        toast('✅ Todos asignados', 'success');
+                                    }
+                                }, 400);
+                                // Quitar la cama del mapa para que no se ofrezca de nuevo
+                                delete camasMapa[String(camaId)];
+                                window._renderV2Solicitudes?.();
+                                refreshBadge();
+                            } catch(e) {
+                                btnEl.disabled = false;
+                                btnEl.textContent = '🛏 ' + camaId;
+                                alert('❌ Error: ' + e.message);
+                            }
+                        };
+
+                        // ── Renderizar grillas por trabajador ─────────────────
+                        function renderGrillas(query) {
+                            const filtradas = camasFiltradas(query);
+                            sinA.forEach(s => {
+                                const grid = document.getElementById('sinA-grid-' + s.rowId);
+                                if(!grid) return;
+                                if(!filtradas.length) {
+                                    grid.innerHTML = `<div style="color:#94a3b8;font-size:11px;padding:4px 0">Sin camas con ese filtro</div>`;
+                                    return;
+                                }
+                                // Mostrar máx. 20 camas para no sobrecargar
+                                grid.innerHTML = filtradas.slice(0, 20).map(([cId, info]) => {
+                                    const rotBadge = info.rot ? ' 🔄' : '';
+                                    const pisoLabel = info.piso ? ` ${info.piso}` : '';
+                                    return `<button
+                                        onclick="window._modalAsignar('${s.rowId}','${cId}','${s.nombre.replace(/'/g,"\\'")}',this)"
+                                        title="${info.edificio} · Pab.${info.pabellon}${pisoLabel} · Hab.${info.numHab}${rotBadge}"
+                                        style="padding:4px 8px;border:none;border-radius:6px;background:linear-gradient(135deg,#16a34a,#22c55e);color:#fff;font-weight:700;font-size:11px;cursor:pointer;margin:2px;transition:transform .1s"
+                                        onmouseover="this.style.transform='scale(1.06)'" onmouseout="this.style.transform=''">
+                                        🛏 ${cId}<span style="font-size:9px;opacity:.8"> Hab.${info.numHab}${pisoLabel}</span>
+                                    </button>`;
+                                }).join('') + (filtradas.length > 20 ? `<div style="font-size:10px;color:#94a3b8;margin-top:4px">+${filtradas.length-20} más — refina la búsqueda</div>` : '');
+                            });
+                        }
+
+                        // ── HTML final del modal ──────────────────────────────
+                        const listHTML = sinA.map(s => `
+                            <div id="sinA-card-${s.rowId}" style="background:#fff;border:1.5px solid #fed7aa;border-radius:12px;padding:14px 16px;margin-bottom:10px">
+                                <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:6px;margin-bottom:8px">
+                                    <div>
+                                        <div style="font-weight:800;font-size:14px;color:#1e293b">👤 ${s.nombre}</div>
+                                        <div style="font-size:11px;color:#64748b">${s.rut||'—'}</div>
+                                        <div style="font-size:12px;color:#b45309;margin-top:3px">❌ ${s.razon}</div>
+                                    </div>
+                                </div>
+                                <div id="sinA-grid-${s.rowId}" style="display:flex;flex-wrap:wrap;gap:3px;min-height:28px">
+                                    <div style="color:#94a3b8;font-size:11px">Cargando…</div>
+                                </div>
+                            </div>`).join('');
+
+                        modal.innerHTML = `
+                            <div style="background:#f8fafc;border-radius:16px;padding:22px;max-width:680px;width:100%;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.28)">
+                                <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+                                    <div style="font-size:26px">⚠️</div>
+                                    <div style="flex:1">
+                                        <div style="font-weight:900;font-size:15px;color:#0f172a">Trabajadores sin asignar — ${res.empresa}</div>
+                                        <div style="font-size:12px;color:#64748b">✅ ${res.asignados} asignados · ⏸ ${sinA.length} pendientes · Fecha llegada: <b>${fechaLlegada}</b></div>
+                                    </div>
+                                    <button onclick="document.getElementById('modal-sinasignar').remove();window._renderV2Solicitudes?.();refreshBadge();"
+                                        style="border:none;background:#fee2e2;color:#b91c1c;border-radius:8px;padding:6px 12px;cursor:pointer;font-weight:700">✕</button>
+                                </div>
+
+                                <!-- Buscador global de camas -->
+                                <div style="margin-bottom:12px">
+                                    <input id="sinA-buscar" type="text"
+                                        placeholder="🔎 Filtrar camas por edificio, pabellón, piso… ej: R-220, Piso 2, 43"
+                                        oninput="window._sinABuscar(this.value)"
+                                        style="width:100%;box-sizing:border-box;padding:9px 14px;border:2px solid #c4b5fd;border-radius:10px;font-size:13px;font-weight:600;color:#4c1d95;outline:none;transition:border-color .2s"
+                                        onfocus="this.style.borderColor='#7c3aed'" onblur="this.style.borderColor='#c4b5fd'">
+                                    <div style="font-size:10px;color:#94a3b8;margin-top:4px">
+                                        💡 Las mismas camas se ofrecen para cada trabajador · Camas con 🔄 = disponibles por rotación de turno
+                                    </div>
+                                </div>
+
+                                <!-- Lista de trabajadores con sus camas -->
+                                <div style="overflow-y:auto;flex:1;padding-right:4px">${listHTML}</div>
+
+                                <div style="font-size:11px;color:#94a3b8;margin-top:12px;text-align:center">
+                                    Los trabajadores sin asignar quedan como <b>Pendientes</b> para reasignación posterior
+                                </div>
+                            </div>`;
+
+                        window._sinABuscar = (q) => renderGrillas(q);
+                        renderGrillas(''); // render inicial
+                        setTimeout(() => document.getElementById('sinA-buscar')?.focus(), 100);
+
+                    } catch(err) {
+                        modal.innerHTML = `<div style="background:#fff;border-radius:16px;padding:32px;color:#ef4444;font-weight:700;max-width:400px">
+                            ❌ Error al cargar camas: ${err.message}
+                            <br><br><button onclick="document.getElementById('modal-sinasignar').remove()" style="padding:8px 16px;border:none;border-radius:8px;background:#fee2e2;color:#b91c1c;cursor:pointer;font-weight:700">Cerrar</button>
+                        </div>`;
+                    }
+                })();
+
             } else {
                 // Sin problemas → toast simple
                 const edifInfo = res.edificios ? ` · ${res.edificios}` : '';

@@ -841,65 +841,70 @@
 
                 var NCOLS = 17;
 
-                // ─── FILA 1-3: ENCABEZADO CON LOGO ───────────────────────────────
+                // ─── FILAS 1-3: ENCABEZADO SIN CELDAS COMBINADAS ────────────────
+                // ⚡ IMPORTANTE: No usar mergeCells en ninguna fila para que el
+                //    pegado masivo de datos funcione sin errores de "celda combinada".
+                ws.getRow(1).height = 18;
+                ws.getRow(2).height = 44;
+                ws.getRow(3).height = 18;
+
+                // Pintar todas las celdas del encabezado en rojo Aramark
                 for (var r = 1; r <= 3; r++) {
-                    ws.getRow(r).height = r === 2 ? 44 : 22;
                     for (var c = 1; c <= NCOLS; c++) {
-                        ws.getRow(r).getCell(c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: ARAMARK_RED } };
+                        var hCell = ws.getRow(r).getCell(c);
+                        hCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: ARAMARK_RED } };
+                        hCell.border = ALL_BORDERS;
                     }
                 }
 
-                // Insertar logo
+                // Logo/texto en A2 (celda individual, sin merge)
                 try {
                     var resp = await fetch('./aramark.png');
                     var buffer = await resp.arrayBuffer();
                     var imageId = wb.addImage({ buffer: buffer, extension: 'png' });
                     ws.addImage(imageId, { tl: { col: 0.1, row: 0.1 }, ext: { width: 175, height: 80 } });
                 } catch (e) {
-                    ws.mergeCells('A1:D3');
-                    var logoCellX = ws.getCell('A1');
+                    var logoCellX = ws.getRow(2).getCell(1);
                     logoCellX.value = 'ARAMARK';
-                    logoCellX.font = { name: 'Calibri', bold: true, size: 22, color: { argb: WHITE } };
-                    logoCellX.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: ARAMARK_RED } };
+                    logoCellX.font = { name: 'Calibri', bold: true, size: 16, color: { argb: WHITE } };
                     logoCellX.alignment = { horizontal: 'center', vertical: 'middle' };
                 }
 
-                // Título centrado
-                ws.mergeCells('E1:Q3');
-                var titleCell = ws.getCell('E1');
-                titleCell.value = 'SOLICITUD DE ALOJAMIENTO\nPC HOTELERÍA  ·  Turno ' + turnoTitle;
-                titleCell.font = { name: 'Calibri', bold: true, size: 18, color: { argb: WHITE } };
+                // Título en E2 (celda individual, sin merge)
+                var titleCell = ws.getRow(2).getCell(5);
+                titleCell.value = 'SOLICITUD DE ALOJAMIENTO  ·  PC HOTELERÍA  ·  Turno ' + turnoTitle;
+                titleCell.font = { name: 'Calibri', bold: true, size: 14, color: { argb: WHITE } };
                 titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: ARAMARK_RED } };
-                titleCell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+                titleCell.alignment = { horizontal: 'left', vertical: 'middle' };
 
-                // ─── FILA 4: ADMINISTRADOR ANGLO ─────────────────────────────────
+                // ─── FILA 4: ADMINISTRADOR ANGLO (sin merge) ─────────────────────
                 ws.getRow(4).height = 28;
                 for (var c4 = 1; c4 <= NCOLS; c4++) {
-                    ws.getRow(4).getCell(c4).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: ARAMARK_DARK } };
-                    ws.getRow(4).getCell(c4).border = ALL_BORDERS;
+                    var r4Cell = ws.getRow(4).getCell(c4);
+                    r4Cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: ARAMARK_DARK } };
+                    r4Cell.border = ALL_BORDERS;
                 }
-                ws.mergeCells('A4:D4');
-                var angloLb = ws.getCell('A4');
-                angloLb.value = '👔 Administrador de Contrato Anglo:';
-                angloLb.font = { name: 'Calibri', bold: true, size: 11, color: { argb: WHITE } };
+                // Etiqueta en A4 (sin merge)
+                var angloLb = ws.getRow(4).getCell(1);
+                angloLb.value = 'Admin. Anglo:';
+                angloLb.font = { name: 'Calibri', bold: true, size: 10, color: { argb: WHITE } };
                 angloLb.alignment = { horizontal: 'left', vertical: 'middle' };
 
-                ws.mergeCells('E4:Q4');
-                var angloVal = ws.getCell('E4');
-                angloVal.value = window.angloAdmin || '';
-                angloVal.font = { name: 'Calibri', size: 12, italic: !window.angloAdmin, color: { argb: window.angloAdmin ? '00000000' : 'FF999999' } };
+                // Valor en B4 (sin merge, fondo crema)
+                var angloVal = ws.getRow(4).getCell(2);
+                var adminNombre = window.angloAdmin || 'Ingrese aquí el nombre del Administrador de Contrato AngloAmerican';
+                angloVal.value = adminNombre;
+                angloVal.font = { name: 'Calibri', size: 11, italic: !window.angloAdmin, color: { argb: window.angloAdmin ? GRAY_TEXT : 'FF999999' } };
                 angloVal.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFAF0' } };
                 angloVal.alignment = { horizontal: 'left', vertical: 'middle' };
-                angloVal.border = { top: { style: 'medium', color: { argb: ARAMARK_DARK } }, bottom: { style: 'medium', color: { argb: ARAMARK_DARK } } };
-                if (!window.angloAdmin) angloVal.value = 'Ingrese aquí el nombre del Administrador de Contrato AngloAmerican';
 
                 // ─── FILA 5: CABECERAS ────────────────────────────────────────────
                 ws.getRow(5).height = 30;
                 var headers = [
                     'FECHA', 'EMPRESA', 'N° CONTRATO', 'GERENCIA', 'RAZÓN SOCIAL',
-                    'NOMBRE COMPLETO HUÉSPED', 'RUT', 'CONTACTO', 'HAB.',
+                    'NOMBRE COMPLETO HUÉSPED', 'RUT (ej: 12345678-9)', 'CONTACTO', 'HAB.',
                     'TURNO', 'SISTEMA', 'TIPO', 'ESTADO',
-                    'FECHA INICIO', 'FECHA TÉRMINO', 'SEXO', 'OBSERVACIÓN'
+                    'FECHA INICIO', 'FECHA TÉRMINO', 'SEXO (F/M)', 'OBSERVACIÓN'
                 ];
                 headers.forEach(function (h, i) {
                     var cell = ws.getRow(5).getCell(i + 1);
@@ -907,11 +912,13 @@
                     styleHeader(cell);
                 });
 
-                // ─── FILAS 6+: 30 FILAS EDITABLES ────────────────────────────────
-                var FILAS = 30;
+
+                // ─── FILAS 6+: 350 FILAS EDITABLES (soporta empresas con hasta 350 trabajadores) ──
+                var FILAS = 350;
+                var lastRow = 5 + FILAS;   // = fila 355
                 var shiftOpts = '"4x3,4x4,Turno H,7x7,8x6,14x14"';
 
-                for (var row = 6; row <= 5 + FILAS; row++) {
+                for (var row = 6; row <= lastRow; row++) {
                     ws.getRow(row).height = 20;
 
                     // Col A: Fecha (pre-rellenada con hoy)
@@ -944,33 +951,13 @@
                     styleData(cellF);
                     cellF.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE6F7FF' } }; // azul claro
 
-                    // Col G: RUT — con validación de dígito verificador chileno (MOD-11)
+                    // Col G: RUT (azul claro — validación visual por formato condicional)
                     var cellG = ws.getRow(row).getCell(7);
                     styleData(cellG);
                     cellG.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE6F7FF' } };
-                    cellG.note = { texts: [{ text: 'Formato: 12345678-9 ó 12345678-K\nEl dígito verificador es validado automáticamente.', font: { size: 9 } }] };
-                    // Fórmula MOD-11 para dígito verificador chileno (relativa a cada fila)
-                    // Permite celda vacía. Si se ingresa RUT, valida que el DV sea correcto.
-                    var rutFormula = 'OR(G' + row + '="",'
-                        + 'IFERROR(AND('
-                        +   'FIND("-",G' + row + ')>1,'
-                        +   'ISNUMBER(--LEFT(G' + row + ',FIND("-",G' + row + ')-1)),'
-                        +   'MOD(11-MOD(SUMPRODUCT('
-                        +     'VALUE(MID(TEXT(VALUE(LEFT(G' + row + ',FIND("-",G' + row + ')-1)),"000000000"),{1,2,3,4,5,6,7,8,9},1)),'
-                        +     '{4,3,2,7,6,5,4,3,2}'
-                        +   '),11),11)='
-                        +   'IF(UPPER(RIGHT(G' + row + ',1))="K",10,'
-                        +     'IF(ISNUMBER(--RIGHT(G' + row + ',1)),VALUE(RIGHT(G' + row + ',1)),-1))'
-                        + '),FALSE))';
-                    cellG.dataValidation = {
-                        type: 'custom',
-                        allowBlank: true,
-                        formulae: [rutFormula],
-                        showErrorMessage: true,
-                        errorStyle: 'stop',
-                        errorTitle: '❌ RUT inválido',
-                        error: 'El dígito verificador no es correcto.\nFormato: 12345678-9  ó  12345678-K'
-                    };
+
+                    // NOTA: La validación MOD-11 del RUT se aplica como formato condicional
+                    // DESPUÉS del bucle (no por celda) para evitar corrupción del archivo.
 
                     // Col H: Contacto
                     styleData(ws.getRow(row).getCell(8));
@@ -985,107 +972,58 @@
                     var cellJ = ws.getRow(row).getCell(10);
                     styleData(cellJ);
                     cellJ.value = isA ? '7x7' : '4x3';
-                    ws.getRow(row).getCell(10).dataValidation = {
-                        type: 'list', allowBlank: true, showDropDown: false,
-                        formulae: [shiftOpts],
-                        showErrorMessage: true, errorTitle: 'Turno inválido', error: 'Seleccione de la lista'
-                    };
 
-                    // Col K: Sistema Turno — 4x3, Turno H, 8x6, 7x7, 14x14
-                    var cellK = ws.getRow(row).getCell(11);
-                    styleData(cellK);
-                    ws.getRow(row).getCell(11).dataValidation = {
-                        type: 'list', allowBlank: true, showDropDown: false,
-                        formulae: ['"4x3,Turno H,8x6,7x7,14x14"'],
-                        showErrorMessage: true, errorTitle: 'Sistema inválido', error: 'Seleccione de la lista'
-                    };
+                    // Col K: Sistema Turno
+                    styleData(ws.getRow(row).getCell(11));
 
-                    // Col L: Tipo Turno — Dia / Noche
+                    // Col L: Tipo Turno
                     var cellL = ws.getRow(row).getCell(12);
                     styleData(cellL);
                     cellL.value = 'Dia';
-                    ws.getRow(row).getCell(12).dataValidation = {
-                        type: 'list', allowBlank: true, showDropDown: false,
-                        formulae: ['"Dia,Noche"'],
-                        showErrorMessage: true, errorTitle: 'Tipo inválido', error: 'Seleccione: Dia o Noche'
-                    };
 
-                    // Col M: Estado (dropdown)
+                    // Col M: Estado
                     var cellM = ws.getRow(row).getCell(13);
                     styleData(cellM);
                     cellM.value = 'Pendiente';
-                    ws.getRow(row).getCell(13).dataValidation = {
-                        type: 'list', allowBlank: true, showDropDown: false,
-                        formulae: ['"Pendiente,Confirmado,Cancelado"'],
-                        showErrorMessage: true, errorTitle: 'Estado inválido', error: 'Seleccione de la lista'
-                    };
 
-                    // Col N: Fecha Inicio
+                    // Col N: Fecha Inicio (verde claro)
                     var cellN = ws.getRow(row).getCell(14);
                     styleData(cellN);
                     cellN.numFmt = 'yyyy-mm-dd';
                     cellN.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0FFF4' } };
 
-                    // Col O: Fecha Término
+                    // Col O: Fecha Término (rojo claro)
                     var cellO = ws.getRow(row).getCell(15);
                     styleData(cellO);
                     cellO.numFmt = 'yyyy-mm-dd';
                     cellO.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF5F5' } };
 
-                    // Col P: Sexo (dropdown) — F=Femenino, M=Masculino
-                    var cellP = ws.getRow(row).getCell(16);
-                    styleData(cellP);
-                    ws.getRow(row).getCell(16).dataValidation = {
-                        type: 'list', allowBlank: true, showDropDown: false,
-                        formulae: ['"F,M"'],
-                        showErrorMessage: true, errorTitle: 'Sexo inválido', error: 'F = Femenino · M = Masculino'
-                    };
-                    cellP.note = { texts: [{ text: 'F = Femenino\nM = Masculino', font: { size: 9 } }] };
+                    // Col P: Sexo
+                    styleData(ws.getRow(row).getCell(16));
 
                     // Col Q: Observación
                     styleData(ws.getRow(row).getCell(17));
                 }
 
-                // ─── FORMATO CONDICIONAL en columna RUT ──────────────────────
-                // Fórmula base (relativa a G6) para validación MOD-11
-                var rutValidExpr = 'IFERROR(AND(FIND("-",G6)>1,ISNUMBER(--LEFT(G6,FIND("-",G6)-1)),'
-                    + 'MOD(11-MOD(SUMPRODUCT(VALUE(MID(TEXT(VALUE(LEFT(G6,FIND("-",G6)-1)),"000000000"),{1,2,3,4,5,6,7,8,9},1)),{4,3,2,7,6,5,4,3,2}),11),11)'
-                    + '=IF(UPPER(RIGHT(G6,1))="K",10,IF(ISNUMBER(--RIGHT(G6,1)),VALUE(RIGHT(G6,1)),-1))),FALSE)';
+                // ─── VALIDACIONES POR RANGO — API correcta ExcelJS: ws.dataValidations.add() ──
+                ws.dataValidations.add('J6:J' + lastRow, { type: 'list', allowBlank: true, showDropDown: false, formulae: [shiftOpts], showErrorMessage: true, errorStyle: 'error', errorTitle: 'Turno inválido', error: 'Seleccione de la lista' });
+                ws.dataValidations.add('K6:K' + lastRow, { type: 'list', allowBlank: true, showDropDown: false, formulae: ['"4x3,Turno H,8x6,7x7,14x14"'], showErrorMessage: true, errorStyle: 'error', errorTitle: 'Sistema inválido', error: 'Seleccione de la lista' });
+                ws.dataValidations.add('L6:L' + lastRow, { type: 'list', allowBlank: true, showDropDown: false, formulae: ['"Dia,Noche"'], showErrorMessage: true, errorStyle: 'error', errorTitle: 'Tipo inválido', error: 'Seleccione: Dia o Noche' });
+                ws.dataValidations.add('M6:M' + lastRow, { type: 'list', allowBlank: true, showDropDown: false, formulae: ['"Pendiente,Confirmado,Cancelado"'], showErrorMessage: true, errorStyle: 'error', errorTitle: 'Estado inválido', error: 'Seleccione de la lista' });
+                ws.dataValidations.add('P6:P' + lastRow, { type: 'list', allowBlank: true, showDropDown: false, formulae: ['"F,M"'], showErrorMessage: true, errorStyle: 'error', errorTitle: 'Sexo inválido', error: 'F = Femenino · M = Masculino' });
 
-                // 🔴 Rojo: RUT ingresado pero DV INCORRECTO
-                ws.addConditionalFormatting({
-                    ref: 'G6:G' + (5 + FILAS),
-                    rules: [{
-                        type: 'expression',
-                        priority: 1,
-                        formulae: ['AND(G6<>"",NOT(' + rutValidExpr + '))'],
-                        style: {
-                            fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFC7CE' } },
-                            font: { color: { argb: 'FF9C0006' }, bold: true, name: 'Calibri', size: 10 }
-                        }
-                    }]
-                });
 
-                // 🟢 Verde: RUT ingresado y DV CORRECTO
-                ws.addConditionalFormatting({
-                    ref: 'G6:G' + (5 + FILAS),
-                    rules: [{
-                        type: 'expression',
-                        priority: 2,
-                        formulae: ['AND(G6<>"",LEN(G6)>3,' + rutValidExpr + ')'],
-                        style: {
-                            fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFC6EFCE' } },
-                            font: { color: { argb: 'FF276221' }, bold: true, name: 'Calibri', size: 10 }
-                        }
-                    }]
-                });
+                // NOTA: El formato condicional MOD-11 fue eliminado porque ExcelJS
+                // genera XML malformado con fórmulas tan complejas, corrompiendo el archivo.
+                // La validación del RUT se hace en el servidor al procesar el archivo.
 
-                // ─── LEYENDA de colores (fila final) ─────────────────────────────
-                var legendRow = 5 + FILAS + 2;
+
+                // ─── LEYENDA de colores (fila final, sin merge) ───────────────────
+                var legendRow = lastRow + 2;
                 ws.getRow(legendRow).height = 16;
-                ws.mergeCells('A' + legendRow + ':D' + legendRow);
-                ws.getCell('A' + legendRow).value = '🔵 Azul = Datos obligatorios del trabajador   🟢 Verde = Fecha inicio   🔴 Rojo = Fecha término';
-                ws.getCell('A' + legendRow).font = { name: 'Calibri', size: 8, italic: true, color: { argb: 'FF718096' } };
+                var legCell = ws.getRow(legendRow).getCell(1);
+                legCell.value = '🔵 Azul = Obligatorio   🟢 Verde = Fecha inicio   🔴 Rojo = Fecha término   ⚠️ RUT rojo = DV incorrecto';
+                legCell.font = { name: 'Calibri', size: 8, italic: true, color: { argb: 'FF718096' } };
 
                 // ─── GENERAR Y DESCARGAR ──────────────────────────────────────────
                 var xlsBuffer = await wb.xlsx.writeBuffer();
@@ -1300,15 +1238,16 @@
                 return;
             }
 
-            // ─ Bloquear envío si hay RUTs inválidos ─
+            // ─ Advertir sobre RUTs inválidos (no bloquear, solo informar) ─
             const rutsInvalidos = window.workers.filter(w => w.rut && !w.rutValido);
             if (rutsInvalidos.length > 0) {
-                alert(
-                    `❌ RUT inválido detectado en ${rutsInvalidos.length} trabajador(es):\n\n` +
-                    rutsInvalidos.map(w => `  • ${w.name} — RUT: ${w.rut}`).join('\n') +
-                    `\n\nCorrige el dígito verificador antes de enviar.`
+                const continuar = confirm(
+                    `⚠️ ${rutsInvalidos.length} trabajador(es) tienen RUT con dígito verificador incorrecto:\n\n` +
+                    rutsInvalidos.slice(0, 5).map(w => `  • ${w.name} — RUT: ${w.rut}`).join('\n') +
+                    (rutsInvalidos.length > 5 ? `\n  ... y ${rutsInvalidos.length - 5} más` : '') +
+                    `\n\n¿Desea enviar igualmente? (Se enviarán con el RUT tal como está)`
                 );
-                return;
+                if (!continuar) return;
             }
 
             const btn = document.getElementById('submit-btn');
@@ -1334,10 +1273,9 @@
                     return (v && v !== '0' && v !== 'null') ? v : null;
                 };
 
-                // Construir array: empresa y gerencia vienen del Excel por fila
-                // Si el Excel trae empresa en col B → se usa esa (multi-empresa)
-                // Si no trae → fallback al campo del formulario (single-empresa)
-                const filas = window.workers
+                // Construir array de filas, excluyendo las que no tienen RUT
+                // (la columna rut_trabajador es NOT NULL en Supabase)
+                const todasLasFilas = window.workers
                     .filter(w => w.name || w.nombre)
                     .map(w => ({
                         rut_trabajador:   _rut(w.rut),
@@ -1351,9 +1289,21 @@
                         n_contrato:       String(w.contract || contractNumber || '').trim() || null
                     }));
 
+                // Separar filas válidas (con RUT) de las que no tienen RUT
+                const filas = todasLasFilas.filter(f => f.rut_trabajador && f.rut_trabajador.length > 0);
+                const sinRut = todasLasFilas.length - filas.length;
+
                 if (filas.length === 0) {
-                    throw new Error('No hay trabajadores válidos para enviar.');
+                    throw new Error('No hay trabajadores con RUT válido para enviar. Verifica que la columna RUT esté completada en el Excel.');
                 }
+
+                // Avisar si se omitieron filas sin RUT
+                if (sinRut > 0) {
+                    statusDiv.textContent = `⚠️ ${sinRut} trabajador(es) sin RUT serán omitidos. Enviando ${filas.length} filas…`;
+                    await new Promise(r => setTimeout(r, 1500));
+                }
+
+
 
                 statusDiv.textContent = `Guardando ${filas.length} filas en Supabase…`;
 

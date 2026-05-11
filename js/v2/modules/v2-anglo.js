@@ -2,7 +2,8 @@
  * v2-anglo.js — Asignación Anglo con cola de carga masiva
  */
 import { supabase } from '../../supabaseClient.js';
-import { doCheckin } from '../v2-service.js';
+import { doCheckin, checkRutDuplicado, checkGeneroHabitacion } from '../v2-service.js';
+
 
 const F4 = () => { const d=new Date(); d.setDate(d.getDate()+4); return d.toISOString().split('T')[0]; };
 const colorLlave = (t='') => (t.toLowerCase().includes('adm')||t.toLowerCase().includes('5x2')) ? 'verde' : 'rojo';
@@ -32,7 +33,8 @@ export async function renderV2Anglo(container) {
         <label style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;display:block;margin-bottom:5px">RUT Trabajador</label>
         <input id="ar" type="text" placeholder="ej: 12345678" autocomplete="off"
           style="width:100%;padding:11px 14px;border-radius:10px;border:1.5px solid var(--border);background:var(--bg);color:var(--text-primary);font-size:15px;outline:none;box-sizing:border-box"
-          oninput="window._aSearch(this.value)" onkeydown="window._aKey(event,'rut')">
+          oninput="window._aSearch(this.value)" onblur="window._aSearchBlur(this.value)" onkeydown="window._aKey(event,'rut')">
+
       </div>
       <div>
         <label style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;display:block;margin-bottom:5px">N° Habitación</label>
@@ -52,7 +54,40 @@ export async function renderV2Anglo(container) {
       </button>
     </div>
 
-    <!-- Info trabajador -->
+    <!-- Buscador por pabellón/piso -->
+    <div style="margin-top:8px;display:flex;align-items:center;gap:8px">
+      <button onclick="window._aBuscarHab()" id="btn-buscar-hab"
+        style="padding:7px 14px;border-radius:8px;border:1.5px dashed #6366f1;background:rgba(99,102,241,.07);color:#6366f1;font-weight:700;font-size:12px;cursor:pointer;white-space:nowrap">
+        🔍 Sin habitación? Buscar por pabellón/piso
+      </button>
+    </div>
+
+    <!-- Panel de búsqueda (oculto por defecto) -->
+    <div id="a-buscador-hab" style="display:none;margin-top:12px;padding:14px;background:rgba(99,102,241,.06);border:1.5px solid #6366f1;border-radius:12px">
+      <div style="font-size:12px;font-weight:800;color:#6366f1;margin-bottom:10px">🏢 Buscar habitación disponible</div>
+      <div style="display:grid;grid-template-columns:2fr 1fr auto;gap:10px;align-items:end">
+        <div>
+          <label style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;display:block;margin-bottom:4px">Pabellón</label>
+          <select id="ab-pabellon"
+            style="width:100%;padding:9px 12px;border-radius:9px;border:1.5px solid var(--border);background:var(--bg);color:var(--text-primary);font-size:13px;outline:none;box-sizing:border-box">
+            <option value="">Cargando pabellones…</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;display:block;margin-bottom:4px">Piso</label>
+          <input id="ab-piso" type="number" placeholder="1, 2, 3…" min="1" max="20"
+            style="width:100%;padding:9px 12px;border-radius:9px;border:1.5px solid var(--border);background:var(--bg);color:var(--text-primary);font-size:13px;outline:none;box-sizing:border-box">
+        </div>
+        <button onclick="window._aBuscarDisponibles()"
+          style="padding:9px 16px;border-radius:9px;border:none;background:#6366f1;color:#fff;font-weight:800;font-size:13px;cursor:pointer">
+          Buscar
+        </button>
+      </div>
+      <!-- Resultados -->
+      <div id="ab-resultados" style="margin-top:12px"></div>
+    </div>
+
+
     <div id="a-card" style="display:none;margin-top:12px;padding:10px 14px;background:rgba(249,115,22,.06);border:1.5px solid #f97316;border-radius:12px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
       <div>
         <span id="a-nombre" style="font-weight:800;font-size:15px"></span>
@@ -103,11 +138,18 @@ export async function renderV2Anglo(container) {
   <div id="a-cola-wrap" style="display:none;background:var(--bg-card);border:1px solid var(--border);border-radius:16px;padding:16px;margin-bottom:16px">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
       <div style="font-size:13px;font-weight:800;color:var(--text-primary)">📋 Lista pendiente de carga</div>
-      <button onclick="window._aCargarTodos()"
-        style="padding:10px 20px;border-radius:10px;border:none;background:#22c55e;color:#fff;font-weight:800;font-size:13px;cursor:pointer">
-        ✅ Cargar todos
-      </button>
+      <div style="display:flex;gap:8px">
+        <button onclick="window._aDescargarExcel()"
+          style="padding:10px 16px;border-radius:10px;border:none;background:#6366f1;color:#fff;font-weight:800;font-size:13px;cursor:pointer">
+          📥 Descargar Excel
+        </button>
+        <button onclick="window._aCargarTodos()"
+          style="padding:10px 20px;border-radius:10px;border:none;background:#22c55e;color:#fff;font-weight:800;font-size:13px;cursor:pointer">
+          ✅ Cargar todos
+        </button>
+      </div>
     </div>
+
     <div id="a-cola-lista" style="display:flex;flex-direction:column;gap:8px"></div>
   </div>
 
@@ -124,18 +166,33 @@ export async function renderV2Anglo(container) {
   <div id="t-inc" style="display:none"><div id="a-incid" style="display:flex;flex-direction:column;gap:10px"><p style="color:var(--text-muted);text-align:center;padding:30px">Cargando…</p></div></div>
 </div>`;
 
+    // ── Restaurar la cola desde sessionStorage (sobrevive navegación atrás) ──
+    const _colaGuardada = sessionStorage.getItem('_angloCola');
+    const colaPrevia = _colaGuardada ? JSON.parse(_colaGuardada) : [];
+
     document.getElementById('as').value = F4();
-    _cola = [];
+    _cola = colaPrevia.length > 0 ? colaPrevia : [];
     _bindGlobals();
+    if (_cola.length > 0) _renderCola(); // Restaurar cola visible si había elementos
     await Promise.all([_loadReg(), _loadInc()]);
 }
 
 // ── GLOBALS ──────────────────────────────────────────────────────────────────
 function _bindGlobals() {
-    window._aSearch  = v => { clearTimeout(_timer); const r=v.replace(/\D/g,''); if(r.length<6){_hideCard();return;} _timer=setTimeout(()=>_buscar(r),350); };
+    // RUT: buscar solo si tiene 8+ dígitos (para no disparar en medio del tipeo)
+    window._aSearch     = v => { clearTimeout(_timer); const r=v.replace(/\D/g,''); if(r.length<8){_hideCard();return;} _timer=setTimeout(()=>_buscar(r),350); };
+    // Blur: buscar aunque tenga 7 dígitos (RUTs cortos tipo 7654321)
+    window._aSearchBlur = v => { clearTimeout(_timer); const r=v.replace(/\D/g,''); if(r.length>=7) _buscar(r); };
+
     window._aAgregar = _agregar;
     window._aCargarTodos = _cargarTodos;
+    window._aDescargarExcel = _descargarExcel;
     window._aRegistrarNuevo = _registrarNuevo;
+    window._aBuscarHab = _buscarHab;
+    window._aBuscarDisponibles = _buscarDisponibles;
+    window._aSeleccionarHab = _seleccionarHab;
+
+
     window._aTab     = _switchTab;
     window._aFiltrar = _filtrar;
     window._aSinLlave= _sinLlave;
@@ -188,7 +245,111 @@ function _msg(t,ok) {
     if(ok) setTimeout(()=>el.style.display='none',4000);
 }
 
+// ── BUSCADOR POR PABELLÓN / PISO ──────────────────────────────────────────────
+let _pabellanesCache = null;
+
+async function _buscarHab() {
+    const panel = document.getElementById('a-buscador-hab');
+    const btn   = document.getElementById('btn-buscar-hab');
+    const visible = panel.style.display !== 'none';
+    panel.style.display = visible ? 'none' : 'block';
+    btn.style.background = visible ? 'rgba(99,102,241,.07)' : 'rgba(99,102,241,.18)';
+    if (visible) return;
+
+    // Cargar pabellones (una sola vez)
+    if (!_pabellanesCache) {
+        const { data } = await supabase
+            .from('v2_pabellones')
+            .select('id, nombre, v2_edificios(nombre)')
+            .order('nombre');
+        _pabellanesCache = data || [];
+    }
+    const sel = document.getElementById('ab-pabellon');
+    sel.innerHTML = '<option value="">— Selecciona pabellón —</option>' +
+        _pabellanesCache.map(p =>
+            `<option value="${p.id}">${p.v2_edificios?.nombre ? p.v2_edificios.nombre + ' · ' : ''}${p.nombre}</option>`
+        ).join('');
+}
+
+async function _buscarDisponibles() {
+    const pabId = document.getElementById('ab-pabellon').value;
+    const piso  = document.getElementById('ab-piso').value.trim();
+    const res   = document.getElementById('ab-resultados');
+
+    if (!pabId) { res.innerHTML = '<p style="color:#991b1b;font-size:12px">⚠️ Selecciona un pabellón</p>'; return; }
+    res.innerHTML = '<p style="color:#6366f1;font-size:12px">🔍 Buscando habitaciones disponibles…</p>';
+
+    // Construir query
+    let q = supabase
+        .from('v2_habitaciones')
+        .select('id_custom, numero_hab, nivel, cantidad_camas, v2_camas(id_cama, estado)')
+        .eq('pabellon_id', pabId);
+
+    if (piso) q = q.eq('nivel', parseInt(piso));
+    const { data: habs, error } = await q.order('numero_hab');
+
+    if (error || !habs) { res.innerHTML = '<p style="color:#991b1b;font-size:12px">❌ Error al buscar habitaciones</p>'; return; }
+
+    // Filtrar: solo las que tienen camas disponibles
+    const disponibles = habs
+        .map(h => ({
+            numero: h.numero_hab,
+            nivel:  h.nivel,
+            total:  h.cantidad_camas || 2,
+            disp:   (h.v2_camas || []).filter(c => c.estado === 'Disponible').length
+        }))
+        .filter(h => h.disp > 0)
+        .sort((a, b) => String(a.numero).localeCompare(String(b.numero), undefined, { numeric: true }));
+
+    if (disponibles.length === 0) {
+        const msg = piso ? `el piso ${piso}` : 'ese pabellón';
+        res.innerHTML = `<p style="color:#92400e;font-size:12px;background:#fef3c7;padding:8px 12px;border-radius:8px">⚠️ No hay habitaciones disponibles en ${msg}</p>`;
+        return;
+    }
+
+    // Agrupar por piso
+    const porPiso = {};
+    disponibles.forEach(h => {
+        const p = h.nivel || '?';
+        if (!porPiso[p]) porPiso[p] = [];
+        porPiso[p].push(h);
+    });
+
+    let html = `<div style="font-size:11px;font-weight:700;color:#6366f1;margin-bottom:8px">${disponibles.length} habitaciones disponibles · Haz clic para seleccionar</div>`;
+    Object.entries(porPiso).sort((a,b) => Number(a[0])-Number(b[0])).forEach(([piso, list]) => {
+        html += `<div style="font-size:10px;font-weight:800;color:var(--text-muted);text-transform:uppercase;margin:8px 0 4px">Piso ${piso}</div>`;
+        html += `<div style="display:flex;flex-wrap:wrap;gap:6px">`;
+        list.forEach(h => {
+            const col = h.disp === h.total ? '#16a34a' : '#f59e0b';
+            const bg  = h.disp === h.total ? '#f0fdf4'  : '#fefce8';
+            html += `<button onclick="window._aSeleccionarHab('${h.numero}')"
+                style="padding:7px 14px;border-radius:8px;border:1.5px solid ${col};background:${bg};color:${col};font-weight:800;font-size:13px;cursor:pointer;transition:all .15s"
+                title="${h.disp} de ${h.total} camas libres">
+                Hab. ${h.numero}
+                <span style="font-size:10px;font-weight:600;opacity:.8"> · ${h.disp}/${h.total} lib.</span>
+            </button>`;
+        });
+        html += `</div>`;
+    });
+
+    res.innerHTML = html;
+}
+
+function _seleccionarHab(numero) {
+    document.getElementById('ah').value = numero;
+    // Colapsar el panel
+    document.getElementById('a-buscador-hab').style.display = 'none';
+    document.getElementById('btn-buscar-hab').style.background = 'rgba(99,102,241,.07)';
+    // Resaltar el campo y mover el foco a Salida
+    const ah = document.getElementById('ah');
+    ah.style.borderColor = '#6366f1';
+    ah.style.boxShadow   = '0 0 0 3px rgba(99,102,241,.2)';
+    setTimeout(() => { ah.style.borderColor=''; ah.style.boxShadow=''; }, 2000);
+    document.getElementById('as').focus();
+}
+
 // ── BUSCAR RUT ────────────────────────────────────────────────────────────────
+
 async function _buscar(rut) {
     const {data} = await supabase.from('v2_usuarios_anglo').select('*').eq('rut',rut).maybeSingle();
     const nuevoEl = document.getElementById('a-nuevo');
@@ -257,7 +418,60 @@ function _quitarCola(rut) {
     _renderCola();
 }
 
+// ── DESCARGAR EXCEL ────────────────────────────────────────────────────────────
+async function _descargarExcel() {
+    if (_cola.length === 0) { _msg('⚠️ La lista está vacía', false); return; }
+    // Cargar SheetJS si no está disponible
+    if (!window.XLSX) {
+        await new Promise((res, rej) => {
+            const s = document.createElement('script');
+            s.src = 'https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js';
+            s.onload = res; s.onerror = rej;
+            document.head.appendChild(s);
+        });
+    }
+    const XLSX = window.XLSX;
+    const hoy  = new Date().toISOString().split('T')[0];
+
+    // Cabeceras
+    const headers = ['RUT', 'Nombre', 'N° Habitación', 'Turno', 'Modo', 'Fecha Salida'];
+    const rows = _cola.map(c => [
+        c.rut,
+        c.nombre,
+        c.hab,
+        c.turno || '—',
+        c.modo === 'dia' ? 'Día' : 'Noche',
+        c.salida || '—'
+    ]);
+
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+
+    // Estilo cabecera
+    const range = XLSX.utils.decode_range(ws['!ref']);
+    for (let C = range.s.c; C <= range.e.c; C++) {
+        const cell = ws[XLSX.utils.encode_cell({ r: 0, c: C })];
+        if (cell) {
+            cell.s = {
+                font:    { bold: true, color: { rgb: 'FFFFFF' } },
+                fill:    { fgColor: { rgb: 'F97316' } },
+                alignment: { horizontal: 'center' }
+            };
+        }
+    }
+    // Anchos de columna
+    ws['!cols'] = [{ wch: 14 }, { wch: 32 }, { wch: 14 }, { wch: 16 }, { wch: 10 }, { wch: 14 }];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Asignacion Anglo');
+    XLSX.writeFile(wb, `Asignacion_Anglo_${hoy}.xlsx`);
+}
+
+
+
 function _renderCola() {
+    // Guardar la cola en sessionStorage para que sobreviva la navegación
+    sessionStorage.setItem('_angloCola', JSON.stringify(_cola));
+
     const wrap=document.getElementById('a-cola-wrap');
     const lista=document.getElementById('a-cola-lista');
     if (!_cola.length) { wrap.style.display='none'; return; }
@@ -318,8 +532,18 @@ async function _cargarTodos() {
             if (!camaDisp) camaDisp = camas.find(c => c.estado === 'Disponible'); // fallback
             if (!camaDisp) { err.push(`${item.nombre}: HAB ${item.hab} sin camas disponibles (modo ${item.modo})`); continue; }
             const camaId=camaDisp.id_cama;
+
+            // ─ REGLA 1: Sin RUT duplicado en fechas solapadas ─
+            const dupRut = await checkRutDuplicado(item.rut, hoy, item.salida || null);
+            if (!dupRut.ok) { err.push(`${item.nombre}: ${dupRut.razon}`); continue; }
+
+            // ─ REGLA 2: Sin mezcla de géneros ─
+            const genCheck = await checkGeneroHabitacion(habId, item.rut);
+            if (!genCheck.ok) { err.push(`${item.nombre}: ${genCheck.razon}`); continue; }
+
             // Check-in
             await doCheckin({idCama:camaId,rutHuesped:item.rut,nombreHuesped:item.nombre,empresaId,fechaCheckin:hoy,fechaSalidaProgramada:item.salida||null,esPreAsignacion:false});
+
             await supabase.from('v2_asignaciones').update({huesped_confirmo:true}).eq('id_cama',camaId).is('fecha_checkout',null);
             await supabase.from('v2_camas').update({estado:'Ocupada'}).eq('id_cama',camaId);
             // Registro Anglo
@@ -329,6 +553,7 @@ async function _cargarTodos() {
     }
 
     _cola=[];
+    sessionStorage.removeItem('_angloCola'); // Limpiar cola guardada al completar
     _renderCola();
     if(btn){btn.disabled=false;btn.textContent='✅ Cargar todos';}
     if(err.length) _msg(`⚠️ ${ok} cargados, ${err.length} errores: ${err.join(' | ')}`,false);

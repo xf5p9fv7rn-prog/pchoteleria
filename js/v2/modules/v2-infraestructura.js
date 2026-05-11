@@ -5,8 +5,10 @@
 import {
     getEdificios, getPabellones, getHabitaciones, getCamas,
     getEmpresas, getAsignacionByCama, doCheckin, doCheckout,
-    buscarTrabajadorPorRut, today, checkConflictoFechas
+    buscarTrabajadorPorRut, today, checkConflictoFechas,
+    checkRutDuplicado, checkGeneroHabitacion
 } from '../v2-service.js';
+
 import { abrirPopover, cerrarPopover } from './CheckinPopoverV2.js';
 import { supabase } from '../../supabaseClient.js';
 
@@ -380,13 +382,32 @@ async function handleCheckin(idCama) {
         msg('⚠️ RUT, Nombre, Empresa y Fecha de llegada son obligatorios','#f59e0b'); return;
     }
 
-    // ─ Validar solapamiento de fechas antes de registrar ─
-    msg('Verificando disponibilidad…','var(--text-muted)');
     try {
+        // ─ Validar solapamiento de fechas ─
+        msg('Verificando disponibilidad…','var(--text-muted)');
         const conflicto = await checkConflictoFechas(idCama, llegada);
         if (!conflicto.ok) {
             msg('❌ ' + conflicto.razon, '#ef4444'); return;
         }
+
+        // ─ REGLA 1: Sin RUT duplicado en fechas solapadas ─
+        const dupRut = await checkRutDuplicado(rut, llegada, salida || null);
+        if (!dupRut.ok) {
+
+            msg('❌ ' + dupRut.razon, '#ef4444'); return;
+        }
+
+        // ─ REGLA 2: Sin mezcla de géneros ─
+        // Obtenemos la habitación a partir del id_cama
+        const camaInfo = _camaData[idCama];
+        const habitacionId = camaInfo?.habitacion_id || null;
+        if (habitacionId) {
+            const genero = await checkGeneroHabitacion(habitacionId, rut);
+            if (!genero.ok) {
+                msg('❌ ' + genero.razon, '#ef4444'); return;
+            }
+        }
+
         const esPreAsignacion = conflicto.esPreAsignacion || false;
         if (esPreAsignacion) {
             msg('🔄 Pre-asignando (cama en rotación)…','#f97316');
@@ -412,6 +433,7 @@ async function handleCheckin(idCama) {
         }, 1400);
     } catch(e) { msg('❌ '+e.message,'#ef4444'); }
 }
+
 
 async function handleCheckout(asigId, idCama) {
     try {

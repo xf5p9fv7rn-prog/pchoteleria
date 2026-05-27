@@ -1,0 +1,28 @@
+# ── Datos sensibles — NUNCA subir al repo ──────────────────────────
+usuarios_anglo.json
+extracted_rooms.json
+sql/crear_usuarios.sql    ← ⚠️ contiene contraseñas — eliminar tras usar
+
+# ── Archivos generados / temporales ────────────────────────────────
+deploy.zip
+*.zip
+*.DS_Store
+.DS_Store
+
+# ── Excel con datos reales ─────────────────────────────────────────
+*.xlsx
+*.xls
+matris\ anglo.xlsx
+11.xlsx
+
+# ── Scripts de diagnóstico Python ─────────────────────────────────
+fix_anglo_dedup.py
+generate_js.py
+parse_excel.py
+
+# ── IDE ────────────────────────────────────────────────────────────
+.vscode/
+*.code-workspace
+
+# ── Node (por si se usa en el futuro) ─────────────────────────────
+node_modules/

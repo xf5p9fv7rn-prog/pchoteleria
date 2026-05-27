@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Parejas Aramark — Selección de Compañero</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <!-- SheetJS para exportar Excel -->
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+  <style>
+    :root {
+      --aramark-red:   #C8102E;
+      --aramark-dark:  #1a1a1a;
+      --aramark-light: #f9f9f9;
+      --aramark-border:#e5e5e5;
+      --radius: 16px;
+    }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body {
+      font-family: 'Inter', sans-serif;
+      background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 50%, #1a1a1a 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 24px 16px 48px;
+    }
+
+    /* ── CARD PRINCIPAL ── */
+    .card {
+      background: #fff;
+      border-radius: 24px;
+      box-shadow: 0 32px 80px rgba(0,0,0,.45);
+      width: 100%;
+      max-width: 520px;
+      overflow: hidden;
+    }
+
+    /* ── HEADER ── */
+    .header {
+      background: #fff;
+      padding: 32px 32px 20px;
+      text-align: center;
+      border-bottom: 3px solid var(--aramark-red);
+    }
+    .header img { height: 52px; margin-bottom: 16px; }
+    .header h1 {
+      font-size: 22px;
+      font-weight: 900;
+      color: var(--aramark-dark);
+      letter-spacing: -.3px;
+    }
+    .header p {
+      font-size: 13px;
+      color: #6b7280;
+      margin-top: 6px;
+    }
+
+    /* ── PASO 1: Seleccionar turno ── */
+    .turno-section {
+      padding: 32px;
+    }
+    .turno-label {
+      font-size: 13px;
+      font-weight: 700;
+      color: #6b7280;
+      text-transform: uppercase;
+      letter-spacing: .8px;
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    .turno-btns {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+    .turno-btn {
+      background: var(--aramark-light);
+      border: 2.5px solid var(--aramark-border);
+      border-radius: var(--radius);
+      padding: 28px 16px;
+      cursor: pointer;
+      transition: all .2s ease;
+      text-align: center;
+    }
+    .turno-btn:hover { border-color: var(--aramark-red); background: #fff5f5; transform: translateY(-2px); }
+    .turno-btn.active { border-color: var(--aramark-red); background: var(--aramark-red); color: #fff; }
+    .turno-btn .t-icon { font-size: 36px; margin-bottom: 10px; display: block; }
+    .turno-btn .t-name { font-size: 22px; font-weight: 900; display: block; }
+    .turno-btn .t-desc { font-size: 12px; opacity: .7; display: block; margin-top: 4px; }
+    .turno-btn.active .t-desc { opacity: .85; }
+
+    /* ── PASO 2: Validar RUT ── */
+    .rut-section { padding: 0 32px 28px; display:none; }
+    .rut-section.show { display: block; }
+
+    /* ── PASO 3: Formulario ── */
+    .form-section { padding: 0 32px 32px; display: none; }
+    .form-section.show { display: block; }
+
+    /* ── SEPARADOR DE SECCIÓN ── */
+    .sec-title {
+      font-size: 13px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: .8px;
+      color: var(--aramark-red);
+      margin: 20px 0 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .sec-title::after { content:''; flex:1; height:1.5px; background:#fbe9eb; }
+
+    /* ── FIELDS ── */
+    .field { margin-bottom: 14px; }
+    .field label {
+      display: block;
+      font-size: 11px;
+      font-weight: 700;
+      color: #6b7280;
+      text-transform: uppercase;
+      letter-spacing: .5px;
+      margin-bottom: 6px;
+    }
+    .field input {
+      width: 100%;
+      padding: 11px 14px;
+      border: 1.5px solid var(--aramark-border);
+      border-radius: 10px;
+      font-size: 14px;
+      font-family: 'Inter', sans-serif;
+      color: var(--aramark-dark);
+      transition: border-color .2s;
+      outline: none;
+    }
+    .field input:focus { border-color: var(--aramark-red); }
+    .field input:disabled {
+      background: #f3f4f6;
+      color: #374151;
+      font-weight: 700;
+      cursor: not-allowed;
+    }
+    .field input.ok { border-color: #10b981; background: #f0fdf4; }
+    .field input.err { border-color: #ef4444; background: #fef2f2; }
+
+    /* ── BOTONES ── */
+    .btn-primary {
+      width: 100%;
+      background: var(--aramark-red);
+      color: #fff;
+      border: none;
+      border-radius: 12px;
+      padding: 14px;
+      font-size: 15px;
+      font-weight: 800;
+      font-family: 'Inter', sans-serif;
+      cursor: pointer;
+      transition: all .2s;
+      box-shadow: 0 4px 16px rgba(200,16,46,.3);
+    }
+    .btn-primary:hover { background: #a50d25; transform: translateY(-1px); }
+    .btn-primary:disabled { background: #9ca3af; cursor: not-allowed; transform: none; box-shadow: none; }
+    .btn-secondary {
+      background: transparent;
+      border: 1.5px solid var(--aramark-border);
+      border-radius: 10px;
+      padding: 10px 16px;
+      font-size: 13px;
+      font-weight: 700;
+      color: #6b7280;
+      cursor: pointer;
+      font-family: 'Inter', sans-serif;
+      transition: all .2s;
+    }
+    .btn-secondary:hover { border-color: #9ca3af; color: #374151; }
+
+    /* ── BADGE TURNO ── */
+    .turno-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--aramark-red);
+      color: #fff;
+      border-radius: 8px;
+      padding: 4px 12px;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .5px;
+      margin-bottom: 16px;
+    }
+
+    /* ── MSG ── */
+    .msg {
+      min-height: 18px;
+      font-size: 12px;
+      font-weight: 600;
+      margin: 8px 0;
+      padding: 0 2px;
+    }
+
+    /* ── SUCCESS SCREEN ── */
+    .success-screen {
+      display: none;
+      padding: 48px 32px;
+      text-align: center;
+    }
+    .success-screen.show { display: block; }
+    .success-icon {
+      width: 80px; height: 80px;
+      background: #dcfce7;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 36px;
+      margin: 0 auto 20px;
+    }
+    .success-screen h2 { font-size: 20px; font-weight: 900; color: var(--aramark-dark); margin-bottom: 8px; }
+    .success-screen p { font-size: 14px; color: #6b7280; line-height: 1.6; }
+
+    /* ── FOOTER ── */
+    .footer {
+      padding: 16px 32px;
+      background: #f9f9f9;
+      border-top: 1px solid var(--aramark-border);
+      font-size: 11px;
+      color: #9ca3af;
+      text-align: center;
+    }
+
+    /* ── RESPONSIVE ── */
+    @media (max-width: 480px) {
+      body { padding: 0; align-items: flex-start; }
+      .card { border-radius: 0; min-height: 100vh; }
+      .header { padding: 24px 20px 16px; }
+      .turno-section, .rut-section, .form-section { padding-left: 20px; padding-right: 20px; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="card">
+
+  <!-- HEADER -->
+  <div class="header">
+    <img src="aramark.png" alt="Aramark">
+    <h1>Parejas de Habitación</h1>
+    <p>Selecciona tu turno e indica con quién deseas compartir habitación</p>
+  </div>
+
+  <!-- PASO 1: SELECCIONAR TURNO -->
+  <div class="turno-section" id="step-turno">
+    <div class="turno-label">¿En qué turno trabajas?</div>
+    <div class="turno-btns">
+      <button class="turno-btn" onclick="seleccionarTurno('A')">
+        <span class="t-icon">🌅</span>
+        <span class="t-name">Turno A</span>
+        <span class="t-desc">Seleccionar</span>
+      </button>
+      <button class="turno-btn" onclick="seleccionarTurno('B')">
+        <span class="t-icon">🌙</span>
+        <span class="t-name">Turno B</span>
+        <span class="t-desc">Seleccionar</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- PASO 2: INGRESAR RUT PARA VALIDAR -->
+  <div class="rut-section" id="step-rut">
+    <div class="sec-title">Tu RUT de trabajador</div>
+    <div class="field">
+      <label>RUT (sin puntos, con guión)</label>
+      <input type="text" id="rut-validar" placeholder="12345678-9" oninput="limpiarRutMsg()" onkeydown="if(event.key==='Enter') validarRut()">
+    </div>
+    <div class="msg" id="msg-rut"></div>
+    <button class="btn-primary" onclick="validarRut()" id="btn-validar">
+      🔍 Validar RUT
+    </button>
+    <br><br>
+    <button class="btn-secondary" onclick="volverTurno()">← Cambiar turno</button>
+  </div>
+
+  <!-- PASO 3: FORMULARIO COMPLETO -->
+  <div class="form-section" id="step-form">
+    <div id="turno-badge-form"></div>
+
+    <!-- PERSONA 1 (YO) -->
+    <div class="sec-title">👤 Tus datos</div>
+    <div class="field">
+      <label>Tu RUT</label>
+      <input type="text" id="p1-rut" disabled>
+    </div>
+    <div class="field">
+      <label>Tu nombre completo</label>
+      <input type="text" id="p1-nombre" placeholder="Nombre Apellido">
+    </div>
+    <div class="field">
+      <label>Tu área / sección</label>
+      <input type="text" id="p1-area" placeholder="Ej: Cocina, Aseo, Casino...">
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="field">
+        <label>Fecha desde</label>
+        <input type="date" id="p1-desde">
+      </div>
+      <div class="field">
+        <label>Fecha hasta</label>
+        <input type="date" id="p1-hasta">
+      </div>
+    </div>
+
+    <!-- PERSONA 2 (PAREJA) -->
+    <div class="sec-title">🤝 Datos de tu compañero(a)</div>
+    <div class="field">
+      <label>RUT del compañero(a)</label>
+      <input type="text" id="p2-rut" placeholder="12345678-9" oninput="buscarNombreP2()">
+    </div>
+    <div class="field">
+      <label>Nombre del compañero(a)</label>
+      <input type="text" id="p2-nombre" placeholder="Nombre Apellido">
+    </div>
+    <div class="field">
+      <label>Área del compañero(a)</label>
+      <input type="text" id="p2-area" placeholder="Ej: Cocina, Aseo, Casino...">
+    </div>
+
+    <div class="msg" id="msg-form"></div>
+
+    <button class="btn-primary" onclick="enviarSolicitud()" id="btn-enviar">
+      ✅ Confirmar Pareja para el Próximo Turno
+    </button>
+    <br><br>
+    <button class="btn-secondary" onclick="volverRut()">← Cambiar RUT</button>
+  </div>
+
+  <!-- ÉXITO -->
+  <div class="success-screen" id="step-success">
+    <div class="success-icon">✅</div>
+    <h2>¡Solicitud enviada!</h2>
+    <p>Tu preferencia de compañero(a) de habitación fue registrada correctamente.<br><br>
+      El equipo de administración la tendrá en cuenta para la asignación del próximo turno.</p>
+    <br>
+    <button class="btn-primary" onclick="reiniciar()" style="max-width:260px;margin:0 auto;display:block">
+      Nueva solicitud
+    </button>
+  </div>
+
+  <div class="footer">
+    Aramark Chile · Sistema de Gestión de Campamento · Uso exclusivo trabajadores
+  </div>
+</div>
+
+<script>
+  // ── SUPABASE ──────────────────────────────────────────────────────────────
+  const { createClient } = supabase;
+  const sb = createClient(
+    'https://pnkajjduvadcxealodcp.supabase.co',
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBua2FqamR1dmFkY3hlYWxvZGNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUyNDQ1MzIsImV4cCI6MjA5MDgyMDUzMn0.NsL16NP16MVEwTSN-1ggAtwzTA-2tDPF7Ndbcsdl-Ro'
+  );
+
+  let _turno = null;
+  let _rutValidado = null;
+  let _nombreValidado = null;
+
+  // ── HELPERS ───────────────────────────────────────────────────────────────
+  function normRut(r) { return r.trim().replace(/\./g, '').toUpperCase(); }
+  function show(id)   { document.getElementById(id).classList.add('show'); }
+  function hide(id)   { document.getElementById(id).classList.remove('show'); }
+  function showBlock(id) { document.getElementById(id).style.display = 'block'; }
+  function hideBlock(id) { document.getElementById(id).style.display = 'none'; }
+  function setMsg(id, txt, color) {
+    const el = document.getElementById(id);
+    el.textContent = txt;
+    el.style.color = color || '#374151';
+  }
+
+  // ── PASO 1: Turno ─────────────────────────────────────────────────────────
+  function seleccionarTurno(t) {
+    _turno = t;
+    document.querySelectorAll('.turno-btn').forEach(b => b.classList.remove('active'));
+    event.currentTarget.classList.add('active');
+    setTimeout(() => {
+      hideBlock('step-turno');
+      document.getElementById('step-rut').classList.add('show');
+      document.getElementById('rut-validar').focus();
+    }, 300);
+  }
+
+  function volverTurno() {
+    hide('step-rut');
+    showBlock('step-turno');
+    document.querySelectorAll('.turno-btn').forEach(b => b.classList.remove('active'));
+    _turno = null;
+  }
+
+  // ── PASO 2: Validar RUT ───────────────────────────────────────────────────
+  function limpiarRutMsg() { setMsg('msg-rut', ''); }
+
+  // Valida formato RUT chileno: 7-8 dígitos + guión + dígito/K
+  function formatoRutOk(r) { return /^\d{7,8}-[\dkK]$/.test(r); }
+
+  async function validarRut() {
+    const rut = normRut(document.getElementById('rut-validar').value);
+    if (!rut) { setMsg('msg-rut', '⚠️ Ingresa tu RUT', '#d97706'); return; }
+
+    // Validar formato chileno
+    if (!formatoRutOk(rut)) {
+      setMsg('msg-rut', '⚠️ Formato incorrecto. Usa: 12345678-9 (sin puntos, con guión)', '#d97706');
+      document.getElementById('rut-validar').classList.add('err');
+      return;
+    }
+
+    const btn = document.getElementById('btn-validar');
+    btn.textContent = '🔍 Buscando…';
+    btn.disabled = true;
+
+    // Intentar autocompletar nombre desde BD (opcional — no bloquea)
+    let nombreEncontrado = '';
+    try {
+      const { data } = await sb.from('v2_asignaciones')
+        .select('nombre_huesped')
+        .eq('rut_huesped', rut)
+        .order('fecha_checkin', { ascending: false })
+        .limit(1);
+      nombreEncontrado = data?.[0]?.nombre_huesped || '';
+    } catch(_) {}
+
+    btn.textContent = '🔍 Validar RUT';
+    btn.disabled = false;
+
+    // ✅ Siempre dejar pasar — el RUT es válido en formato
+    _rutValidado = rut;
+    _nombreValidado = nombreEncontrado;
+
+    document.getElementById('rut-validar').classList.remove('err');
+    document.getElementById('rut-validar').classList.add('ok');
+
+    const saludo = nombreEncontrado
+      ? `✅ Bienvenido, ${nombreEncontrado}`
+      : '✅ RUT válido — completa tus datos en el siguiente paso';
+    setMsg('msg-rut', saludo, '#10b981');
+
+    setTimeout(() => {
+      hide('step-rut');
+      cargarFormulario();
+      show('step-form');
+    }, 700);
+  }
+
+  function volverRut() {
+    hide('step-form');
+    show('step-rut');
+    document.getElementById('rut-validar').classList.remove('ok','err');
+    setMsg('msg-rut', '');
+    _rutValidado = null;
+    _nombreValidado = null;
+  }
+
+  // ── PASO 3: Formulario ────────────────────────────────────────────────────
+  function cargarFormulario() {
+    // Badge turno
+    document.getElementById('turno-badge-form').innerHTML =
+      `<div class="turno-badge">${_turno === 'A' ? '🌅' : '🌙'} Turno ${_turno}</div>`;
+
+    // Pre-llenar persona 1
+    document.getElementById('p1-rut').value    = _rutValidado;
+    document.getElementById('p1-nombre').value = _nombreValidado;
+    document.getElementById('p1-area').value   = '';
+
+    // Limpiar persona 1 extras
+    document.getElementById('p1-desde').value = '';
+    document.getElementById('p1-hasta').value = '';
+
+    // Limpiar persona 2
+    document.getElementById('p2-rut').value    = '';
+    document.getElementById('p2-nombre').value = '';
+    document.getElementById('p2-area').value   = '';
+    setMsg('msg-form', '');
+  }
+
+  // Auto-buscar nombre de persona 2 cuando escribe el RUT
+  let _p2Timer = null;
+  async function buscarNombreP2() {
+    clearTimeout(_p2Timer);
+    _p2Timer = setTimeout(async () => {
+      const rut = normRut(document.getElementById('p2-rut').value);
+      if (rut.length < 5) return;
+      const { data } = await sb.from('v2_asignaciones')
+        .select('nombre_huesped')
+        .eq('rut_huesped', rut)
+        .order('fecha_checkin', { ascending: false })
+        .limit(1);
+      if (data?.[0]?.nombre_huesped) {
+        const el = document.getElementById('p2-nombre');
+        if (!el.value) {
+          el.value = data[0].nombre_huesped;
+          el.style.borderColor = '#10b981';
+          setTimeout(() => el.style.borderColor = '', 2000);
+        }
+      }
+    }, 600);
+  }
+
+  async function enviarSolicitud() {
+    const p1rut    = document.getElementById('p1-rut').value;
+    const p1nombre = document.getElementById('p1-nombre').value.trim();
+    const p1area   = document.getElementById('p1-area').value.trim();
+    const p1desde  = document.getElementById('p1-desde').value;
+    const p1hasta  = document.getElementById('p1-hasta').value;
+    const p2rut    = normRut(document.getElementById('p2-rut').value);
+    const p2nombre = document.getElementById('p2-nombre').value.trim();
+    const p2area   = document.getElementById('p2-area').value.trim();
+
+    if (!p1nombre || !p1area) {
+      setMsg('msg-form', '⚠️ Completa tu nombre y área', '#d97706'); return;
+    }
+    if (!p2rut || !p2nombre) {
+      setMsg('msg-form', '⚠️ Ingresa el RUT y nombre de tu compañero(a)', '#d97706'); return;
+    }
+    if (p2rut === p1rut) {
+      setMsg('msg-form', '⚠️ No puedes seleccionarte a ti mismo como pareja', '#d97706'); return;
+    }
+
+    const btn = document.getElementById('btn-enviar');
+    btn.disabled = true;
+    btn.textContent = '⏳ Guardando…';
+    setMsg('msg-form', 'Registrando solicitud…', '#6b7280');
+
+    const { error } = await sb.from('v2_parejas_aramark').insert([{
+      turno:           _turno,
+      rut_persona1:    p1rut,
+      nombre_persona1: p1nombre,
+      area_persona1:   p1area,
+      fecha_desde:     p1desde  || null,
+      fecha_hasta:     p1hasta  || null,
+      rut_persona2:    p2rut,
+      nombre_persona2: p2nombre,
+      area_persona2:   p2area,
+      agrupados:       false,
+    }]);
+
+    btn.disabled = false;
+    btn.textContent = '✅ Confirmar Pareja para el Próximo Turno';
+
+    if (error) {
+      setMsg('msg-form', '❌ Error al guardar: ' + error.message, '#ef4444');
+      return;
+    }
+
+    // Éxito
+    hide('step-form');
+    show('step-success');
+  }
+
+  // ── REINICIAR ─────────────────────────────────────────────────────────────
+  function reiniciar() {
+    hide('step-success');
+    showBlock('step-turno');
+    document.getElementById('step-rut').classList.remove('show');
+    document.getElementById('rut-validar').value = '';
+    document.querySelectorAll('.turno-btn').forEach(b => b.classList.remove('active'));
+    _turno = null;
+    _rutValidado = null;
+    _nombreValidado = null;
+  }
+</script>
+</body>
+</html>

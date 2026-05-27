@@ -4,173 +4,186 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     <title>Mi Habitación — PC Hotelería</title>
-    <link rel="stylesheet" href="css/main.css">
-    <link rel="stylesheet" href="css/premium.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
     <style>
-        * {
-            box-sizing: border-box;
-        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
 
         body {
-            background: linear-gradient(160deg, #e8202020 0%, #f9d6d6 40%, #fff5f5 70%, #ffffff 100%);
+            background: linear-gradient(145deg, #fca5a5 0%, #fcd5d5 30%, #feecec 60%, #fff7f7 80%, #ffffff 100%);
             min-height: 100vh;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
             color: #1a202c;
-            margin: 0;
-            padding: 0;
+            overflow-x: hidden;
         }
 
-        /* ── Fondo con brillos suaves ── */
+        /* ── Fondo: brillo suave ── */
         body::before {
             content: '';
             position: fixed;
             inset: 0;
             background:
-                radial-gradient(circle at 10% 20%, rgba(192, 57, 43, 0.18) 0%, transparent 45%),
-                radial-gradient(circle at 90% 80%, rgba(192, 57, 43, 0.10) 0%, transparent 45%);
+                radial-gradient(ellipse 55% 40% at 0% 0%,   rgba(255,255,255,0.55) 0%, transparent 55%),
+                radial-gradient(ellipse 45% 40% at 100% 100%, rgba(255,255,255,0.60) 0%, transparent 50%),
+                radial-gradient(ellipse 30% 25% at 50% 50%, rgba(255,255,255,0.25) 0%, transparent 60%);
             pointer-events: none;
+            z-index: 0;
         }
 
         .pub-container {
             max-width: 420px;
             margin: 0 auto;
-            padding: 24px 16px 40px;
+            padding: 32px 20px 48px;
             min-height: 100vh;
             display: flex;
             flex-direction: column;
             justify-content: center;
+            position: relative;
+            z-index: 1;
         }
 
         /* ── Logo header ── */
         .page-logo {
             text-align: center;
-            margin-bottom: 28px;
+            margin-bottom: 32px;
         }
 
         .page-logo .logo-icon {
-            width: 140px;
+            width: 120px;
             height: auto;
             display: block;
-            margin: 0 auto 12px;
-            animation: floatIcon 3s ease-in-out infinite;
-            filter: drop-shadow(0 6px 18px rgba(0, 0, 0, 0.35));
+            margin: 0 auto 16px;
+            filter: drop-shadow(0 6px 18px rgba(180,30,20,0.25));
+            animation: floatIcon 4s ease-in-out infinite;
         }
 
         @keyframes floatIcon {
-
-            0%,
-            100% {
-                transform: translateY(0);
-            }
-
-            50% {
-                transform: translateY(-6px);
-            }
+            0%, 100% { transform: translateY(0px); }
+            50%       { transform: translateY(-8px); }
         }
 
         .page-logo h1 {
             color: #c0392b;
-            font-size: 22px;
-            font-weight: 800;
-            margin: 0 0 4px;
-            text-shadow: 0 1px 4px rgba(192, 57, 43, 0.15);
+            font-size: 26px;
+            font-weight: 900;
+            letter-spacing: -0.5px;
+            margin-bottom: 6px;
+            text-shadow: 0 2px 12px rgba(192,57,43,0.2);
         }
 
         .page-logo p {
             color: #7f1d1d;
+            opacity: 0.65;
             font-size: 13px;
-            opacity: .8;
-            margin: 0;
+            font-weight: 500;
+            letter-spacing: 0.3px;
         }
 
-        /* ── Search card ── */
+        /* ── Search card — Glassmorphism claro ── */
         .search-card {
-            background: rgba(255, 255, 255, 0.97);
-            border-radius: 24px;
-            padding: 28px 24px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+            background: rgba(255, 255, 255, 0.75);
+            backdrop-filter: blur(28px);
+            -webkit-backdrop-filter: blur(28px);
+            border: 1px solid rgba(255, 255, 255, 0.9);
+            border-radius: 28px;
+            padding: 32px 28px;
+            box-shadow: 0 20px 60px rgba(192,57,43,0.12), 0 4px 20px rgba(0,0,0,0.06), inset 0 1px 0 rgba(255,255,255,0.95);
         }
 
         .search-card h2 {
-            font-size: 18px;
+            font-size: 20px;
             font-weight: 800;
-            margin: 0 0 6px;
             color: #1a202c;
+            margin-bottom: 6px;
+            letter-spacing: -0.3px;
         }
 
         .search-card p {
             font-size: 13px;
             color: #64748b;
-            margin: 0 0 20px;
-            line-height: 1.5;
+            margin-bottom: 28px;
+            line-height: 1.6;
         }
 
         .rut-label {
-            font-size: 11px;
-            font-weight: 800;
+            font-size: 10px;
+            font-weight: 700;
             text-transform: uppercase;
-            letter-spacing: 0.8px;
-            color: #64748b;
-            margin-bottom: 8px;
+            letter-spacing: 1.2px;
+            color: #94a3b8;
+            margin-bottom: 10px;
             display: block;
         }
 
         .rut-input {
             width: 100%;
-            padding: 16px 20px;
-            font-size: 22px;
+            padding: 18px 60px 18px 20px;
+            font-size: 20px;
             font-weight: 700;
+            font-family: 'Inter', monospace;
             text-align: center;
-            letter-spacing: 2px;
-            border: 2px solid #e2e8f0;
-            border-radius: 14px;
+            letter-spacing: 3px;
+            border: 1.5px solid #e2e8f0;
+            border-radius: 16px;
             background: #f8fafc;
             color: #1a202c;
             outline: none;
-            transition: all 0.2s;
-            margin-bottom: 16px;
+            transition: all 0.25s;
+            margin-bottom: 0;
         }
 
         .rut-input:focus {
             border-color: #c0392b;
             background: #fff;
-            box-shadow: 0 0 0 4px rgba(192, 57, 43, 0.1);
+            box-shadow: 0 0 0 4px rgba(192,57,43,0.12);
         }
 
         .rut-input::placeholder {
             color: #cbd5e1;
-            font-size: 16px;
+            font-size: 14px;
+            font-weight: 400;
             letter-spacing: 1px;
         }
 
         .btn-buscar {
             width: 100%;
-            padding: 16px;
-            background: linear-gradient(135deg, #c0392b, #e74c3c);
+            padding: 18px;
+            background: linear-gradient(135deg, #c0392b 0%, #e74c3c 50%, #c0392b 100%);
+            background-size: 200% 200%;
             color: white;
             border: none;
-            border-radius: 14px;
-            font-size: 16px;
+            border-radius: 16px;
+            font-size: 15px;
             font-weight: 800;
             cursor: pointer;
-            box-shadow: 0 6px 20px rgba(192, 57, 43, 0.4);
-            transition: all 0.2s;
+            box-shadow: 0 8px 30px rgba(192, 57, 43, 0.5);
+            transition: all 0.25s;
             display: flex;
             align-items: center;
             justify-content: center;
             gap: 8px;
+            letter-spacing: 0.3px;
+            margin-top: 20px;
         }
 
         .btn-buscar:hover:not(:disabled) {
             transform: translateY(-2px);
-            box-shadow: 0 10px 30px rgba(192, 57, 43, 0.5);
+            box-shadow: 0 12px 40px rgba(192, 57, 43, 0.6);
+            background-position: right center;
+        }
+
+        .btn-buscar:active:not(:disabled) {
+            transform: translateY(0);
         }
 
         .btn-buscar:disabled {
-            opacity: 0.6;
+            opacity: 0.5;
             cursor: not-allowed;
-            transform: none;
         }
 
         .no-result {
@@ -178,114 +191,125 @@
             background: #fff5f5;
             border: 1.5px solid #feb2b2;
             border-radius: 14px;
-            padding: 16px 20px;
+            padding: 14px 18px;
             text-align: center;
             color: #c0392b;
-            font-weight: 700;
-            font-size: 14px;
+            font-weight: 600;
+            font-size: 13px;
             line-height: 1.5;
             display: none;
         }
 
         /* ── Ticket ── */
         .ticket {
-            background: #fff;
-            border-radius: 24px;
+            background: rgba(255,255,255,0.85);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
+            border: 1px solid rgba(255,255,255,0.95);
+            border-radius: 28px;
             overflow: hidden;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
-            animation: slideUp 0.5s cubic-bezier(0.2, 0.8, 0.2, 1);
+            box-shadow: 0 24px 60px rgba(192,57,43,0.14), 0 4px 20px rgba(0,0,0,0.06);
+            animation: slideUp 0.45s cubic-bezier(0.2, 0.8, 0.2, 1);
         }
 
         @keyframes slideUp {
-            from {
-                transform: translateY(30px);
-                opacity: 0;
-            }
-
-            to {
-                transform: translateY(0);
-                opacity: 1;
-            }
+            from { transform: translateY(24px); opacity: 0; }
+            to   { transform: translateY(0);    opacity: 1; }
         }
 
         .ticket-header {
-            background: linear-gradient(135deg, #c0392b, #e74c3c);
-            padding: 24px;
+            background: linear-gradient(135deg, #7f1d1d 0%, #c0392b 50%, #e74c3c 100%);
+            padding: 28px 24px 24px;
             color: #fff;
             text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .ticket-header::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(circle at 80% 20%, rgba(255,255,255,0.12) 0%, transparent 50%);
         }
 
         .ticket-header .building-badge {
             display: inline-block;
-            background: rgba(255, 255, 255, 0.2);
+            background: rgba(255,255,255,0.18);
+            border: 1px solid rgba(255,255,255,0.25);
             border-radius: 99px;
-            padding: 4px 12px;
-            font-size: 12px;
+            padding: 5px 14px;
+            font-size: 11px;
             font-weight: 700;
-            margin-bottom: 10px;
+            letter-spacing: 0.4px;
+            margin-bottom: 12px;
+            backdrop-filter: blur(8px);
         }
 
         .ticket-header h2 {
-            font-size: 18px;
+            font-size: 20px;
             font-weight: 800;
-            margin: 0 0 2px;
+            margin-bottom: 4px;
+            letter-spacing: -0.3px;
         }
 
         .ticket-header p {
-            opacity: 0.85;
+            opacity: 0.7;
             font-size: 12px;
-            margin: 0;
+            font-weight: 500;
         }
 
         /* Número de habitación */
         .room-hero {
-            padding: 28px 24px 20px;
+            padding: 32px 24px 24px;
             text-align: center;
-            border-bottom: 2px dashed #e2e8f0;
+            border-bottom: 1px dashed #e2e8f0;
         }
 
         .room-label {
             font-size: 10px;
-            font-weight: 800;
+            font-weight: 700;
             text-transform: uppercase;
-            letter-spacing: 1px;
+            letter-spacing: 1.5px;
             color: #94a3b8;
-            margin-bottom: 4px;
+            margin-bottom: 6px;
         }
 
         .room-number {
-            font-size: 72px;
+            font-size: 80px;
             font-weight: 900;
             color: #c0392b;
             line-height: 1;
+            text-shadow: 0 4px 20px rgba(192,57,43,0.2);
+            letter-spacing: -3px;
         }
 
         .room-sub {
             font-size: 14px;
-            font-weight: 700;
-            color: #64748b;
-            margin-top: 4px;
+            font-weight: 600;
+            color: #94a3b8;
+            margin-top: 8px;
         }
 
         .ticket-body {
-            padding: 20px 24px;
+            padding: 22px 24px;
         }
 
         .info-grid {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 16px;
+            gap: 14px;
             margin-bottom: 16px;
         }
 
         .info-cell label {
             font-size: 10px;
-            font-weight: 800;
+            font-weight: 700;
             text-transform: uppercase;
-            letter-spacing: 0.5px;
+            letter-spacing: 0.8px;
             color: #94a3b8;
             display: block;
-            margin-bottom: 3px;
+            margin-bottom: 4px;
         }
 
         .info-cell .val {
@@ -294,124 +318,100 @@
             color: #1a202c;
         }
 
-        .info-cell.right {
-            text-align: right;
-        }
+        .info-cell.right { text-align: right; }
 
         .dates-bar {
             display: flex;
-            gap: 12px;
-            margin-bottom: 0;
+            gap: 10px;
         }
 
         .date-box {
             flex: 1;
             background: #f8fafc;
-            border-radius: 12px;
-            padding: 12px;
             border: 1px solid #e2e8f0;
+            border-radius: 14px;
+            padding: 12px 14px;
         }
 
         .date-box label {
             font-size: 10px;
-            font-weight: 800;
+            font-weight: 700;
             text-transform: uppercase;
-            letter-spacing: 0.5px;
+            letter-spacing: 0.6px;
             color: #94a3b8;
             display: block;
-            margin-bottom: 3px;
+            margin-bottom: 4px;
         }
 
         .date-box .dval {
             font-size: 14px;
             font-weight: 800;
+            color: #1a202c;
         }
 
-        .date-box.arrival .dval {
-            color: #2b6cb0;
-        }
-
-        .date-box.departure .dval {
-            color: #c0392b;
-        }
-
-        /* ── Footer con checkin/checkout ── */
+        /* ── Footer ── */
         .ticket-footer {
-            padding: 20px 24px;
-            border-top: 2px dashed #e2e8f0;
-            background: #fafafa;
+            padding: 20px 24px 24px;
+            border-top: 1px dashed #e2e8f0;
         }
 
         /* Punch holes */
-        .punch-wrap {
-            position: relative;
-        }
-
+        .punch-wrap { position: relative; }
         .punch-hole {
             position: absolute;
-            width: 22px;
-            height: 22px;
-            background: linear-gradient(135deg, #1a1a2e, #0f3460);
+            width: 20px; height: 20px;
+            background: linear-gradient(160deg, #ffffff 0%, #ffe0e0 100%);
             border-radius: 50%;
             top: 50%;
             transform: translateY(-50%);
+            box-shadow: inset 0 0 0 1.5px #e2e8f0;
         }
-
-        .punch-left {
-            left: -11px;
-        }
-
-        .punch-right {
-            right: -11px;
-        }
+        .punch-left  { left: -10px; }
+        .punch-right { right: -10px; }
 
         .btn-checkin {
             width: 100%;
-            padding: 16px;
-            background: linear-gradient(135deg, #276749, #38a169);
+            padding: 17px;
+            background: linear-gradient(135deg, #065f46, #10b981);
             color: white;
             border: none;
             border-radius: 14px;
             font-size: 15px;
             font-weight: 800;
             cursor: pointer;
-            box-shadow: 0 6px 20px rgba(39, 103, 73, 0.4);
+            box-shadow: 0 8px 28px rgba(16,185,129,0.4);
             transition: all 0.2s;
             letter-spacing: 0.3px;
         }
 
         .btn-checkin:hover:not(:disabled) {
             transform: translateY(-2px);
-            box-shadow: 0 10px 28px rgba(39, 103, 73, 0.5);
+            box-shadow: 0 12px 36px rgba(16,185,129,0.5);
         }
 
-        .btn-checkin:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
-            transform: none;
-        }
+        .btn-checkin:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 
         .checkin-hint {
             font-size: 12px;
             color: #64748b;
-            font-weight: 600;
+            font-weight: 500;
             text-align: center;
-            margin-bottom: 14px;
-            line-height: 1.5;
+            margin-bottom: 16px;
+            line-height: 1.6;
         }
 
         .status-confirmed {
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 8px;
-            padding: 14px 20px;
-            background: linear-gradient(135deg, #f0fff4, #dcfce7);
-            border: 2px solid #86efac;
+            gap: 10px;
+            padding: 16px 20px;
+            background: rgba(16,185,129,0.15);
+            border: 1.5px solid rgba(16,185,129,0.35);
             border-radius: 14px;
             font-size: 15px;
             font-weight: 800;
-            color: #15803d;
+            color: #6ee7b7;
             margin-bottom: 12px;
         }
 
@@ -419,13 +419,13 @@
             text-align: center;
             font-size: 12px;
             color: #64748b;
-            font-weight: 600;
+            font-weight: 500;
         }
 
         .checkout-box {
-            margin-top: 16px;
-            background: #fffbeb;
-            border: 1.5px solid #fcd34d;
+            margin-top: 18px;
+            background: rgba(245,158,11,0.08);
+            border: 1px solid rgba(245,158,11,0.25);
             border-radius: 14px;
             padding: 16px;
         }
@@ -434,25 +434,22 @@
             font-size: 12px;
             color: #92400e;
             font-weight: 600;
-            line-height: 1.5;
+            line-height: 1.6;
             margin-bottom: 12px;
-            background: rgba(251, 191, 36, 0.15);
-            border-radius: 10px;
-            padding: 10px 12px;
             text-align: center;
         }
 
         .btn-checkout {
             width: 100%;
             padding: 14px;
-            background: linear-gradient(135deg, #f59e0b, #d97706);
+            background: linear-gradient(135deg, #d97706, #f59e0b);
             color: white;
             border: none;
             border-radius: 12px;
-            font-size: 15px;
+            font-size: 14px;
             font-weight: 800;
             cursor: pointer;
-            box-shadow: 0 4px 14px rgba(245, 158, 11, 0.4);
+            box-shadow: 0 4px 16px rgba(245,158,11,0.3);
             display: flex;
             align-items: center;
             justify-content: center;
@@ -460,10 +457,7 @@
             transition: all 0.2s;
         }
 
-        .btn-checkout:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
+        .btn-checkout:disabled { opacity: 0.5; cursor: not-allowed; }
 
         .status-checkout {
             display: flex;
@@ -471,59 +465,73 @@
             justify-content: center;
             gap: 8px;
             padding: 14px 20px;
-            background: linear-gradient(135deg, #fffbeb, #fef3c7);
-            border: 2px solid #fcd34d;
+            background: rgba(245,158,11,0.1);
+            border: 1.5px solid rgba(245,158,11,0.3);
             border-radius: 14px;
             font-size: 14px;
             font-weight: 800;
-            color: #92400e;
+            color: #fcd34d;
             margin-bottom: 12px;
         }
 
         .ticket-tx {
             text-align: center;
             font-size: 10px;
-            color: #94a3b8;
-            font-weight: 700;
+            color: #cbd5e1;
+            font-weight: 600;
             text-transform: uppercase;
-            letter-spacing: 1px;
-            margin-top: 16px;
+            letter-spacing: 1.5px;
+            margin-top: 18px;
         }
 
         .btn-volver {
             width: 100%;
-            padding: 14px;
-            background: rgba(255, 255, 255, 0.15);
-            color: #fff;
-            border: 1.5px solid rgba(255, 255, 255, 0.3);
+            padding: 15px;
+            background: rgba(255,255,255,0.6);
+            color: #64748b;
+            border: 1px solid #e2e8f0;
             border-radius: 14px;
             font-size: 14px;
             font-weight: 700;
             cursor: pointer;
             margin-top: 16px;
             transition: all 0.2s;
-            backdrop-filter: blur(10px);
+            letter-spacing: 0.2px;
         }
 
         .btn-volver:hover {
-            background: rgba(255, 255, 255, 0.25);
+            background: #fff;
+            color: #1a202c;
         }
 
         /* Spinner */
-        @keyframes spin {
-            to {
-                transform: rotate(360deg);
-            }
-        }
-
+        @keyframes spin { to { transform: rotate(360deg); } }
         .spinner {
-            width: 20px;
-            height: 20px;
-            border: 3px solid rgba(255, 255, 255, 0.3);
+            width: 18px; height: 18px;
+            border: 2.5px solid rgba(255,255,255,0.3);
             border-top-color: white;
             border-radius: 50%;
-            animation: spin 0.8s linear infinite;
+            animation: spin 0.7s linear infinite;
             display: inline-block;
+        }
+
+        /* Not authorized */
+        .not-auth-box {
+            background: #fff5f5;
+            border: 1.5px solid #feb2b2;
+            border-radius: 16px;
+            padding: 20px;
+            text-align: center;
+        }
+
+        /* Progress bar */
+        #progress-bar-wrap { margin-top: 18px; }
+        #progress-msg {
+            text-align: center;
+            font-size: 13px;
+            font-weight: 600;
+            color: #c0392b;
+            margin-top: 10px;
         }
     </style>
 </head>
@@ -544,8 +552,23 @@
                 <p>Ingresa tu RUT para ver tu habitación asignada y confirmar tu llegada.</p>
 
                 <label class="rut-label" for="rut-input">Tu RUT</label>
-                <input type="text" id="rut-input" class="rut-input" placeholder="12345678-9" autocomplete="off"
-                    inputmode="numeric" maxlength="12">
+                <div style="position:relative">
+                  <input type="text" id="rut-input" class="rut-input"
+                    placeholder="Ej: 12345678-9  o  12345678K"
+                    autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+                    inputmode="text" maxlength="13">
+                  <!-- Botón K para teléfonos sin teclado alfanumérico fácil -->
+                  <button type="button" id="btn-k"
+                    onclick="var i=document.getElementById('rut-input');i.value=(i.value.replace(/[Kk]$/,'')).replace(/-$/,'')+'-K';i.focus()"
+                    style="position:absolute;right:10px;top:50%;transform:translateY(-50%);
+                           background:#6366f1;color:#fff;border:none;border-radius:8px;
+                           padding:6px 12px;font-size:14px;font-weight:900;cursor:pointer;letter-spacing:1px">
+                    -K
+                  </button>
+                </div>
+                <p style="font-size:11px;color:#94a3b8;margin:6px 0 0;text-align:center;font-weight:600">
+                  RUT con dígito verificador
+                </p>
 
                 <button class="btn-buscar" id="btn-buscar" onclick="window.searchRoom()">
                     🔍 Buscar mi habitación
@@ -626,13 +649,11 @@
 
                     <!-- Estado 1A: No autorizado aún -->
                     <div id="not-authorized-section" style="display:none">
-                        <div
-                            style="background:#fff5f5;border:2px solid #feb2b2;border-radius:14px;padding:16px;text-align:center">
-                            <div style="font-size:32px;margin-bottom:8px">🔴</div>
-                            <div style="font-size:14px;font-weight:800;color:#c53030;margin-bottom:6px">INGRESO AÚN NO
-                                AUTORIZADO</div>
-                            <div style="font-size:12px;color:#742a2a;line-height:1.5">
-                                Dirígete a <strong>Recepción</strong> con tu carnet de identidad.<br>
+                        <div class="not-auth-box">
+                            <div style="font-size:36px;margin-bottom:10px">🔴</div>
+                            <div style="font-size:15px;font-weight:800;color:#c53030;margin-bottom:8px">INGRESO AÚN NO AUTORIZADO</div>
+                            <div style="font-size:13px;color:#742a2a;line-height:1.6">
+                                Dirígete a <strong style="color:#c0392b">Recepción</strong> con tu carnet de identidad.<br>
                                 El personal autorizará tu check-in.
                             </div>
                         </div>
@@ -678,6 +699,12 @@
                     <div class="ticket-tx">
                         ID TRANSACCIÓN: <span id="t-id">000000</span>
                     </div>
+
+                    <!-- 📱 QR Code para compartir -->
+                    <div id="qr-section" style="margin-top:16px;text-align:center;display:none">
+                        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#94a3b8;margin-bottom:8px">Escanea para ver esta habitación</div>
+                        <div id="qr-canvas" style="display:inline-block;padding:10px;background:white;border-radius:12px;box-shadow:0 4px 16px rgba(0,0,0,.10)"></div>
+                    </div>
                 </div>
             </div>
 
@@ -694,16 +721,31 @@
         let _supabase = null;
         async function getSb() {
             if (_supabase) return _supabase;
-            const mod = await import('./js/supabaseClient.js');
+            // Timeout de 10s para conexiones lentas (3G)
+            const mod = await Promise.race([
+                import('./js/supabaseClient.js'),
+                new Promise((_, rej) => setTimeout(() => rej(new Error('Tiempo de espera agotado. Verifica tu señal.')), 10000))
+            ]);
             _supabase = mod.supabase;
             return _supabase;
         }
 
         // ── Formatear RUT mientras escribe ───────────────────────────────────
         const rutInput = document.getElementById('rut-input');
+
+        // 🔗 Auto-rellenar desde parámetro ?rut= de la URL
+        const _urlRut = new URLSearchParams(location.search).get('rut');
+        if (_urlRut) {
+            rutInput.value = _urlRut;
+            // Buscar automáticamente tras pequeño delay
+            setTimeout(() => window.searchRoom(), 600);
+        }
+
         rutInput.addEventListener('input', () => {
-            let v = rutInput.value.replace(/[^0-9Kk]/g, '').toUpperCase();
-            if (v.length > 1) v = v.slice(0, -1) + '-' + v.slice(-1);
+            // Permitir: números, K, k, punto, guión
+            let v = rutInput.value.replace(/[^0-9Kk\-\.]/g, '').toUpperCase();
+            // Limitar a 13 chars (12345678-9)
+            if (v.length > 13) v = v.slice(0, 13);
             rutInput.value = v;
         });
         rutInput.addEventListener('keypress', e => {
@@ -730,17 +772,16 @@
             noResult.style.display = 'none';
 
             const rutRaw = rutInput.value.trim();
-            if (!rutRaw) {
-                rutInput.focus();
-                return;
-            }
+            if (!rutRaw) { rutInput.focus(); return; }
 
-            // Normalizar RUT: sin puntos ni guión → base numérica
-            const rutBase = rutRaw.replace(/[\.\-]/g, '').trim().toUpperCase();
-            // Reconstruir formato con guión (ej: 13746146-3)
+            // Normalizar: quitar puntos y guiones, uppercase
+            const rutBase = rutRaw.replace(/[\.\.\-]/g, '').trim().toUpperCase();
+            // Con guion estándar: "12345678-9" o "12345678-K"
             const rutConDash = rutBase.length > 1
                 ? rutBase.slice(0, -1) + '-' + rutBase.slice(-1)
                 : rutBase;
+            // Solo la parte numérica (sin dígito verificador) para búsqueda tolerante
+            const rutSoloNumeros = rutBase.replace(/[^0-9]/g, '');
 
             btn.style.display = 'none';
             setProgress(30, '🔍 Consultando base de datos V2...');
@@ -748,68 +789,124 @@
             try {
                 const sb = await getSb();
 
+                // Construir filtro OR con variantes del RUT (sin generar decenas de variantes)
+                const variantes = new Set([rutBase, rutConDash]);
+                // Si el último char es dígito, probar también con K
+                if (/[0-9]$/.test(rutBase)) {
+                    variantes.add(rutBase.slice(0, -1) + 'K');
+                    variantes.add(rutBase.slice(0, -1) + '-K');
+                }
+                // Si ingresaron solo números sin guión, agregar con guión
+                if (!rutBase.includes('-') && rutBase.length >= 2) {
+                    variantes.add(rutBase.slice(0, -1) + '-' + rutBase.slice(-1));
+                }
+
+                const orFilter = [...variantes].map(r => `rut_huesped.eq.${r}`).join(',');
+
                 const { data, error } = await sb
                     .from('v2_asignaciones')
                     .select(`
-                id,
-                id_cama,
-                rut_huesped, 
-                nombre_huesped, 
-                fecha_checkin, 
-                fecha_checkout,
-                fecha_salida_programada,
-                huesped_confirmo,
-                 autorizado_checkin,
-                v2_camas (
-                  numero_cama,
-                  v2_habitaciones (
-                    numero_hab,
-                    nivel,
-                    v2_pabellones (nombre, v2_edificios (nombre))
-                  )
-                ),
-                v2_empresas (nombre, turno)
-              `)
-                    // Busca RUT con y sin guión para compatibilidad con ambos formatos en BD
-                    .or(`rut_huesped.eq.${rutBase},rut_huesped.eq.${rutConDash}`)
-                    .is('fecha_checkout', null)           // Solo activos (sin check-out)
+                        id, id_cama, rut_huesped, nombre_huesped,
+                        fecha_checkin, fecha_checkout, fecha_salida_programada,
+                        huesped_confirmo, autorizado_checkin, empresa_id,
+                        v2_empresas (nombre, turno)
+                    `)
+                    .or(orFilter)
+                    .is('fecha_checkout', null)
                     .order('fecha_checkin', { ascending: false })
                     .limit(1);
 
-                console.log("🔍 Buscando RUT (base):", rutBase, "/ con guión:", rutConDash);
-                console.log("📦 Respuesta Data:", data);
-                console.log("🚨 Respuesta Error:", error);
+                console.log('🔍 RUT:', rutBase, '/', rutConDash, '→ data:', data, 'error:', error);
 
-
-                if (error) {
-                    console.error("Error en DB:", error);
-                }
+                if (error) console.error('Error DB:', error);
 
                 if (!data || data.length === 0) {
+                    // ── Fallback: buscar en v2_solicitudes_b2b (pre-asignado sin check-in formal) ──
+                    setProgress(50, '🔍 Buscando pre-asignación...');
+                    const rutVariants = [rutBase, rutConDash];
+                    let solData = null;
+                    for (const rv of rutVariants) {
+                        const { data: sd } = await sb.from('v2_solicitudes_b2b')
+                            .select('nombre_trabajador, rut_trabajador, empresa, gerencia, fecha_llegada, fecha_salida, hab_solicitada, status, shift_type')
+                            .eq('rut_trabajador', rv)
+                            .not('hab_solicitada', 'is', null)
+                            .in('status', ['aceptada', 'parcial', 'pendiente'])
+                            .order('fecha_llegada', { ascending: false })
+                            .limit(1);
+                        if (sd?.length) { solData = sd[0]; break; }
+                    }
+
                     setProgress(0);
-                    noResult.innerHTML = `❌ No se encontró una habitación activa para el RUT <strong>${rutRaw}</strong>.<br>
-                    <span style="font-size:12px;color:#718096;font-weight:600;margin-top:4px;display:block">
-                        Si crees que esto es un error, por favor dirígete a recepción.
-                    </span>`;
-                    noResult.style.display = 'block';
-                    btn.style.display = 'flex';
-                    btn.disabled = false;
+                    if (solData) {
+                        // ✅ Pre-asignación desde solicitud — NO revelar habitación hasta autorización
+                        document.getElementById('t-name').textContent = (solData.nombre_trabajador || '—').split('(')[0].trim();
+                        document.getElementById('t-rut-header').textContent = solData.rut_trabajador || rutRaw;
+                        document.getElementById('t-company').textContent = solData.empresa || '—';
+                        document.getElementById('t-shift').textContent = solData.shift_type || '—';
+                        document.getElementById('t-arrival').textContent = solData.fecha_llegada ? toChileanDate(solData.fecha_llegada) : '—';
+                        document.getElementById('t-departure').textContent = solData.fecha_salida ? toChileanDate(solData.fecha_salida) : '—';
+                        document.getElementById('t-id').textContent = 'PRE-' + (solData.rut_trabajador || '').slice(-4);
+                        // 🔒 OCULTAR habitación — solo se revela tras confirmar en Recepción
+                        document.getElementById('t-building').textContent = 'Dirígete a Recepción';
+                        document.getElementById('t-room').textContent = '🔒';
+                        document.getElementById('t-floor-bed').textContent = 'Tu habitación se revelará al confirmar tu llegada';
+                        document.getElementById('t-floor').textContent = '—';
+                        document.getElementById('t-bed').textContent = '—';
+                        ['not-authorized-section','checkin-section','success-section','checkout-done-section']
+                            .forEach(id => document.getElementById(id).style.display = 'none');
+                        document.getElementById('not-authorized-section').style.display = 'block';
+                        document.getElementById('search-view').style.display = 'none';
+                        document.getElementById('ticket-view').style.display = 'block';
+                    } else {
+                        noResult.innerHTML = `❌ No se encontró habitación activa para el RUT <strong>${rutRaw}</strong>.<br>
+                        <span style="font-size:12px;color:#718096;font-weight:600;margin-top:4px;display:block">
+                            Si crees que esto es un error, por favor dirígete a recepción.
+                        </span>`;
+                        noResult.style.display = 'block';
+                        btn.style.display = 'flex';
+                        btn.disabled = false;
+                    }
                     return;
                 }
 
-                setProgress(80, '✅ Asignación encontrada, preparando pase...');
+                setProgress(60, '🏨 Cargando datos de habitación...');
                 const asignacion = data[0];
                 window._currentAsignacion = asignacion;
-
-                // ── Guardar datos para revelar después ─────────────────────
-                const cama = asignacion.v2_camas || {};
-                const hab = cama.v2_habitaciones || {};
-                const pab = hab.v2_pabellones || {};
-                const edif = pab.v2_edificios || {};
                 const emp = asignacion.v2_empresas || {};
 
-                // Siempre visibles: nombre, empresa, turno, fechas
-                document.getElementById('t-name').textContent = asignacion.nombre_huesped.split('(')[0].trim();
+                // ── PASO 2 y 3: Buscar habitación directamente por habitacion_id ──
+                // El id_cama tiene formato COPC000019-C1 → habitacion_id = COPC000019
+                // No dependemos de FK de Supabase; consultamos v2_habitaciones directo
+                let hab = {}, pab = {}, edif = {};
+                if (asignacion.id_cama) {
+                    // Extraer habitacion_id: todo menos el último segmento "-C1"
+                    const partes = asignacion.id_cama.split('-');
+                    // Si formato es "COPC000019-C1" → habitacion_id = "COPC000019"
+                    // Si solo hay un segmento, usar el id_cama completo
+                    const habitacionId = partes.length > 1
+                        ? partes.slice(0, -1).join('-')
+                        : asignacion.id_cama;
+
+                    const { data: habData } = await sb
+                        .from('v2_habitaciones')
+                        .select('id_custom, numero_hab, nivel, pabellon_id, v2_pabellones(nombre, v2_edificios(nombre))')
+                        .eq('id_custom', habitacionId)
+                        .maybeSingle();
+
+                    if (habData) {
+                        hab  = habData;
+                        pab  = habData.v2_pabellones || {};
+                        edif = pab.v2_edificios || {};
+                    }
+                }
+
+                // Número de cama: último segmento del id_cama (C1, C2, etc.)
+                const numCama = asignacion.id_cama
+                    ? asignacion.id_cama.split('-').pop()
+                    : '—';
+
+                // ── Datos siempre visibles ────────────────────────────────────
+                document.getElementById('t-name').textContent = (asignacion.nombre_huesped || '—').split('(')[0].trim();
                 document.getElementById('t-rut-header').textContent = asignacion.rut_huesped;
                 document.getElementById('t-company').textContent = emp.nombre || '—';
                 document.getElementById('t-shift').textContent = emp.turno || '—';
@@ -819,39 +916,49 @@
 
                 // Helper para revelar habitación al confirmar
                 window._revelarHabitacion = () => {
-                    document.getElementById('t-building').textContent = (edif.nombre || 'Edificio') + ' · ' + (pab.nombre || 'Pabellón');
-                    document.getElementById('t-room').textContent = hab.numero_hab || '—';
-                    document.getElementById('t-floor-bed').textContent = `Nivel ${hab.nivel || '—'} · Cama ${cama.numero_cama || '—'}`;
+                    document.getElementById('t-building').textContent =
+                        (edif.nombre || 'Edificio') + ' · ' + (pab.nombre || 'Pabellón');
+                    document.getElementById('t-room').textContent = hab.numero_hab || asignacion.id_cama || '—';
+                    document.getElementById('t-floor-bed').textContent =
+                        `Nivel ${hab.nivel || '—'} · Cama ${numCama}`;
                     document.getElementById('t-floor').textContent = `Nivel ${hab.nivel || '—'}`;
-                    document.getElementById('t-bed').textContent = `Cama ${cama.numero_cama || '—'}`;
-                    // Animación de revelación
+                    document.getElementById('t-bed').textContent = `Cama ${numCama}`;
+                    // Animación
                     const roomEl = document.getElementById('t-room');
                     roomEl.style.transition = 'transform 0.4s cubic-bezier(0.34,1.56,0.64,1), color 0.3s';
                     roomEl.style.transform = 'scale(1.15)';
                     setTimeout(() => { roomEl.style.transform = 'scale(1)'; }, 400);
                 };
 
-                // ── Estado y visibilidad de la habitación ────────────────────
-                document.getElementById('not-authorized-section').style.display = 'none';
-                document.getElementById('checkin-section').style.display = 'none';
-                document.getElementById('success-section').style.display = 'none';
-                document.getElementById('checkout-done-section').style.display = 'none';
+                // ── Estado y visibilidad ─────────────────────────────────────────────────────
+                ['not-authorized-section','checkin-section','success-section','checkout-done-section']
+                    .forEach(id => document.getElementById(id).style.display = 'none');
+
+                const esPreAsignado = asignacion.estado_asignacion === 'pre_asignado';
 
                 if (asignacion.huesped_confirmo) {
-                    // Ya confirmó: mostrar habitación completa
+                    // ✅ Check-in confirmado — mostrar todo
                     window._revelarHabitacion();
                     document.getElementById('success-section').style.display = 'block';
                     document.getElementById('t-time').textContent = 'Activo en base de datos';
                 } else if (asignacion.autorizado_checkin) {
-                    // Autorizado por recepción: puede confirmar llegada
+                    // 📱 Autorizado auto-check-in — confirmar desde el celular
                     document.getElementById('t-building').textContent = '✅ Autorizado — Confirma tu llegada';
                     document.getElementById('t-room').textContent = '🔒';
                     document.getElementById('t-floor-bed').textContent = 'Tu número se revelará al confirmar';
                     document.getElementById('t-floor').textContent = '—';
                     document.getElementById('t-bed').textContent = '—';
                     document.getElementById('checkin-section').style.display = 'block';
+                } else if (esPreAsignado) {
+                    // 🔒 Pre-asignado — NO revelar habitación hasta que el admin autorice el check-in
+                    document.getElementById('t-building').textContent = 'Dirígete a Recepción';
+                    document.getElementById('t-room').textContent = '🔒';
+                    document.getElementById('t-floor-bed').textContent = 'Tu habitación se revelará al confirmar tu llegada';
+                    document.getElementById('t-floor').textContent = '—';
+                    document.getElementById('t-bed').textContent = '—';
+                    document.getElementById('not-authorized-section').style.display = 'block';
                 } else {
-                    // No autorizado aún: debe pasar por recepción
+                    // 🚫 Sin autorizar — acercarse a administración
                     document.getElementById('t-building').textContent = 'Pasa primero por Recepción';
                     document.getElementById('t-room').textContent = '🔒';
                     document.getElementById('t-floor-bed').textContent = 'El personal te autorizará el ingreso';
@@ -860,12 +967,15 @@
                     document.getElementById('not-authorized-section').style.display = 'block';
                 }
 
-                // ── Mostrar vista ticket ──────────────────────────────────
                 setProgress(100, '✅ ¡Listo!');
                 await new Promise(r => setTimeout(r, 400));
                 setProgress(0);
                 document.getElementById('search-view').style.display = 'none';
                 document.getElementById('ticket-view').style.display = 'block';
+
+                // 📱 Generar QR con el RUT
+                generarQR(asignacion.rut_huesped || rutRaw);
+
 
             } catch (err) {
                 console.error('[mi-hab] Error:', err);
@@ -937,16 +1047,23 @@
                 const asignacion = window._currentAsignacion;
                 if (!asignacion || !asignacion.id) throw new Error('Sin datos de asignación activa');
 
-                const now = new Date();
-                // Restar horas para compensar zona horaria si fuera necesario, o simplemente usar YYYY-MM-DD
-                const fechaHoy = now.toISOString().split('T')[0];
+                const fechaHoy = new Date().toISOString().split('T')[0];
 
+                // 1. Registrar fecha_checkout en la asignación
                 const { error: err } = await sb
                     .from('v2_asignaciones')
                     .update({ fecha_checkout: fechaHoy })
                     .eq('id', asignacion.id);
 
                 if (err) throw err;
+
+                // ✅ 2. Liberar la cama en v2_camas → visible inmediatamente en el mapa admin
+                //    (huesped_confirmo NO existe en v2_camas — solo en v2_asignaciones)
+                if (asignacion.id_cama) {
+                    await sb.from('v2_camas')
+                        .update({ estado: 'Disponible' })
+                        .eq('id_cama', asignacion.id_cama);
+                }
 
                 document.getElementById('success-section').style.display = 'none';
                 document.getElementById('checkout-done-section').style.display = 'block';
@@ -969,6 +1086,36 @@
             document.getElementById('rut-input').value = '';
             document.getElementById('rut-input').focus();
         };
+
+        // ── Generar código QR (lazy-loaded) ─────────────────────────────────
+        async function generarQR(rut) {
+            const sec    = document.getElementById('qr-section');
+            const canvas = document.getElementById('qr-canvas');
+            if (!sec || !canvas) return;
+            try {
+                if (!window.QRCode) {
+                    await new Promise((res, rej) => {
+                        const s = document.createElement('script');
+                        s.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js';
+                        s.onload = res;
+                        s.onerror = rej;
+                        document.head.appendChild(s);
+                    });
+                }
+                canvas.innerHTML = '';
+                const url = `${location.origin}${location.pathname}?rut=${encodeURIComponent(rut)}`;
+                new QRCode(canvas, {
+                    text: url,
+                    width: 120, height: 120,
+                    colorDark: '#c0392b',
+                    colorLight: '#ffffff',
+                    correctLevel: QRCode.CorrectLevel.M
+                });
+                sec.style.display = 'block';
+            } catch(e) {
+                console.warn('[QR] No disponible:', e);
+            }
+        }
     </script>
 </body>
 

@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin — Parejas Aramark</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+  <style>
+    :root {
+      --aramark-red:   #C8102E;
+      --aramark-dark:  #1a1a1a;
+      --bg:            #f4f4f5;
+      --card:          #ffffff;
+      --border:        #e5e7eb;
+      --radius:        14px;
+    }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg);
+      min-height: 100vh;
+      color: var(--aramark-dark);
+    }
+
+    /* ── NAVBAR ── */
+    nav {
+      background: var(--aramark-dark);
+      padding: 0 32px;
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      height: 60px;
+      border-bottom: 3px solid var(--aramark-red);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    nav img { height: 32px; filter: brightness(10); }
+    nav h1 { font-size: 16px; font-weight: 800; color: #fff; }
+    nav span { font-size: 11px; color: #9ca3af; background: #374151; padding: 2px 8px; border-radius: 6px; }
+    nav .spacer { flex: 1; }
+    nav button {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      font-family: 'Inter', sans-serif;
+    }
+    .btn-excel  { background: #16a34a; color: #fff; }
+    .btn-reload { background: #374151; color: #fff; }
+    .btn-excel:hover  { background: #15803d; }
+    .btn-reload:hover { background: #4b5563; }
+
+    /* ── MAIN ── */
+    main { padding: 28px 32px; max-width: 1200px; margin: 0 auto; }
+
+    /* ── STATS ── */
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .stat-card {
+      background: var(--card);
+      border-radius: var(--radius);
+      padding: 18px 20px;
+      box-shadow: 0 1px 4px rgba(0,0,0,.08);
+      border: 1px solid var(--border);
+    }
+    .stat-card .val {
+      font-size: 32px;
+      font-weight: 900;
+      color: var(--aramark-red);
+    }
+    .stat-card .lbl {
+      font-size: 11px;
+      font-weight: 600;
+      color: #6b7280;
+      text-transform: uppercase;
+      letter-spacing: .5px;
+      margin-top: 4px;
+    }
+
+    /* ── FILTERS ── */
+    .filters {
+      background: var(--card);
+      border-radius: var(--radius);
+      padding: 16px 20px;
+      margin-bottom: 20px;
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      align-items: center;
+      border: 1px solid var(--border);
+    }
+    .filters input, .filters select {
+      padding: 8px 12px;
+      border: 1.5px solid var(--border);
+      border-radius: 8px;
+      font-size: 13px;
+      font-family: 'Inter', sans-serif;
+      outline: none;
+      color: var(--aramark-dark);
+    }
+    .filters input:focus, .filters select:focus { border-color: var(--aramark-red); }
+    .filters label { font-size: 12px; font-weight: 700; color: #6b7280; }
+
+    /* ── TABLE ── */
+    .table-wrap {
+      background: var(--card);
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      overflow: hidden;
+      box-shadow: 0 1px 4px rgba(0,0,0,.06);
+    }
+    table { width: 100%; border-collapse: collapse; }
+    thead { background: #f9fafb; border-bottom: 2px solid var(--border); }
+    thead th {
+      padding: 12px 14px;
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: .5px;
+      color: #6b7280;
+      text-align: left;
+    }
+    tbody tr { border-bottom: 1px solid var(--border); transition: background .15s; }
+    tbody tr:last-child { border-bottom: none; }
+    tbody tr:hover { background: #fafafa; }
+    tbody tr.grouped { background: #f0fdf4; }
+    tbody tr.grouped:hover { background: #dcfce7; }
+    td {
+      padding: 12px 14px;
+      font-size: 13px;
+      vertical-align: middle;
+    }
+    td .name { font-weight: 700; color: var(--aramark-dark); }
+    td .rut  { font-family: monospace; font-size: 12px; color: #6b7280; }
+    td .area { font-size: 11px; color: #9ca3af; margin-top: 2px; }
+
+    /* ── TURNO BADGE ── */
+    .badge-A { background: #fef3c7; color: #92400e; border-radius: 6px; padding: 2px 8px; font-size: 11px; font-weight: 800; }
+    .badge-B { background: #ede9fe; color: #5b21b6; border-radius: 6px; padding: 2px 8px; font-size: 11px; font-weight: 800; }
+
+    /* ── CHECKBOX AGRUPADO ── */
+    .check-agrup {
+      width: 20px; height: 20px;
+      accent-color: var(--aramark-red);
+      cursor: pointer;
+    }
+
+    /* ── FLECHA ── */
+    .arrow { color: var(--aramark-red); font-size: 18px; font-weight: 900; }
+
+    /* ── LOADING/EMPTY ── */
+    .loading { text-align:center; padding: 48px; color: #9ca3af; font-size: 14px; }
+
+    /* ── RESPONSIVE ── */
+    @media (max-width: 768px) {
+      main { padding: 16px; }
+      nav { padding: 0 16px; }
+      nav h1 { display: none; }
+      thead th:nth-child(4), thead th:nth-child(5), td:nth-child(4), td:nth-child(5) { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- NAVBAR -->
+<nav>
+  <img src="aramark.png" alt="Aramark">
+  <h1>Panel Admin — Parejas</h1>
+  <span>SOLO EQUIPO ADM</span>
+  <div class="spacer"></div>
+  <button class="btn-reload" onclick="cargarParejas()">🔄 Recargar</button>
+  <button class="btn-excel"  onclick="exportarExcel()">📥 Exportar Excel</button>
+</nav>
+
+<main>
+
+  <!-- STATS -->
+  <div class="stats">
+    <div class="stat-card">
+      <div class="val" id="stat-total">—</div>
+      <div class="lbl">Total solicitudes</div>
+    </div>
+    <div class="stat-card">
+      <div class="val" id="stat-turnoA">—</div>
+      <div class="lbl">Turno A</div>
+    </div>
+    <div class="stat-card">
+      <div class="val" id="stat-turnoB">—</div>
+      <div class="lbl">Turno B</div>
+    </div>
+    <div class="stat-card">
+      <div class="val" id="stat-agrupados">—</div>
+      <div class="lbl">Ya agrupados ✅</div>
+    </div>
+    <div class="stat-card">
+      <div class="val" id="stat-pendientes">—</div>
+      <div class="lbl">Pendientes</div>
+    </div>
+  </div>
+
+  <!-- FILTROS -->
+  <div class="filters">
+    <label>Turno:</label>
+    <select id="f-turno" onchange="renderTabla()">
+      <option value="">Todos</option>
+      <option value="A">Turno A</option>
+      <option value="B">Turno B</option>
+    </select>
+    <label>Estado:</label>
+    <select id="f-estado" onchange="renderTabla()">
+      <option value="">Todos</option>
+      <option value="0">Pendientes</option>
+      <option value="1">Agrupados</option>
+    </select>
+    <input type="text" id="f-buscar" placeholder="🔍 Buscar nombre o RUT…" oninput="renderTabla()" style="min-width:200px">
+  </div>
+
+  <!-- TABLA -->
+  <div class="table-wrap">
+    <div class="loading" id="tbl-loading">Cargando solicitudes…</div>
+    <table id="tbl" style="display:none">
+      <thead>
+        <tr>
+          <th>Turno</th>
+          <th>Persona 1 (Solicitante)</th>
+          <th style="width:36px"></th>
+          <th>Persona 2 (Compañero deseado)</th>
+          <th>Fechas Turno</th>
+          <th>✅ Agrupado</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="tbl-body"></tbody>
+    </table>
+  </div>
+
+</main>
+
+<script>
+  const { createClient } = supabase;
+  const sb = createClient(
+    'https://pnkajjduvadcxealodcp.supabase.co',
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBua2FqamR1dmFkY3hlYWxvZGNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUyNDQ1MzIsImV4cCI6MjA5MDgyMDUzMn0.NsL16NP16MVEwTSN-1ggAtwzTA-2tDPF7Ndbcsdl-Ro'
+  );
+
+  let _data = [];
+
+  // ── CARGA ──────────────────────────────────────────────────────────────────
+  async function cargarParejas() {
+    document.getElementById('tbl-loading').style.display = 'block';
+    document.getElementById('tbl').style.display = 'none';
+
+    const { data, error } = await sb
+      .from('v2_parejas_aramark')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      document.getElementById('tbl-loading').textContent = '❌ Error: ' + error.message;
+      return;
+    }
+    _data = data || [];
+    actualizarStats();
+    renderTabla();
+  }
+
+  // ── STATS ──────────────────────────────────────────────────────────────────
+  function actualizarStats() {
+    const total     = _data.length;
+    const turnoA    = _data.filter(r => r.turno === 'A').length;
+    const turnoB    = _data.filter(r => r.turno === 'B').length;
+    const agrupados = _data.filter(r => r.agrupados).length;
+    const pending   = total - agrupados;
+
+    document.getElementById('stat-total').textContent     = total;
+    document.getElementById('stat-turnoA').textContent    = turnoA;
+    document.getElementById('stat-turnoB').textContent    = turnoB;
+    document.getElementById('stat-agrupados').textContent = agrupados;
+    document.getElementById('stat-pendientes').textContent= pending;
+  }
+
+  // ── RENDER TABLA ──────────────────────────────────────────────────────────
+  function renderTabla() {
+    const fTurno  = document.getElementById('f-turno').value;
+    const fEstado = document.getElementById('f-estado').value;
+    const fBuscar = document.getElementById('f-buscar').value.toLowerCase();
+
+    const filtrado = _data.filter(r => {
+      if (fTurno  && r.turno !== fTurno) return false;
+      if (fEstado === '0' && r.agrupados)  return false;
+      if (fEstado === '1' && !r.agrupados) return false;
+      if (fBuscar) {
+        const txt = [r.nombre_persona1, r.rut_persona1, r.nombre_persona2, r.rut_persona2, r.area_persona1, r.area_persona2].join(' ').toLowerCase();
+        if (!txt.includes(fBuscar)) return false;
+      }
+      return true;
+    });
+
+    const tbody = document.getElementById('tbl-body');
+    if (!filtrado.length) {
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:#9ca3af;padding:32px">Sin resultados para los filtros seleccionados</td></tr>`;
+    } else {
+      tbody.innerHTML = filtrado.map(r => `
+        <tr class="${r.agrupados ? 'grouped' : ''}" id="row-${r.id}">
+          <td>
+            <span class="badge-${r.turno}">Turno ${r.turno}</span>
+          </td>
+          <td>
+            <div class="name">${r.nombre_persona1 || '—'}</div>
+            <div class="rut">${r.rut_persona1 || '—'}</div>
+            <div class="area">${r.area_persona1 || '—'}</div>
+          </td>
+          <td class="arrow">→</td>
+          <td>
+            <div class="name">${r.nombre_persona2 || '—'}</div>
+            <div class="rut">${r.rut_persona2 || '—'}</div>
+            <div class="area">${r.area_persona2 || '—'}</div>
+          </td>
+          <td style="font-size:12px;color:#6b7280">
+            ${r.fecha_desde ? `<div>📅 <strong>${dd(r.fecha_desde)}</strong> al <strong>${dd(r.fecha_hasta||'')}</strong></div>` : '<span style="color:#d1d5db">—</span>'}
+            <div style="font-size:11px;color:#9ca3af;margin-top:2px">${fmtFecha(r.created_at)}</div>
+          </td>
+          <td style="text-align:center">
+            <input type="checkbox"
+              class="check-agrup"
+              ${r.agrupados ? 'checked' : ''}
+              onchange="toggleAgrupado('${r.id}', this.checked)"
+              title="Marcar como agrupados">
+          </td>
+          <td style="text-align:center">
+            <button onclick="eliminarFila('${r.id}', this)"
+              style="background:none;border:none;cursor:pointer;font-size:16px;opacity:.5;transition:opacity .15s"
+              onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.5"
+              title="Eliminar registro">🗑️</button>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    document.getElementById('tbl-loading').style.display = 'none';
+    document.getElementById('tbl').style.display = 'table';
+  }
+
+  // ── TOGGLE AGRUPADO ───────────────────────────────────────────────────────
+  async function toggleAgrupado(id, value) {
+    const { error } = await sb
+      .from('v2_parejas_aramark')
+      .update({ agrupados: value })
+      .eq('id', id);
+
+    if (error) {
+      alert('❌ Error al actualizar: ' + error.message);
+      return;
+    }
+    // Actualizar en caché local
+    const item = _data.find(r => r.id === id);
+    if (item) item.agrupados = value;
+    actualizarStats();
+
+    // Cambiar clase de fila visualmente sin re-render
+    const row = document.getElementById('row-' + id);
+    if (row) row.className = value ? 'grouped' : '';
+  }
+
+  // ── EXPORTAR EXCEL ────────────────────────────────────────────────────────
+  function exportarExcel() {
+    const fTurno  = document.getElementById('f-turno').value;
+    const fEstado = document.getElementById('f-estado').value;
+    const fBuscar = document.getElementById('f-buscar').value.toLowerCase();
+
+    let rows = _data.filter(r => {
+      if (fTurno  && r.turno !== fTurno) return false;
+      if (fEstado === '0' && r.agrupados)  return false;
+      if (fEstado === '1' && !r.agrupados) return false;
+      if (fBuscar) {
+        const txt = [r.nombre_persona1, r.rut_persona1, r.nombre_persona2, r.rut_persona2].join(' ').toLowerCase();
+        if (!txt.includes(fBuscar)) return false;
+      }
+      return true;
+    });
+
+    if (!rows.length) { alert('No hay filas para exportar con los filtros actuales.'); return; }
+
+    const wsData = [
+      ['Turno', 'Nombre Persona 1', 'RUT Persona 1', 'Área Persona 1', 'Fecha Desde', 'Fecha Hasta', 'Nombre Persona 2', 'RUT Persona 2', 'Área Persona 2', 'Agrupados', 'Fecha Solicitud'],
+      ...rows.map(r => [
+        'Turno ' + r.turno,
+        r.nombre_persona1 || '',
+        r.rut_persona1    || '',
+        r.area_persona1   || '',
+        r.fecha_desde     || '',
+        r.fecha_hasta     || '',
+        r.nombre_persona2 || '',
+        r.rut_persona2    || '',
+        r.area_persona2   || '',
+        r.agrupados ? 'SÍ' : 'NO',
+        fmtFecha(r.created_at),
+      ])
+    ];
+
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet(wsData);
+
+    // Estilo de cabecera (ancho columnas)
+    ws['!cols'] = [
+      {wch:10},{wch:28},{wch:16},{wch:20},{wch:13},{wch:13},{wch:28},{wch:16},{wch:20},{wch:12},{wch:18}
+    ];
+
+    XLSX.utils.book_append_sheet(wb, ws, 'Parejas Aramark');
+    const fname = `Parejas_Aramark_Turno${fTurno||'AB'}_${new Date().toISOString().split('T')[0]}.xlsx`;
+    XLSX.writeFile(wb, fname);
+  }
+
+  // ── ELIMINAR FILA ─────────────────────────────────────────────────────────
+  async function eliminarFila(id, btn) {
+    if (!confirm('¿Eliminar este registro? Esta acción no se puede deshacer.')) return;
+    btn.textContent = '⏳';
+    const { error } = await sb.from('v2_parejas_aramark').delete().eq('id', id);
+    if (error) { alert('❌ ' + error.message); btn.textContent = '🗑️'; return; }
+    // Quitar de caché local y del DOM
+    _data = _data.filter(r => r.id !== id);
+    document.getElementById('row-' + id)?.remove();
+    actualizarStats();
+  }
+
+  // ── HELPERS ───────────────────────────────────────────────────────────────
+  function fmtFecha(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    return d.toLocaleDateString('es-CL', { day:'2-digit', month:'2-digit', year:'numeric' })
+      + ' ' + d.toLocaleTimeString('es-CL', { hour:'2-digit', minute:'2-digit' });
+  }
+
+  function dd(iso) {
+    if (!iso) return '—';
+    return iso.substring(8,10) + '/' + iso.substring(5,7) + '/' + iso.substring(0,4);
+  }
+
+  // ── INIT ──────────────────────────────────────────────────────────────────
+  cargarParejas();
+</script>
+</body>
+</html>

@@ -11,14 +11,44 @@ import { getAll, put, remove } from '../db.js';
 import { showToast, recordLog } from '../utils.js';
 import { supabase } from '../supabaseClient.js';
 
+// Colores por tipo de acción
+const ACCION_COLORS = {
+    LOGIN:            { bg: '#dcfce7', color: '#166534', label: '🔑 LOGIN' },
+    ASIGNACION_MASIVA:{ bg: '#dbeafe', color: '#1e40af', label: '🏠 ASIGNACIÓN' },
+    CHECKOUT_GRUPAL:  { bg: '#fef3c7', color: '#92400e', label: '🚪 CHECKOUT' },
+    BORRAR_EMPRESA:   { bg: '#fee2e2', color: '#b91c1c', label: '🗑️ BORRAR' },
+    CREAR_USUARIO:    { bg: '#f3e8ff', color: '#7c3aed', label: '👤 CREAR USER' },
+    ELIMINAR_USUARIO: { bg: '#fee2e2', color: '#b91c1c', label: '❌ ELIM. USER' },
+};
+function badgeAccion(accion) {
+    const c = ACCION_COLORS[accion] || { bg: '#f1f5f9', color: '#475569', label: accion };
+    return `<span style="background:${c.bg};color:${c.color};padding:2px 8px;border-radius:99px;font-size:11px;font-weight:800;white-space:nowrap">${c.label}</span>`;
+}
+
 export async function renderUsuarios(container) {
-    const [users, logs] = await Promise.all([
+    const [users, auditRes] = await Promise.all([
         getAll('users'),
-        getAll('logs')
+        supabase.from('v2_audit_log')
+            .select('id,created_at,usuario,accion,detalle,metadata')
+            .order('created_at', { ascending: false })
+            .limit(100)
     ]);
 
-    // Format logs: most recent first
-    const sortedLogs = logs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, 50);
+    const auditLogs = auditRes.data || [];
+
+    // También leer logs legacy de IndexedDB (login antiguo)
+    const localLogs = await getAll('logs').catch(() => []);
+    // Fusionar y ordenar
+    const legacyMapped = localLogs.map(l => ({
+        created_at: l.timestamp,
+        usuario: l.username,
+        accion: l.action,
+        detalle: l.details,
+        metadata: null,
+    }));
+    const allLogs = [...auditLogs, ...legacyMapped]
+        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+        .slice(0, 100);
 
     container.innerHTML = `
         <div class="section-header">
@@ -65,27 +95,63 @@ export async function renderUsuarios(container) {
             </div>
 
             <!-- Audit Logs -->
-            <div class="card" style="padding:20px">
-                <h3 style="font-size:16px; font-weight:800; margin-bottom:16px">Historial de Acciones (Últimos 50)</h3>
+                <div class="card" style="padding:20px">
+                <h3 style="font-size:16px; font-weight:800; margin-bottom:4px">Historial de Acciones</h3>
+                <p style="font-size:11px;color:var(--text-muted);margin-bottom:14px">Últimos 100 eventos · Todos los dispositivos · Tiempo real</p>
                 <div class="table-container" style="max-height:600px; overflow-y:auto">
-                    <table class="table" style="font-size:12px">
+                    <table class="table" style="font-size:12px;width:100%">
                         <thead>
                             <tr>
-                                <th>Fecha/Hora</th>
+                                <th style="white-space:nowrap">Fecha/Hora (local)</th>
                                 <th>Usuario</th>
                                 <th>Acción</th>
-                                <th>Detalle</th>
+                                <th>Descripción</th>
+                                <th>Detalle exacto</th>
                             </tr>
                         </thead>
                         <tbody>
-                            ${sortedLogs.map(l => `
-                                <tr>
-                                    <td style="white-space:nowrap; color:var(--text-muted)">${l.timestamp.slice(0, 16).replace('T', ' ')}</td>
-                                    <td><strong>${l.username}</strong></td>
-                                    <td><span class="status-badge ${l.action.toLowerCase() === 'login' ? 'assigned' : 'pending'}">${l.action}</span></td>
-                                    <td>${l.details}</td>
-                                </tr>
-                            `).join('')}
+                            ${allLogs.length === 0
+                                ? `<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:20px">Sin registros aún — los eventos aparecerán aquí en tiempo real</td></tr>`
+                                : allLogs.map(l => {
+                                    // Convertir UTC a hora local legible
+                                    const fechaLocal = l.created_at
+                                        ? new Date(l.created_at).toLocaleString('es-CL', {
+                                            day:'2-digit', month:'2-digit', year:'numeric',
+                                            hour:'2-digit', minute:'2-digit', second:'2-digit'
+                                          })
+                                        : '—';
+
+                                    // Construir detalle fino del metadata
+                                    let metaHtml = '—';
+                                    const m = l.metadata;
+                                    if (m && typeof m === 'object') {
+                                        const items = [];
+                                        if (m.empresa)               items.push(`🏢 <strong>${m.empresa}</strong>`);
+                                        if (m.rut)                   items.push(`👤 RUT: <strong>${m.rut}</strong>`);
+                                        if (m.cama_liberada)         items.push(`🛏️ Cama: <strong>${m.cama_liberada}</strong>`);
+                                        if (m.total != null)         items.push(`📋 Registros: <strong>${m.total}</strong>`);
+                                        if (m.asignaciones_borradas != null) items.push(`🗑️ Asignaciones eliminadas: <strong>${m.asignaciones_borradas}</strong>`);
+                                        if (m.camas_liberadas != null)       items.push(`🛏️ Camas liberadas: <strong>${m.camas_liberadas}</strong>`);
+                                        if (m.camas_liberadas != null && m.empresa) items.push(`🏢 Empresa: <strong>${m.empresa}</strong>`);
+                                        if (m.total != null && m.empresa)           items.push(`📋 Total solicitudes: <strong>${m.total}</strong>`);
+                                        if (m.email)                 items.push(`📧 Email: <strong>${m.email}</strong>`);
+                                        if (m.role)                  items.push(`🎭 Rol: <strong>${m.role}</strong>`);
+                                        if (m.contrato)              items.push(`📄 Contrato: <strong>${m.contrato}</strong>`);
+                                        if (items.length) metaHtml = items.join(' &nbsp;·&nbsp; ');
+                                    }
+
+                                    // Fondo rojo para acciones destructivas
+                                    const esDestructiva = ['BORRAR_EMPRESA_COMPLETA','BORRAR_ASIGNACION','BORRAR_LISTA_EMPRESA'].includes(l.accion);
+                                    const rowBg = esDestructiva ? 'background:#fff5f5' : '';
+
+                                    return `<tr style="${rowBg}">
+                                        <td style="white-space:nowrap;color:var(--text-muted);font-family:monospace;font-size:11px">${fechaLocal}</td>
+                                        <td><strong style="color:${esDestructiva?'#b91c1c':'inherit'}">${l.usuario||'—'}</strong></td>
+                                        <td>${badgeAccion(l.accion)}</td>
+                                        <td style="font-size:11px;color:#475569">${l.detalle||'—'}</td>
+                                        <td style="font-size:11px">${metaHtml}</td>
+                                    </tr>`;
+                                }).join('')}
                         </tbody>
                     </table>
                 </div>

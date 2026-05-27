@@ -696,6 +696,11 @@
             <span class="sug-icon">📩</span>
             Todas las solicitudes B2B
         </button>
+        <button class="suggestion-btn" onclick="enviarPregunta('¿Quién llega esta semana?')" style="border-color:#bbf7d0;background:#f0fdf4;">
+            <span class="sug-icon">🛬</span>
+            <span style="color:#166534;font-weight:700;">Llegadas próximas</span>
+            <span style="font-size:11px;color:#14532d;display:block;margin-top:2px;">Quién llega en los próximos 7 días</span>
+        </button>
 
         <div class="panel-label" style="margin-top:8px;">Eficiencia</div>
 
@@ -718,6 +723,18 @@
             <span style="font-size:11px;color:#6d28d9;display:block;margin-top:2px;">Disponibles por turno</span>
         </button>
 
+        <div class="panel-label" style="margin-top:8px;">Control de Asistencia</div>
+        <button class="suggestion-btn" onclick="enviarPregunta('¿Quién no ha confirmado llegada?')" style="border-color:#fde68a;background:#fffbeb;">
+            <span class="sug-icon">⚠️</span>
+            <span style="color:#b45309;font-weight:700;">Sin confirmar check-in</span>
+            <span style="font-size:11px;color:#92400e;display:block;margin-top:2px;">Trabajadores pendientes de confirmar</span>
+        </button>
+        <button class="suggestion-btn" onclick="enviarPregunta('¿Quién sale esta semana?')" style="border-color:#fecaca;background:#fff5f5;">
+            <span class="sug-icon">📅</span>
+            <span style="color:#c0392b;font-weight:700;">Salidas próximas</span>
+            <span style="font-size:11px;color:#b91c1c;display:block;margin-top:2px;">Próximos a salir del campamento</span>
+        </button>
+
         <div class="panel-label" style="margin-top:8px;">Habitación específica</div>
         <button class="suggestion-btn" onclick="
             const n = prompt('¿Número de habitación?');
@@ -726,6 +743,11 @@
             <span class="sug-icon">🏠</span>
             <span style="color:#16a34a;font-weight:700;">Buscar habitación</span>
             <span style="font-size:11px;color:#166534;display:block;margin-top:2px;">Ver quién está en una hab.</span>
+        </button>
+        <button class="suggestion-btn" onclick="enviarPregunta('guarda esta consulta')" style="border-color:#fde68a;background:#fffdf0;margin-top:4px;">
+            <span class="sug-icon">⭐</span>
+            <span style="color:#d97706;font-weight:700;">Guardar última consulta</span>
+            <span style="font-size:11px;color:#92400e;display:block;margin-top:2px;">Crear acceso rápido en favoritos</span>
         </button>
     </aside>
 
@@ -907,43 +929,127 @@
         }
     })();
 
-    // ── Sistema de aprendizaje — preguntas frecuentes ─────────────────────
-    const LEARN_KEY = 'constanza_freq_v1';
+    // ── Sistema de aprendizaje + Favoritos ─────────────────────────────────────
+    const LEARN_KEY = 'constanza_freq_v2';
+    const FAV_KEY   = 'constanza_favoritos_v1';
+    let _ultimaPregunta = '';  // Guarda la última pregunta para poder favorearla
+
+    // ── Helpers de localStorage ──
+    function getFreq()  { try { return JSON.parse(localStorage.getItem(LEARN_KEY) || '{}'); } catch(e) { return {}; } }
+    function getFavs()  { try { return JSON.parse(localStorage.getItem(FAV_KEY)   || '[]'); } catch(e) { return []; } }
+    function saveFreq(d) { try { localStorage.setItem(LEARN_KEY, JSON.stringify(d)); } catch(e) {} }
+    function saveFavs(a) { try { localStorage.setItem(FAV_KEY,   JSON.stringify(a)); } catch(e) {} }
+
+    // ── Aprender pregunta (incrementa contador, auto-favorito en 3+ usos) ──
     function aprenderPregunta(pregunta) {
-        try {
-            const data = JSON.parse(localStorage.getItem(LEARN_KEY) || '{}');
-            const key = pregunta.trim().toLowerCase();
-            data[key] = (data[key] || 0) + 1;
-            localStorage.setItem(LEARN_KEY, JSON.stringify(data));
-            actualizarSugerenciasFrecuentes();
-        } catch(e) {}
-    }
-    function actualizarSugerenciasFrecuentes() {
-        try {
-            const data = JSON.parse(localStorage.getItem(LEARN_KEY) || '{}');
-            const top5 = Object.entries(data)
-                .sort((a,b) => b[1]-a[1])
-                .slice(0,5)
-                .map(([q]) => q);
-            if (!top5.length) return;
-            let panel = document.getElementById('freq-panel');
-            if (!panel) {
-                panel = document.createElement('div');
-                panel.id = 'freq-panel';
-                const aside = document.querySelector('.suggestions-panel');
-                if (aside) aside.insertBefore(panel, aside.firstChild);
+        _ultimaPregunta = pregunta;
+        const data = getFreq();
+        const key  = pregunta.trim().toLowerCase();
+        data[key] = (data[key] || 0) + 1;
+        saveFreq(data);
+        // Auto-favorito a partir de 3 usos (si no está ya guardado)
+        if (data[key] === 3) {
+            const favs = getFavs();
+            if (!favs.some(f => f.q.toLowerCase() === key)) {
+                favs.unshift({ q: pregunta, auto: true, ts: Date.now() });
+                saveFavs(favs);
+                showToast(`⭐ Constanza aprendió: "${pregunta.slice(0,35)}..." guardada como favorita`);
             }
-            panel.innerHTML = `
-                <div class="panel-label" style="color:#7c3aed">🧠 Preguntas frecuentes</div>
-                ${top5.map(q => `
-                <button class="suggestion-btn" onclick="enviarPregunta('${q.replace(/'/g,"\\'")}')">
-                    <span class="sug-icon">⭐</span>${q.charAt(0).toUpperCase()+q.slice(1)}
-                </button>`).join('')}
-                <div style="font-size:10px;color:#94a3b8;padding:4px 4px 8px;border-bottom:1px solid #f1f5f9">Basado en tu historial de uso</div>
-            `;
-        } catch(e) {}
+        }
+        actualizarSidebar();
     }
-    actualizarSugerenciasFrecuentes(); // Mostrar al cargar
+
+    // ── Guardar favorito manualmente (llamado desde el botón en el chat) ──
+    window._constanzaGuardarFav = function() {
+        const q = _ultimaPregunta;
+        if (!q) return;
+        const favs = getFavs();
+        const key  = q.trim().toLowerCase();
+        if (favs.some(f => f.q.toLowerCase() === key)) {
+            showToast('⭐ Ya está guardada como favorita');
+            return;
+        }
+        favs.unshift({ q, auto: false, ts: Date.now() });
+        saveFavs(favs);
+        actualizarSidebar();
+        showToast(`✅ "${q.slice(0,35)}" guardada — ya aparece en la barra lateral`);
+    };
+
+    // ── Borrar favorito ──
+    window._constanzaBorrarFav = function(ts) {
+        const favs = getFavs().filter(f => f.ts !== ts);
+        saveFavs(favs);
+        actualizarSidebar();
+    };
+
+    // ── Renderizar sidebar dinámico ──
+    function actualizarSidebar() {
+        const favs  = getFavs();
+        const freq  = getFreq();
+        const aside = document.querySelector('.suggestions-panel');
+        if (!aside) return;
+
+        // ── Panel "Creados por ti" (favoritos manuales + auto) ──
+        let panelFavs = document.getElementById('fav-panel');
+        if (!panelFavs) {
+            panelFavs = document.createElement('div');
+            panelFavs.id = 'fav-panel';
+            aside.insertBefore(panelFavs, aside.firstChild);
+        }
+        if (favs.length > 0) {
+            panelFavs.innerHTML = `
+                <div class="panel-label" style="color:#f59e0b;display:flex;align-items:center;justify-content:space-between">
+                    <span>⭐ Creados por ti</span>
+                    <span style="font-size:9px;color:#94a3b8;font-weight:500">click ✕ para borrar</span>
+                </div>
+                ${favs.map(f => `
+                <div style="display:flex;align-items:stretch;gap:4px;margin-bottom:4px">
+                    <button class="suggestion-btn" onclick="enviarPregunta('${f.q.replace(/'/g,"\\'")}')"
+                        style="flex:1;margin-bottom:0;border-color:#fde68a;background:#fffbeb"
+                        title="${f.auto ? 'Auto-aprendida (3+ usos)' : 'Guardada manualmente'}">
+                        <span class="sug-icon">${f.auto ? '🔁' : '⭐'}</span>
+                        ${f.q.charAt(0).toUpperCase() + f.q.slice(1,60)}${f.q.length > 60 ? '…' : ''}
+                    </button>
+                    <button onclick="window._constanzaBorrarFav(${f.ts})"
+                        style="background:#fee2e2;border:1px solid #fecaca;border-radius:8px;
+                               color:#c0392b;font-weight:900;font-size:12px;cursor:pointer;
+                               padding:0 8px;flex-shrink:0" title="Eliminar favorito">✕</button>
+                </div>`).join('')}
+                <div style="font-size:10px;color:#94a3b8;padding:2px 4px 8px;border-bottom:1px solid #f1f5f9">
+                    Se guardan en tu navegador · automático tras 3 usos
+                </div>`;
+        } else {
+            panelFavs.innerHTML = '';
+        }
+
+        // ── Panel "Más usadas" (frecuentes que no son ya favoritos) ──
+        let panelFreq = document.getElementById('freq-panel');
+        if (!panelFreq) {
+            panelFreq = document.createElement('div');
+            panelFreq.id = 'freq-panel';
+            // Insertar después del panel de favoritos
+            panelFavs.insertAdjacentElement('afterend', panelFreq);
+        }
+        const favKeys = new Set(favs.map(f => f.q.toLowerCase()));
+        const top4 = Object.entries(freq)
+            .filter(([k]) => !favKeys.has(k))
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 4)
+            .map(([q]) => q);
+        if (top4.length > 0) {
+            panelFreq.innerHTML = `
+                <div class="panel-label" style="color:#7c3aed">🧠 Más usadas</div>
+                ${top4.map(q => `
+                <button class="suggestion-btn" onclick="enviarPregunta('${q.replace(/'/g,"\\'")}')"
+                    style="border-color:#e9d5ff;background:#faf5ff">
+                    <span class="sug-icon" style="color:#7c3aed">⭐</span>${q.charAt(0).toUpperCase()+q.slice(1)}
+                </button>`).join('')}
+                <div style="font-size:10px;color:#94a3b8;padding:2px 4px 8px;border-bottom:1px solid #f1f5f9">Basado en tu historial de uso</div>`;
+        } else {
+            panelFreq.innerHTML = '';
+        }
+    }
+    actualizarSidebar(); // Mostrar al cargar
 
     // ── Auto-resize textarea ─────────────────────────────
     inputEl.addEventListener('input', () => {

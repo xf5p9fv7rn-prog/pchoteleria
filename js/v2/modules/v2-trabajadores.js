@@ -182,10 +182,10 @@ export async function renderV2Trabajadores(container) {
         if (!q) { el.innerHTML = ''; return; }
         el.innerHTML = `<p style="color:var(--text-muted)">Buscando…</p>`;
         const { data, error } = await supabase
-            .from('v2_asignaciones')
-            .select('rut_huesped,nombre_huesped')
-            .or(`rut_huesped.ilike.%${q}%,nombre_huesped.ilike.%${q}%`)
-            .order('nombre_huesped')
+            .from('v2_huespedes')
+            .select('rut,nombre,sexo')
+            .or(`rut.ilike.%${q}%,nombre.ilike.%${q}%`)
+            .order('nombre')
             .limit(30);
         if (error || !data?.length) {
             el.innerHTML = `<p style="color:var(--text-muted)">Sin resultados para "${q}"</p>`; return;
@@ -196,10 +196,12 @@ export async function renderV2Trabajadores(container) {
               <thead><tr style="background:var(--bg-card);border-bottom:1px solid var(--border)">
                 <th style="padding:10px 14px;text-align:left;font-size:11px;font-weight:700;color:var(--text-muted)">RUT</th>
                 <th style="padding:10px 14px;text-align:left;font-size:11px;font-weight:700;color:var(--text-muted)">NOMBRE</th>
+                <th style="padding:10px 14px;text-align:left;font-size:11px;font-weight:700;color:var(--text-muted)">SEXO</th>
               </tr></thead>
               <tbody>${data.map((t,i)=>`<tr style="border-bottom:1px solid var(--border);background:${i%2===0?'transparent':'var(--bg-card)'}">
-                <td style="padding:10px 14px;font-family:monospace;font-size:13px;color:var(--text-primary)">${t.rut_huesped}</td>
-                <td style="padding:10px 14px;font-size:13px;font-weight:600;color:var(--text-primary)">${t.nombre_huesped}</td>
+                <td style="padding:10px 14px;font-family:monospace;font-size:13px;color:var(--text-primary)">${t.rut}</td>
+                <td style="padding:10px 14px;font-size:13px;font-weight:600;color:var(--text-primary)">${t.nombre}</td>
+                <td style="padding:10px 14px;font-size:13px;color:var(--text-secondary)">${t.sexo||'—'}</td>
               </tr>`).join('')}</tbody>
             </table>
           </div>`;

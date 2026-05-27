@@ -11,13 +11,16 @@ import { renderV2Dashboard } from './v2/modules/v2-dashboard.js';
 import { renderV2Buscador } from './v2/modules/v2-buscador.js';
 import { renderV2Checkin } from './v2/modules/v2-checkin.js';
 import { renderV2Trabajadores } from './v2/modules/v2-trabajadores.js';
-import { renderV2Solicitudes } from './v2/modules/v2-solicitudes.js?v=20260429-5';
+import { renderV2Solicitudes } from './v2/modules/v2-solicitudes.js?v=20260525-1315';
 import { renderV2CamasPerdidas } from './v2/modules/v2-camas-perdidas.js';
 import { renderV2Cupos }      from './v2/modules/v2-cupos.js';
 import { renderV2Censo }      from './v2/modules/v2-censo.js';
+import { renderCensoTrabajadores } from './v2/modules/v2-censo-trabajadores.js';
 import { renderV2Distribucion } from './v2/modules/v2-distribucion.js';
 import { renderV2Historial }    from './v2/modules/v2-historial.js';
 import { renderV2Cama3 }       from './v2/modules/v2-cama3.js';
+import { renderV2Backup }      from './v2/modules/v2-backup.js';
+import { renderV2Asistencia }  from './v2/modules/v2-asistencia.js';
 
 // ── Supervisores autorizados (Cupos por Gerencia + Censo Admin) ──────────────
 const SUPERVISOR_EMAILS = [
@@ -35,6 +38,8 @@ import { renderUsuarios } from './modules/usuarios.js';
 import { renderAsistencia } from './modules/asistencia.js';
 import { renderCupos } from './modules/cupos.js';
 import { loginApp, logoutApp, checkSession } from './auth.js';
+import { logAudit } from './v2/v2-audit.js';
+import { ejecutarAutoRotacion } from './v2/v2-service.js';
 
 // Exponer globalmente para uso en Dashboard e Infraestructura (después de todos los imports)
 window.__getExpiredBeds = getExpiredBeds;
@@ -47,19 +52,21 @@ let currentRoute = 'v2dashboard';
 const ROUTES = {
     // ── V2 (Sistema Principal) ────────────────────────────────
     v2dashboard:      { label: 'Dashboard',               icon: '📊', render: renderV2Dashboard },
-    v2anglo:          { label: 'Asignación Anglo',          icon: '🗝️', render: renderV2Anglo },
-
+    v2solicitudes:    { label: 'Solicitudes Pendientes',   icon: '🔔', render: renderV2Solicitudes, badge: true },
     v2infraestructura:{ label: 'Infraestructura',          icon: '🏛️', render: renderV2Infraestructura },
-    v2censo:          { label: 'Censo Administrativo',     icon: '📅', render: renderV2Censo },
     v2checkin:        { label: 'Check-in / Check-out',     icon: '🛎️', render: renderV2Checkin },
     v2buscador:       { label: 'Buscar Huésped',           icon: '🔍', render: renderV2Buscador },
+    v2anglo:          { label: 'Asignación Anglo',          icon: '🗝️', render: renderV2Anglo },
+    v2censo:          { label: 'Censo Administrativo',     icon: '📅', render: renderV2Censo },
+    v2censotrab:      { label: 'Censo Trabajadores QR',    icon: '📲', render: renderCensoTrabajadores },
     v2trabajadores:   { label: 'Padrón Trabajadores',      icon: '👥', render: renderV2Trabajadores },
-    v2solicitudes:    { label: 'Solicitudes Pendientes',   icon: '🔔', render: renderV2Solicitudes, badge: true },
-    v2camasperdidas:  { label: 'Camas Perdidas',           icon: '🛏️', render: renderV2CamasPerdidas },
+    v2camasperdidas:  { label: 'Camas Perdidas',           icon: '🛏️', render: renderV2CamasPerdidas, supervisorOnly: true },
     v2cupos:          { label: 'Cupos por Gerencia',       icon: '📊', render: renderV2Cupos,        supervisorOnly: true },
     v2distribucion:   { label: 'Distribución Habitaciones',icon: '🏨', render: renderV2Distribucion, supervisorOnly: true },
     v2historial:      { label: 'Historial',                 icon: '📋', render: renderV2Historial,   supervisorOnly: true },
     v2cama3:          { label: 'Gestión Cama 3',            icon: '🛏️', render: renderV2Cama3,      supervisorOnly: true },
+    v2backup:         { label: 'Respaldo Diario',            icon: '🛡️', render: renderV2Backup,     supervisorOnly: true },
+    v2asistencia:     { label: 'Control de Asistencia',      icon: '📋', render: renderV2Asistencia }, // ✅ Visible para todos los admins
     // ── Superadmin ────────────────────────────────────────────
     cupos:      { label: 'Cupos por Gerencia',          icon: '🎯', render: renderCupos,      superadminOnly: true, hidden: true },
     asistencia: { label: 'Control Asistencia',           icon: '✅', render: renderAsistencia, superadminOnly: true, hidden: true },
@@ -117,6 +124,67 @@ async function boot() {
             role: getRole(userSession.email)
         };
         initApp();
+
+        // ⚡ AUTO-ROTACIÓN AL ARRANCAR LA APP
+        // Corre en segundo plano (no bloquea la UI) cada vez que alguien abre la app.
+        // Garantiza que los pre-asignados cuya fecha ya llegó se activen automáticamente
+        // sin necesidad de que el usuario entre al Dashboard o Infraestructura.
+        setTimeout(async () => {
+            try {
+                const { autoCheckout, activados } = await ejecutarAutoRotacion();
+                const total = (autoCheckout?.length || 0) + (activados?.length || 0);
+                if (total > 0) {
+                    const msgs = [];
+                    if (autoCheckout?.length > 0) msgs.push(`${autoCheckout.length} salida${autoCheckout.length > 1 ? 's' : ''} automática${autoCheckout.length > 1 ? 's' : ''}`);
+                    if (activados?.length > 0)    msgs.push(`${activados.length} turno${activados.length > 1 ? 's' : ''} entrante${activados.length > 1 ? 's' : ''} activado${activados.length > 1 ? 's' : ''}`);
+                    showToast(`⚡ Rotación automática: ${msgs.join(' · ')}`, 'success', 7000);
+                    // ✅ Notificar a todos los módulos para que refresquen
+                    window.dispatchEvent(new CustomEvent('rotacion-completada', { detail: { autoCheckout, activados } }));
+                }
+            } catch(e) {
+                console.warn('[AutoRotación] Error:', e.message);
+            }
+        }, 2000); // 2s de retraso para no competir con la carga inicial de la UI
+
+        // ⏰ TICKER DE MEDIANOCHE
+        // Dispara ejecutarAutoRotacion exactamente al segundo 1 de cada nuevo día.
+        // Garantiza que pre-asignados se activen y salidas se procesen automáticamente
+        // aunque la app lleve horas abierta sin recargar (ej: tablet de guardia 24/7).
+        (function programarRotacionMedianoche() {
+            const ahora     = new Date();
+            const manana    = new Date(ahora);
+            manana.setDate(manana.getDate() + 1);
+            manana.setHours(0, 0, 1, 0); // 00:00:01 del día siguiente
+            const msHastaMedianoche = manana - ahora;
+            console.log(`[Medianoche] Próxima rotación programada en ${Math.round(msHastaMedianoche/60000)} min`);
+
+            setTimeout(async () => {
+                console.log('[Medianoche] ⏰ Disparando rotación automática de medianoche...');
+                try {
+                    const { autoCheckout, activados } = await ejecutarAutoRotacion();
+                    const total = (autoCheckout?.length || 0) + (activados?.length || 0);
+                    if (total > 0) {
+                        const msgs = [];
+                        if (autoCheckout?.length > 0) msgs.push(`🌅 ${autoCheckout.length} checkout${autoCheckout.length > 1 ? 's' : ''} automático${autoCheckout.length > 1 ? 's' : ''}`);
+                        if (activados?.length > 0)    msgs.push(`✅ ${activados.length} turno${activados.length > 1 ? 's' : ''} activado${activados.length > 1 ? 's' : ''}`);
+                        showToast(`⏰ Rotación medianoche: ${msgs.join(' · ')}`, 'success', 10000);
+                    }
+                    // ✅ Notificar a todos los módulos abiertos para que refresquen
+                    window.dispatchEvent(new CustomEvent('rotacion-completada', {
+                        detail: { autoCheckout, activados, medianoche: true }
+                    }));
+                } catch(e) {
+                    console.warn('[Medianoche] Error en rotación:', e.message);
+                }
+                // Re-programar para la siguiente medianoche (loop infinito de 24h)
+                programarRotacionMedianoche();
+            }, msHastaMedianoche);
+        })();
+
+        // ⏱️ Refresco periódico cada 5 minutos — garantiza consistencia si la app está abierta toda la noche
+        setInterval(() => {
+            window.dispatchEvent(new CustomEvent('rotacion-completada', { detail: { refresh: true } }));
+        }, 5 * 60 * 1000);
     }
 }
 
@@ -273,8 +341,8 @@ async function initApp() {
         document.getElementById('offline-badge')?.classList.add('visible');
     }
 
-    const hash = location.hash.replace('#', '') || 'dashboard';
-    await navigate(hash in ROUTES ? hash : 'dashboard');
+    const hash = location.hash.replace('#', '') || 'v2dashboard';
+    navigate(hash in ROUTES ? hash : 'v2dashboard'); // fire-and-forget — UI responde al instante
 
     // popstate: dispara cuando el usuario presiona el botón Atrás/Adelante del navegador
     window.addEventListener('popstate', (e) => {
@@ -333,7 +401,10 @@ function showLoginOverlay() {
                     role: getRole(result.user.email)
                 };
 
-                try { await put('logs', { timestamp: new Date().toISOString(), username: userVal, action: 'LOGIN', details: 'Acceso seguro en la nube' }); } catch (err) { }
+                try {
+                    await put('logs', { timestamp: new Date().toISOString(), username: userVal, action: 'LOGIN', details: 'Acceso seguro en la nube' });
+                    await logAudit('LOGIN', `Ingreso al sistema desde ${navigator.platform||'web'}`, { email: userVal, role: getRole(userVal) });
+                } catch (err) { }
 
                 overlay.style.opacity = '0';
                 setTimeout(() => {
@@ -417,6 +488,14 @@ function buildNav() {
       <span class="nav-icon">🏠</span>
       <span class="nav-label">Residentes (Link)</span>
     </a>
+    <a href="parejas-aramark.html" target="_blank" class="nav-item" style="background:linear-gradient(135deg,rgba(200,16,46,0.10),rgba(200,16,46,0.05));border:1px solid rgba(200,16,46,0.25);border-radius:10px;">
+      <span class="nav-icon">👫</span>
+      <span class="nav-label" style="color:#C8102E;font-weight:700;">Parejas Aramark</span>
+    </a>
+    <a href="parejas-aramark-admin.html" target="_blank" class="nav-item" style="background:linear-gradient(135deg,rgba(200,16,46,0.06),rgba(26,26,26,0.04));border:1px solid rgba(200,16,46,0.18);border-radius:10px;">
+      <span class="nav-icon">🔒</span>
+      <span class="nav-label" style="color:#7f1d1d;font-weight:700;">Parejas — Admin</span>
+    </a>
     <a href="consultas.html" target="_blank" class="nav-item" style="background:linear-gradient(135deg,rgba(192,57,43,0.08),rgba(231,76,60,0.05));border:1px solid rgba(192,57,43,0.2);border-radius:10px;">
       <span class="nav-icon" style="display:flex;align-items:center;justify-content:center;"><img src="Mirian.png" style="width:22px;height:22px;border-radius:50%;object-fit:cover;border:1.5px solid rgba(192,57,43,0.4);" alt="Constanza"></span>
       <span class="nav-label" style="color:var(--red-600,#c0392b);font-weight:700;">Constanza IA</span>
@@ -471,13 +550,30 @@ async function navigate(route) {
 
     const content = document.getElementById('page-content');
     if (content) {
-        content.style.opacity = '0';
-        content.style.transform = 'translateY(8px)';
+        // Mostrar esqueleto inmediato — el usuario ve respuesta al instante
+        content.style.opacity = '1';
+        content.style.transform = 'none';
+        content.style.transition = 'none';
+        content.innerHTML = `
+          <div style="padding:28px;max-width:1200px;margin:0 auto">
+            <div style="height:36px;width:220px;background:linear-gradient(90deg,#e2e8f0 25%,#f1f5f9 50%,#e2e8f0 75%);
+                        background-size:400% 100%;animation:_skShimmer 1.2s ease infinite;border-radius:10px;margin-bottom:24px"></div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:24px">
+              ${[1,2,3,4].map(()=>`<div style="height:90px;background:linear-gradient(90deg,#e2e8f0 25%,#f1f5f9 50%,#e2e8f0 75%);
+                background-size:400% 100%;animation:_skShimmer 1.2s ease infinite;border-radius:14px"></div>`).join('')}
+            </div>
+            <div style="height:320px;background:linear-gradient(90deg,#e2e8f0 25%,#f1f5f9 50%,#e2e8f0 75%);
+                        background-size:400% 100%;animation:_skShimmer 1.2s ease infinite;border-radius:14px"></div>
+          </div>
+          <style>@keyframes _skShimmer{0%{background-position:100% 0}100%{background-position:-100% 0}}</style>`;
+
         await ROUTES[route].render(content);
+
+        // Fade in suave al terminar
+        content.style.transition = 'opacity 0.2s ease';
+        content.style.opacity = '0.1';
         requestAnimationFrame(() => {
-            content.style.transition = 'opacity 0.25s ease, transform 0.25s ease';
             content.style.opacity = '1';
-            content.style.transform = 'translateY(0)';
         });
     }
 

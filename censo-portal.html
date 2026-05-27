@@ -100,6 +100,11 @@
     .radio-opt.opt-noche       input:checked + .radio-pill { background: #7c3aed; }
     .radio-opt.opt-2_dia       input:checked + .radio-pill { background: var(--amber); }
     .radio-opt.opt-2_noche     input:checked + .radio-pill { background: #dc2626; }
+    .radio-opt.opt-3_dia       input:checked + .radio-pill { background: #0891b2; }
+    .radio-opt.opt-3_noche     input:checked + .radio-pill { background: #4a1d96; }
+    /* Borde especial para opciones de cama 3 (sin seleccionar) */
+    .radio-opt.opt-3_dia  .radio-pill,
+    .radio-opt.opt-3_noche .radio-pill { border-color: #7c3aed; color: #7c3aed; font-weight:700; }
 
     /* ── Bottom bar ────────────────────────────────── */
     .bottom-bar {
@@ -138,6 +143,28 @@
              border-top-color: var(--indigo); border-radius: 50%;
              animation: spin .7s linear infinite; margin: 30px auto; }
     @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Estado de Limpieza ─────────────────────────────── */
+    .clean-row { display:flex; align-items:center; gap:8px; margin-top:10px; padding-top:10px; border-top:1px solid var(--gray-100); flex-wrap:wrap; }
+    .clean-label { font-size:11px; font-weight:700; color:var(--gray-500); white-space:nowrap; }
+    .clean-pills { display:flex; gap:6px; flex-wrap:wrap; }
+    .clean-pill  { padding:5px 11px; border-radius:99px; font-size:11px; font-weight:700; border:2px solid var(--gray-200); color:var(--gray-500); background:var(--gray-50); cursor:pointer; transition:all .15s; font-family:inherit; }
+    .clean-pill.active-limpia  { background:#10b981; color:white; border-color:transparent; }
+    .clean-pill.active-sucia   { background:#ef4444; color:white; border-color:transparent; }
+    .clean-pill.active-proceso { background:#f59e0b; color:white; border-color:transparent; }
+
+    /* ── Banner borrador recuperado ─────────────────────── */
+    #draft-banner {
+      position:fixed; top:72px; left:50%; transform:translateX(-50%);
+      background:#1e1b4b; color:white; padding:9px 18px; border-radius:99px;
+      font-size:12px; font-weight:700; z-index:200;
+      display:flex; align-items:center; gap:10px;
+      box-shadow:0 4px 20px rgba(0,0,0,.25); animation:fadeIn .3s ease; white-space:nowrap;
+    }
+    #draft-banner .draft-close {
+      background:rgba(255,255,255,.2); border:none; color:white;
+      border-radius:99px; padding:3px 10px; font-size:11px; font-weight:700; cursor:pointer;
+    }
   </style>
 </head>
 <body>
@@ -229,14 +256,23 @@
 <!-- Bottom save bar (hidden initially) -->
 <div class="bottom-bar" id="bottom-bar" style="display:none">
   <div class="bottom-inner">
-    <div class="counter-text" id="counter-text">0 / 0</div>
+    <div style="display:flex;flex-direction:column;gap:2px;min-width:76px">
+      <div class="counter-text" id="counter-text">0 / 0</div>
+      <div style="font-size:10px;color:var(--gray-500);font-weight:700" id="clean-counter-text"></div>
+    </div>
     <button class="btn btn-success" id="btn-guardar" onclick="guardarCenso()" style="flex:1">
       💾 Guardar Censo del Piso
     </button>
+    <button class="btn btn-amber" id="btn-pdf" onclick="exportarPDF()" title="Exportar PDF del Censo"
+      style="padding:14px 16px;min-width:50px;flex:0 0 auto">📄</button>
   </div>
 </div>
 
 <div id="toast"></div>
+<div id="draft-banner" style="display:none">
+  <span>📝 Borrador recuperado</span>
+  <button class="draft-close" onclick="descartarDraft()">Descartar</button>
+</div>
 
 <script type="module">
 import { supabase } from './js/supabaseClient.js';
@@ -295,26 +331,32 @@ window.irASeleccion = async function() {
   const btn    = document.getElementById('btn-ingresar');
   errEl.style.display = 'none';
 
-  if (!rutRaw || !dvRaw) { errEl.textContent = '⚠️ Ingresa RUT y dígito verificador'; errEl.style.display='block'; return; }
-  if (!/^\d{7,9}$/.test(rutRaw)) { errEl.textContent = '⚠️ RUT inválido (solo números, sin puntos)'; errEl.style.display='block'; return; }
-  if (calcularDV(rutRaw) !== dvRaw) { errEl.textContent = '❌ Dígito verificador incorrecto'; errEl.style.display='block'; return; }
-
-  btn.disabled = true; btn.textContent = '⏳ Verificando…';
-  const rutCompleto = rutRaw + '-' + dvRaw;
-
-  // Verificar que el RUT existe en el sistema
-  const { data, error } = await supabase.from('v2_asignaciones')
-    .select('rut_huesped,nombre_huesped').eq('rut_huesped', rutCompleto)
-    .is('fecha_checkout', null).limit(1);
-
-  if (error || !data?.length) {
-    errEl.textContent = '🚫 RUT no encontrado en el sistema. Contacta a recepción.';
-    errEl.style.display = 'block';
-    btn.disabled = false; btn.textContent = 'Verificar e ingresar →';
-    return;
+  if (!rutRaw || !dvRaw) {
+    errEl.textContent = '⚠️ Ingresa RUT y dígito verificador';
+    errEl.style.display = 'block'; return;
+  }
+  if (!/^\d{7,9}$/.test(rutRaw)) {
+    errEl.textContent = '⚠️ RUT inválido (solo números, sin puntos)';
+    errEl.style.display = 'block'; return;
+  }
+  if (calcularDV(rutRaw) !== dvRaw) {
+    errEl.textContent = '❌ Dígito verificador incorrecto';
+    errEl.style.display = 'block'; return;
   }
 
-  _nombre = data[0].nombre_huesped || rutCompleto;
+  btn.disabled = true; btn.textContent = '⏳ Ingresando…';
+  const rutCompleto = rutRaw + '-' + dvRaw;
+
+  // Intentar obtener nombre desde v2_asignaciones (opcional, no bloquea el acceso)
+  let nombreMostrar = rutCompleto;
+  try {
+    const { data } = await supabase.from('v2_asignaciones')
+      .select('nombre_huesped').eq('rut_huesped', rutCompleto)
+      .is('fecha_checkout', null).limit(1);
+    if (data?.[0]?.nombre_huesped) nombreMostrar = data[0].nombre_huesped;
+  } catch(_) { /* sin problema, continúa igual */ }
+
+  _nombre = nombreMostrar;
   document.getElementById('hola-nombre').textContent = '👤 ' + _nombre;
   btn.disabled = false; btn.textContent = 'Verificar e ingresar →';
   cargarEdificios();
@@ -323,19 +365,50 @@ window.irASeleccion = async function() {
 
 // ── Step 2a: Load edificios ─────────────────────────────────────────────
 async function cargarEdificios() {
-  const { data } = await supabase.from('v2_edificios').select('id,nombre').order('nombre');
+  // Cargar edificios
+  const { data: edifs } = await supabase.from('v2_edificios').select('id,nombre').order('nombre');
   const sel = document.getElementById('sel-edif');
-  sel.innerHTML = '<option value="">— Seleccionar edificio —</option>' +
-    (data || []).map(e => `<option value="${e.id}">${e.nombre}</option>`).join('');
+  sel.innerHTML = '<option value="">— Todos los edificios —</option>' +
+    (edifs || []).map(e => `<option value="${e.id}">${e.nombre}</option>`).join('');
+
+  // Cargar TODOS los pabellones agrupados desde el inicio
+  await _cargarTodosPabellones();
 }
 
-// ── Step 2b: Load pabellones ────────────────────────────────────────────
+// Carga todos los pabellones agrupados por edificio (sin filtro)
+async function _cargarTodosPabellones() {
+  const { data } = await supabase
+    .from('v2_pabellones')
+    .select('id,nombre,edificio_id,v2_edificios(nombre)')
+    .order('nombre');
+
+  const sel = document.getElementById('sel-pab');
+  // Agrupar por edificio
+  const grupos = {};
+  (data || []).forEach(p => {
+    const edNombre = p.v2_edificios?.nombre || 'Sin edificio';
+    if (!grupos[edNombre]) grupos[edNombre] = [];
+    grupos[edNombre].push(p);
+  });
+
+  sel.innerHTML = '<option value="">— Seleccionar pabellón —</option>' +
+    Object.entries(grupos).sort((a,b)=>a[0].localeCompare(b[0],'es')).map(([edNombre, pabs]) =>
+      `<optgroup label="📍 ${edNombre}">${pabs.map(p =>
+        `<option value="${p.id}">${p.nombre}</option>`).join('')}</optgroup>`
+    ).join('');
+}
+
+// ── Step 2b: Filter pabellones by edificio ──────────────────────────────
 window.cargarPabellones = async function() {
   _edificioId = document.getElementById('sel-edif').value;
+  if (!_edificioId) {
+    // Sin filtro → mostrar todos
+    await _cargarTodosPabellones();
+    return;
+  }
   const sel = document.getElementById('sel-pab');
   sel.innerHTML = '<option value="">— Seleccionar pabellón —</option>';
   document.getElementById('btn-cargar').disabled = true;
-  if (!_edificioId) return;
   const { data } = await supabase.from('v2_pabellones')
     .select('id,nombre').eq('edificio_id', _edificioId).order('nombre');
   sel.innerHTML = '<option value="">— Seleccionar pabellón —</option>' +
@@ -374,20 +447,30 @@ window.cargarHabitaciones = async function() {
     .order('numero_hab');
   if (nivelFil) habQ = habQ.eq('nivel', nivelFil);
 
-  // Cargar hab y censo existente (con catch por si la tabla aún no existe)
-  const [{ data: habs }, censoRes] = await Promise.all([
+  // ── Cargar hab, censo existente y camas-3 activas en paralelo ──────────
+  const [{ data: habs }, censoRes, cama3Res] = await Promise.all([
     habQ,
     supabase.from('v2_censo_registros')
       .select('habitacion_id,estado')
       .eq('fecha', todayISO())
-      .eq('pabellon_id', _pabellonId)
+      .eq('pabellon_id', _pabellonId),
+    // Camas con numero_cama=3 que NO están Deshabilitadas en este pabellón
+    supabase.from('v2_camas')
+      .select('habitacion_id, estado')
+      .eq('numero_cama', 3)
+      .neq('estado', 'Deshabilitada')
   ]);
 
   _habitaciones = habs || [];
+
+  // Set de habitacion_ids que tienen cama 3 activa
+  window._habsCon3 = new Set(
+    (cama3Res.data || []).map(c => c.habitacion_id)
+  );
+
   _censoHoy = {};
 
   if (censoRes.error) {
-    // Tabla no existe aún — mostrar aviso pero continuar
     panel.innerHTML = `
       <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:12px;padding:14px;margin-bottom:12px;font-size:12px;color:#92400e">
         <strong>⚠️ Tabla v2_censo_registros no encontrada.</strong><br>
@@ -402,19 +485,35 @@ window.cargarHabitaciones = async function() {
     return;
   }
 
+  // 💾 Pre-cargar estados guardados (limpieza local + borrador de censo)
+  cargarLimpiezaLocal();
+  restaurarDraft();
+
   renderHabitaciones(panel);
+
   document.getElementById('bottom-bar').style.display = 'block';
   actualizarContador();
+  actualizarContadorLimpieza();
 };
 
 // ── Render room cards ───────────────────────────────────────────────────
-const OPCIONES = [
+const OPCIONES_BASE = [
   { val: 'sin_ocupar', lbl: 'Sin Ocupar' },
   { val: 'dia',        lbl: 'Día'        },
   { val: 'noche',      lbl: 'Noche'      },
   { val: '2_dia',      lbl: '2 Día'      },
-  { val: '2_noche',    lbl: '2 Noche'    },
+  { val: '2_noche',   lbl: '2 Noche'    },
 ];
+const OPCIONES_C3 = [
+  { val: '3_dia',      lbl: '3 Día'      },
+  { val: '3_noche',   lbl: '3 Noche'    },
+];
+
+function opcionesHab(h) {
+  return (window._habsCon3?.has(h.id_custom))
+    ? [...OPCIONES_BASE, ...OPCIONES_C3]
+    : OPCIONES_BASE;
+}
 
 function renderHabitaciones(panel) {
   const hoy = todayISO();
@@ -425,9 +524,11 @@ function renderHabitaciones(panel) {
       <span style="font-size:11px;color:var(--gray-500);margin-left:4px;font-weight:400">${hoy}</span>
     </div>` +
     _habitaciones.map(h => {
-      const est = _censoHoy[h.id_custom] || '';
+      const est  = _censoHoy[h.id_custom] || '';
       const done = !!est;
-      const rads = OPCIONES.map(op => `
+      const ops  = opcionesHab(h);
+      const tiene3 = window._habsCon3?.has(h.id_custom) || false;
+      const rads = ops.map(op => `
         <label class="radio-opt opt-${op.val}">
           <input type="radio" name="hab_${h.id_custom}" value="${op.val}"
             ${est === op.val ? 'checked' : ''}
@@ -438,13 +539,16 @@ function renderHabitaciones(panel) {
         <div class="room-card ${done ? 'done' : ''}" id="rc-${h.id_custom}">
           <div class="room-head">
             <div>
-              <div class="rnum">Habitación ${h.numero_hab}</div>
-              <div class="rid">${h.id_custom}${h.nivel ? ' · Nivel ' + h.nivel : ''}</div>
+              <div class="rnum">Habitación ${h.numero_hab}
+                ${tiene3 ? '<span style="background:#7c3aed;color:#fff;font-size:9px;font-weight:800;border-radius:6px;padding:1px 6px;margin-left:6px;vertical-align:middle">🛏️ C3</span>' : ''}
+              </div>
+              <div class="rid">${h.id_custom}${h.nivel ? ' · Nivel ' + h.nivel : ''}${tiene3 ? ' · Cama 3 habilitada' : ''}</div>
             </div>
             <div class="tick" id="tick-${h.id_custom}">${done ? '✅' : '⬜'}</div>
           </div>
           <div class="room-body">
             <div class="radio-grid">${rads}</div>
+            ${cleaningUI(h.id_custom)}
           </div>
         </div>`;
     }).join('');
@@ -458,6 +562,7 @@ window.onRadioChange = function(habId, estado) {
   rc.classList.add('done');
   tk.textContent = '✅';
   actualizarContador();
+  autoGuardar(); // 💾 Auto-guardado en borrador
 };
 
 function actualizarContador() {
@@ -493,6 +598,7 @@ window.guardarCenso = async function() {
   toast(`✅ ${rows.length} habitaciones guardadas`);
   btn.textContent = '💾 Guardar Censo del Piso';
   btn.disabled = false;
+  clearDraft(); // 🗑️ Borrador cumplió su función, limpiar
 };
 
 // ── Bajadas — próximos 3 días (para que se preparen) ──────────────────
@@ -504,85 +610,296 @@ async function cargarBajadas() {
   }
   panel.innerHTML = '<div class="spin"></div>';
 
-  const hoy   = new Date();
-  const desde = todayISO();
-  const hasta = new Date(hoy); hasta.setDate(hoy.getDate() + 3);
+  const hoy      = new Date();
+  const desde    = todayISO();
+  const hasta    = new Date(hoy); hasta.setDate(hoy.getDate() + 6); // próximos 7 días
   const hastaISO = hasta.toLocaleDateString('en-CA');
+  const nivelFil = document.getElementById('sel-nivel')?.value || '';
 
-  const { data: proximas } = await supabase
-    .from('v2_asignaciones')
-    .select('nombre_huesped,rut_huesped,fecha_salida_programada,v2_empresas(nombre),v2_camas(v2_habitaciones(pabellon_id,numero_hab,nivel))')
-    .gte('fecha_salida_programada', desde)
-    .lte('fecha_salida_programada', hastaISO)
-    .is('fecha_checkout', null);
+  try {
+    // ── PASO 1: habitaciones de este pabellón (+ nivel si aplica) ─────────
+    let qH = supabase.from('v2_habitaciones')
+      .select('id_custom, numero_hab, nivel')
+      .eq('pabellon_id', _pabellonId);
+    if (nivelFil) qH = qH.eq('nivel', nivelFil);
+    const { data: habs, error: eH } = await qH;
+    if (eH) throw eH;
 
-  const filtradas = (proximas || []).filter(b =>
-    b.v2_camas?.v2_habitaciones?.pabellon_id === _pabellonId);
+    // Mapa id_custom → datos hab para lookup O(1)
+    const habMap = {};
+    (habs || []).forEach(h => { habMap[h.id_custom] = h; });
+    const habIds = new Set(Object.keys(habMap));
 
-  if (!filtradas.length) {
-    panel.innerHTML = `
-      <div class="card" style="text-align:center">
-        <div style="font-size:36px;margin-bottom:8px">📭</div>
-        <div style="font-weight:700;color:var(--gray-700)">Sin bajadas próximas</div>
-        <div style="font-size:12px;color:var(--gray-500);margin-top:4px">No hay salidas programadas en los próximos 3 días para ${_pabNombre}</div>
-      </div>`;
-    return;
-  }
+    // ── PASO 2: asignaciones activas con salida en los próximos 7 días ────
+    // No filtramos por cama en la query — lo hacemos en JS con el id_cama
+    const { data: proximas, error: eA } = await supabase
+      .from('v2_asignaciones')
+      .select('nombre_huesped, rut_huesped, fecha_salida_programada, id_cama, v2_empresas(nombre)')
+      .gte('fecha_salida_programada', desde)
+      .lte('fecha_salida_programada', hastaISO)
+      .is('fecha_checkout', null);
+    if (eA) throw eA;
 
-  // Agrupar por fecha → empresa
-  const porFecha = {};
-  filtradas.forEach(b => {
-    const f   = b.fecha_salida_programada;
-    const emp = b.v2_empresas?.nombre || 'Sin empresa';
-    if (!porFecha[f]) porFecha[f] = {};
-    if (!porFecha[f][emp]) porFecha[f][emp] = [];
-    porFecha[f][emp].push(b);
-  });
+    // Filtrar: extraer habitacion_id de id_cama ("COPC000449-C1" → "COPC000449")
+    const filtradas = (proximas || [])
+      .map(b => {
+        const partes = (b.id_cama || '').split('-');
+        const habId  = partes.length > 1 ? partes.slice(0, -1).join('-') : b.id_cama;
+        return { ...b, _hab: habMap[habId] || null };
+      })
+      .filter(b => b._hab !== null);
 
-  const diasLabel = ['Hoy','Mañana','Pasado mañana','En 3 días'];
+    const nivelLabel = nivelFil ? ` · Piso ${nivelFil}` : '';
 
-  panel.innerHTML = `<div class="sec-title">📤 Próximas bajadas · ${_pabNombre} <span class="badge">${filtradas.length}</span></div>` +
-    Object.entries(porFecha).sort().map(([fecha, empresas]) => {
-      const diffMs = new Date(fecha+'T12:00:00') - new Date(desde+'T00:00:00');
-      const diffD  = Math.round(diffMs / 86400000);
-      const etiq   = diasLabel[diffD] || fecha;
-      const fmtFecha = new Date(fecha+'T12:00:00').toLocaleDateString('es-CL',{weekday:'long',day:'numeric',month:'long'});
-      const totalDia = Object.values(empresas).reduce((s,a) => s+a.length, 0);
-      return `
-        <div style="margin-bottom:6px">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-            <span style="background:${diffD===0?'#ef4444':diffD===1?'#f59e0b':'#6366f1'};color:white;border-radius:8px;padding:4px 12px;font-size:12px;font-weight:800">${etiq}</span>
-            <span style="font-size:12px;color:var(--gray-500)">${fmtFecha}</span>
-            <span style="margin-left:auto;font-size:13px;font-weight:800;color:#ef4444">${totalDia} camas</span>
-          </div>
-          ${Object.entries(empresas).map(([emp, rows]) => `
-            <div class="card" style="margin-bottom:8px">
-              <div style="display:flex;justify-content:space-between;align-items:flex-start">
-                <div>
-                  <div class="dep-emp">${emp}</div>
-                  <div class="dep-sub">${_pabNombre}</div>
-                </div>
-                <div>
-                  <div class="dep-num">${rows.length}</div>
-                  <div class="dep-lbl">camas</div>
-                </div>
-              </div>
-              <div style="margin-top:8px;border-top:1px solid var(--gray-100);padding-top:8px">
-                ${rows.map(r => `
-                  <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:11px">
-                    <span style="font-weight:600;color:var(--gray-700)">${r.nombre_huesped}</span>
-                    <span style="color:var(--gray-500);font-family:monospace">${r.rut_huesped}</span>
-                  </div>`).join('')}
-              </div>
-            </div>`).join('')}
+    if (!filtradas.length) {
+      panel.innerHTML = `
+        <div class="card" style="text-align:center">
+          <div style="font-size:36px;margin-bottom:8px">📭</div>
+          <div style="font-weight:700;color:var(--gray-700)">Sin bajadas próximas</div>
+          <div style="font-size:12px;color:var(--gray-500);margin-top:4px">No hay salidas en los próximos 7 días para ${_pabNombre}${nivelLabel}</div>
         </div>`;
-    }).join('');
+      return;
+    }
+
+    // Agrupar por fecha → empresa
+    const porFecha = {};
+    filtradas.forEach(b => {
+      const f   = b.fecha_salida_programada;
+      const emp = b.v2_empresas?.nombre || 'Sin empresa';
+      if (!porFecha[f]) porFecha[f] = {};
+      if (!porFecha[f][emp]) porFecha[f][emp] = [];
+      porFecha[f][emp].push(b);
+    });
+
+    const diasLabel = ['Hoy','Mañana','Pasado mañana','En 3 días','En 4 días','En 5 días','En 6 días'];
+
+    panel.innerHTML = `<div class="sec-title">📤 Próximas bajadas · ${_pabNombre}${nivelLabel} <span class="badge">${filtradas.length}</span></div>` +
+      Object.entries(porFecha).sort().map(([fecha, empresas]) => {
+        const diffMs = new Date(fecha+'T12:00:00') - new Date(desde+'T00:00:00');
+        const diffD  = Math.round(diffMs / 86400000);
+        const etiq   = diasLabel[diffD] || fecha;
+        const fmtFecha = new Date(fecha+'T12:00:00').toLocaleDateString('es-CL',{weekday:'long',day:'numeric',month:'long'});
+        const totalDia = Object.values(empresas).reduce((s,a) => s+a.length, 0);
+        const col = diffD === 0 ? '#ef4444' : diffD === 1 ? '#f59e0b' : '#6366f1';
+        return `
+          <div style="margin-bottom:6px">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+              <span style="background:${col};color:white;border-radius:8px;padding:4px 12px;font-size:12px;font-weight:800">${etiq}</span>
+              <span style="font-size:12px;color:var(--gray-500)">${fmtFecha}</span>
+              <span style="margin-left:auto;font-size:13px;font-weight:800;color:#ef4444">${totalDia} camas</span>
+            </div>
+            ${Object.entries(empresas).map(([emp, rows]) => `
+              <div class="card" style="margin-bottom:8px">
+                <div style="display:flex;justify-content:space-between;align-items:flex-start">
+                  <div>
+                    <div class="dep-emp">${emp}</div>
+                    <div class="dep-sub">${_pabNombre}${nivelLabel}</div>
+                  </div>
+                  <div>
+                    <div class="dep-num">${rows.length}</div>
+                    <div class="dep-lbl">camas</div>
+                  </div>
+                </div>
+                <div style="margin-top:8px;border-top:1px solid var(--gray-100);padding-top:8px">
+                  ${rows.map(r => `
+                    <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:11px">
+                      <span style="font-weight:600;color:var(--gray-700)">${r.nombre_huesped}</span>
+                      <span style="color:var(--gray-500);font-family:monospace">${r.rut_huesped}</span>
+                    </div>`).join('')}
+                </div>
+              </div>`).join('')}
+          </div>`;
+      }).join('');
+
+  } catch(err) {
+    console.error('[bajadas]', err);
+    panel.innerHTML = `<div class="card" style="color:#ef4444;font-weight:700">⚠️ ${err.message}</div>`;
+  }
 }
 
 // ── Utils ───────────────────────────────────────────────────────────────
 function todayISO() {
   return new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 🆕 MEJORAS: Auto-guardado · Limpieza · PDF
+// ═══════════════════════════════════════════════════════════════════════════
+
+let _limpiezaHoy = {}; // habitacion_id → 'limpia' | 'sucia' | 'proceso'
+
+// ── Claves de localStorage ────────────────────────────────────────────────
+function draftKey()        { return `censo_draft_${_pabellonId}_${todayISO()}`; }
+function limpiezaKey(hId)  { return `censo_limp_${_pabellonId}_${hId}_${todayISO()}`; }
+
+// ── Auto-guardado del borrador �// ── Exportar PDF del Censo (con fallback offline) ───────────────────────
+window.exportarPDF = async function() {
+  const btn = document.getElementById('btn-pdf');
+  if (!_habitaciones.length) { toast('⚠️ No hay habitaciones cargadas', 2000); return; }
+  if (btn) { btn.textContent = '⏳'; btn.disabled = true; }
+
+  // ── Construir contenido HTML del census ──
+  const fecha    = todayISO();
+  const marcadas = Object.keys(_censoHoy).filter(k => _habitaciones.find(h => h.id_custom === k)).length;
+  const limpias  = _habitaciones.filter(h => _limpiezaHoy[h.id_custom] === 'limpia').length;
+  const sucias   = _habitaciones.filter(h => _limpiezaHoy[h.id_custom] === 'sucia').length;
+  const proceso  = _habitaciones.filter(h => _limpiezaHoy[h.id_custom] === 'proceso').length;
+  const estadoLbl = { sin_ocupar:'Sin Ocupar', dia:'Día', noche:'Noche', '2_dia':'2 Día', '2_noche':'2 Noche', '3_dia':'3 Día', '3_noche':'3 Noche' };
+  const limpLbl   = { limpia:'✅ Limpia', sucia:'🔴 Sucia', proceso:'⏳ En proceso' };
+  const limpCol   = { limpia:'#10b981', sucia:'#ef4444', proceso:'#f59e0b' };
+  const rows = _habitaciones.map((h,i) => {
+    const est  = _censoHoy[h.id_custom];
+    const limp = _limpiezaHoy[h.id_custom];
+    const bg   = i % 2 === 0 ? '#ffffff' : '#f8fafc';
+    return `<tr style="background:${bg}">
+      <td style="padding:6px 10px;font-weight:700;border:1px solid #e2e8f0">${h.numero_hab}</td>
+      <td style="padding:6px 10px;font-family:monospace;font-size:11px;color:#6366f1;border:1px solid #e2e8f0">${h.id_custom}</td>
+      <td style="padding:6px 10px;font-weight:600;color:${est?'#1e293b':'#94a3b8'};border:1px solid #e2e8f0">${estadoLbl[est]||'—'}</td>
+      <td style="padding:6px 10px;color:${limp?limpCol[limp]:'#94a3b8'};font-weight:700;border:1px solid #e2e8f0">${limp?limpLbl[limp]:'—'}</td>
+    </tr>`;
+  }).join('');
+
+  const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
+  <title>Censo ${_pabNombre} · ${fecha}</title>
+  <style>
+    body{font-family:Arial,sans-serif;padding:20px;color:#1e293b;}
+    @media print{
+      button{display:none!important;}
+      body{padding:10px;}
+    }
+  </style>
+  </head><body>
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #6366f1;padding-bottom:14px;margin-bottom:16px">
+    <div>
+      <h1 style="font-size:20px;font-weight:900;margin:0;color:#1e1b4b">Censo de Camas — PC Hotería</h1>
+      <p style="margin:4px 0 0;font-size:12px;color:#64748b">${_pabNombre} · ${fecha} · ${_nombre}</p>
+    </div>
+    <div style="text-align:right">
+      <div style="font-size:28px;font-weight:900;color:#6366f1">${marcadas}/${_habitaciones.length}</div>
+      <div style="font-size:10px;color:#64748b">habitaciones censadas</div>
+    </div>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px">
+    <div style="background:#f1f5f9;border-radius:8px;padding:8px;text-align:center"><div style="font-size:18px;font-weight:900;color:#6366f1">${marcadas}</div><div style="font-size:9px;color:#64748b;text-transform:uppercase;font-weight:700">Censadas</div></div>
+    <div style="background:#ecfdf5;border-radius:8px;padding:8px;text-align:center"><div style="font-size:18px;font-weight:900;color:#10b981">${limpias}</div><div style="font-size:9px;color:#64748b;text-transform:uppercase;font-weight:700">Limpias</div></div>
+    <div style="background:#fef2f2;border-radius:8px;padding:8px;text-align:center"><div style="font-size:18px;font-weight:900;color:#ef4444">${sucias}</div><div style="font-size:9px;color:#64748b;text-transform:uppercase;font-weight:700">Sucias</div></div>
+    <div style="background:#fffbeb;border-radius:8px;padding:8px;text-align:center"><div style="font-size:18px;font-weight:900;color:#f59e0b">${proceso}</div><div style="font-size:9px;color:#64748b;text-transform:uppercase;font-weight:700">En proceso</div></div>
+  </div>
+  <table style="width:100%;border-collapse:collapse;font-size:12px">
+    <thead><tr style="background:#1e1b4b;color:white">
+      <th style="padding:7px 10px;text-align:left;border:1px solid #312e81">Habitación</th>
+      <th style="padding:7px 10px;text-align:left;border:1px solid #312e81">ID</th>
+      <th style="padding:7px 10px;text-align:left;border:1px solid #312e81">Estado Censo</th>
+      <th style="padding:7px 10px;text-align:left;border:1px solid #312e81">Limpieza</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table>
+  <p style="margin-top:14px;font-size:9px;color:#94a3b8;text-align:center">PC Hotería · Aramark Chile · ${new Date().toLocaleString('es-CL')}</p>
+  <script>
+    window.onload = function() {
+      // Intentar guardar como PDF automáticamente
+      setTimeout(function() { window.print(); }, 300);
+    };
+  <\/script>
+  </body></html>`;
+
+  try {
+    // ── Intentar con html2pdf (si hay internet) ──
+    if (!window.html2pdf) {
+      await Promise.race([
+        new Promise((res, rej) => {
+          const s = document.createElement('script');
+          s.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
+          s.onload = res;
+          s.onerror = () => rej(new Error('sin internet'));
+          document.head.appendChild(s);
+        }),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 5000))
+      ]);
+    }
+
+    // html2pdf cargó OK — descarga directa
+    const wrapper = document.createElement('div');
+    wrapper.innerHTML = html;
+    document.body.appendChild(wrapper);
+    await html2pdf().set({
+      margin: 6,
+      filename: `censo_${_pabNombre.replace(/\s+/g,'_')}_${fecha}.pdf`,
+      image: { type: 'jpeg', quality: 0.95 },
+      html2canvas: { scale: 2, useCORS: true, logging: false },
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+    }).from(wrapper).save();
+    document.body.removeChild(wrapper);
+    toast('📄 PDF descargado', 2000);
+
+  } catch(_) {
+    // ── Fallback offline: abrir ventana e imprimir (Cmd+P → Guardar como PDF) ──
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+    const url  = URL.createObjectURL(blob);
+    const win  = window.open(url, '_blank');
+    if (win) {
+      toast('📄 Se abrió el censo — presiona ⌘P y elige "Guardar como PDF"', 5000);
+    } else {
+      // Último recurso: descarga directa del HTML
+      const a = document.createElement('a');
+      a.href = url; a.download = `censo_${_pabNombre.replace(/\s+/g,'_')}_${fecha}.html`;
+      a.click();
+      toast('📄 Archivo descargado (abrir con Word o Chrome)', 4000);
+    }
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  }
+
+  if (btn) { btn.textContent = '📄'; btn.disabled = false; }
+};
+}</td>
+        <td style="padding:6px 10px;color:${limp?limpCol[limp]:'#94a3b8'};font-weight:700;border:1px solid #e2e8f0">${limp?limpLbl[limp]:'—'}</td>
+      </tr>`;
+    }).join('');
+    const html = `<div style="font-family:Arial,sans-serif;padding:20px;color:#1e293b">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #6366f1;padding-bottom:14px;margin-bottom:16px">
+        <div>
+          <h1 style="font-size:20px;font-weight:900;margin:0;color:#1e1b4b">Censo de Camas — PC Hotelería</h1>
+          <p style="margin:4px 0 0;font-size:12px;color:#64748b">${_pabNombre} · ${fecha} · ${_nombre}</p>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:28px;font-weight:900;color:#6366f1">${marcadas}/${_habitaciones.length}</div>
+          <div style="font-size:10px;color:#64748b">habitaciones censadas</div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px">
+        <div style="background:#f1f5f9;border-radius:8px;padding:8px;text-align:center"><div style="font-size:18px;font-weight:900;color:#6366f1">${marcadas}</div><div style="font-size:9px;color:#64748b;text-transform:uppercase;font-weight:700">Censadas</div></div>
+        <div style="background:#ecfdf5;border-radius:8px;padding:8px;text-align:center"><div style="font-size:18px;font-weight:900;color:#10b981">${limpias}</div><div style="font-size:9px;color:#64748b;text-transform:uppercase;font-weight:700">Limpias</div></div>
+        <div style="background:#fef2f2;border-radius:8px;padding:8px;text-align:center"><div style="font-size:18px;font-weight:900;color:#ef4444">${sucias}</div><div style="font-size:9px;color:#64748b;text-transform:uppercase;font-weight:700">Sucias</div></div>
+        <div style="background:#fffbeb;border-radius:8px;padding:8px;text-align:center"><div style="font-size:18px;font-weight:900;color:#f59e0b">${proceso}</div><div style="font-size:9px;color:#64748b;text-transform:uppercase;font-weight:700">En proceso</div></div>
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead><tr style="background:#1e1b4b;color:white">
+          <th style="padding:7px 10px;text-align:left;border:1px solid #312e81">Habitación</th>
+          <th style="padding:7px 10px;text-align:left;border:1px solid #312e81">ID</th>
+          <th style="padding:7px 10px;text-align:left;border:1px solid #312e81">Estado Censo</th>
+          <th style="padding:7px 10px;text-align:left;border:1px solid #312e81">Limpieza</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <p style="margin-top:14px;font-size:9px;color:#94a3b8;text-align:center">PC Hotelería · Aramark Chile · ${new Date().toLocaleString('es-CL')}</p>
+    </div>`;
+    const wrapper = document.createElement('div');
+    wrapper.innerHTML = html;
+    document.body.appendChild(wrapper);
+    await html2pdf().set({
+      margin: 6,
+      filename: `censo_${_pabNombre.replace(/\s+/g,'_')}_${fecha}.pdf`,
+      image: { type: 'jpeg', quality: 0.95 },
+      html2canvas: { scale: 2, useCORS: true, logging: false },
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+    }).from(wrapper).save();
+    document.body.removeChild(wrapper);
+    toast('📄 PDF generado exitosamente', 2000);
+  } catch(err) {
+    toast('❌ Error PDF: ' + err.message, 4000);
+  }
+  if (btn) { btn.textContent = '📄'; btn.disabled = false; }
+};
 </script>
 </body>
 </html>

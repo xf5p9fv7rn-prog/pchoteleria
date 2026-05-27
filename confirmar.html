@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>Confirmar Habitación — Aramark</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap');
+
+    :root {
+      --red:    #c8102e;
+      --red-dk: #9e0b24;
+      --red-lt: #fff0f3;
+      --green:  #10b981;
+      --amber:  #f59e0b;
+      --blue:   #3b82f6;
+      --gray:   #64748b;
+      --border: #e2e8f0;
+      --bg:     #f8fafc;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Header ── */
+    .header {
+      background: var(--red);
+      color: white;
+      padding: 18px 20px 14px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .header-logo {
+      width: 40px;
+      height: 40px;
+      background: rgba(255,255,255,.18);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      font-weight: 900;
+    }
+    .header h1 { font-size: 17px; font-weight: 800; }
+    .header p  { font-size: 12px; opacity: .8; margin-top: 1px; }
+
+    /* ── Room badge ── */
+    .room-badge {
+      background: white;
+      margin: -1px 20px 0;
+      border-radius: 14px;
+      padding: 16px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      box-shadow: 0 4px 16px rgba(200,16,46,.15);
+      border: 2px solid var(--red);
+    }
+    .room-num {
+      font-size: 42px;
+      font-weight: 900;
+      color: var(--red);
+      line-height: 1;
+    }
+    .room-info { text-align: right; }
+    .room-info .pab { font-size: 11px; font-weight: 700; color: var(--gray); text-transform: uppercase; letter-spacing: .5px; }
+    .room-info .piso { font-size: 13px; font-weight: 700; color: #1e293b; }
+
+    /* ── Main content ── */
+    main {
+      flex: 1;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    /* ── Card ── */
+    .card {
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 18px;
+    }
+    .card-title {
+      font-size: 12px;
+      font-weight: 800;
+      color: var(--gray);
+      text-transform: uppercase;
+      letter-spacing: .5px;
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    /* ── RUT input ── */
+    .rut-wrap { position: relative; }
+    .rut-wrap input {
+      width: 100%;
+      padding: 14px 16px;
+      font-size: 20px;
+      font-weight: 700;
+      border: 2px solid var(--border);
+      border-radius: 12px;
+      outline: none;
+      font-family: 'Inter', monospace;
+      letter-spacing: 1px;
+      color: #1e293b;
+      background: var(--bg);
+      transition: border-color .2s;
+    }
+    .rut-wrap input:focus { border-color: var(--red); background: white; }
+    .rut-wrap input.ok  { border-color: var(--green); }
+    .rut-wrap input.err { border-color: #ef4444; }
+    .rut-hint { font-size: 11px; color: var(--gray); margin-top: 6px; }
+
+    /* ── Button ── */
+    .btn {
+      width: 100%;
+      padding: 15px;
+      border: none;
+      border-radius: 12px;
+      font-size: 16px;
+      font-weight: 800;
+      cursor: pointer;
+      transition: transform .1s, opacity .15s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    .btn:active { transform: scale(.97); }
+    .btn:disabled { opacity: .5; cursor: not-allowed; }
+    .btn-primary { background: var(--red); color: white; }
+    .btn-confirm { background: var(--green); color: white; font-size: 17px; }
+    .btn-sm {
+      padding: 10px 16px;
+      font-size: 13px;
+      border-radius: 10px;
+      width: auto;
+    }
+
+    /* ── Worker info card ── */
+    .worker-card {
+      background: linear-gradient(135deg, #f0fdf4, #dcfce7);
+      border: 2px solid #86efac;
+      border-radius: 16px;
+      padding: 18px;
+      display: none;
+    }
+    .worker-card.show { display: block; }
+    .worker-name {
+      font-size: 20px;
+      font-weight: 900;
+      color: #14532d;
+      margin-bottom: 4px;
+    }
+    .worker-empresa {
+      font-size: 13px;
+      font-weight: 700;
+      color: #166534;
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .worker-dates {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    .date-box {
+      background: white;
+      border-radius: 10px;
+      padding: 10px 12px;
+      border: 1px solid #86efac;
+    }
+    .date-box .lbl { font-size: 10px; font-weight: 700; color: var(--gray); text-transform: uppercase; letter-spacing: .3px; }
+    .date-box .val { font-size: 14px; font-weight: 800; color: #1e293b; margin-top: 2px; }
+
+    /* ── Warning card (wrong room) ── */
+    .warn-card {
+      background: #fffbeb;
+      border: 2px solid #fde68a;
+      border-radius: 16px;
+      padding: 18px;
+      display: none;
+    }
+    .warn-card.show { display: block; }
+    .warn-title { font-size: 14px; font-weight: 800; color: #92400e; margin-bottom: 6px; }
+    .warn-text  { font-size: 13px; color: #78350f; line-height: 1.5; }
+
+    /* ── Error msg ── */
+    .msg {
+      font-size: 13px;
+      font-weight: 600;
+      padding: 10px 14px;
+      border-radius: 10px;
+      display: none;
+    }
+    .msg.show { display: block; }
+    .msg.err  { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+    .msg.ok   { background: #f0fdf4; color: #15803d; border: 1px solid #86efac; }
+    .msg.info { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
+
+    /* ── Confirm section ── */
+    .confirm-section {
+      display: none;
+    }
+    .confirm-section.show { display: flex; flex-direction: column; gap: 10px; }
+    .confirm-done {
+      background: linear-gradient(135deg, #10b981, #059669);
+      color: white;
+      border-radius: 14px;
+      padding: 20px;
+      text-align: center;
+      display: none;
+    }
+    .confirm-done.show { display: block; }
+    .confirm-done .icon { font-size: 40px; }
+    .confirm-done h2 { font-size: 18px; font-weight: 900; margin-top: 8px; }
+    .confirm-done p  { font-size: 13px; opacity: .85; margin-top: 4px; }
+
+    /* ── Toggle modo (solo admin) ── */
+    .mode-toggle {
+      position: fixed;
+      bottom: 20px;
+      right: 16px;
+      z-index: 99;
+    }
+    .mode-toggle button {
+      background: #1e293b;
+      color: white;
+      border: none;
+      border-radius: 50%;
+      width: 44px;
+      height: 44px;
+      font-size: 18px;
+      cursor: pointer;
+      box-shadow: 0 4px 14px rgba(0,0,0,.25);
+    }
+  </style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+  <div class="header-logo">A</div>
+  <div>
+    <h1>Verificación de Habitación</h1>
+    <p>Confirma que eres el ocupante</p>
+  </div>
+</div>
+
+<!-- Room badge -->
+<div class="room-badge">
+  <div>
+    <div style="font-size:11px;font-weight:700;color:var(--gray);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Habitación</div>
+    <div class="room-num" id="disp-hab">—</div>
+  </div>
+  <div class="room-info">
+    <div class="pab">Pabellón 4</div>
+    <div class="piso">Piso 2 · 2°niv</div>
+  </div>
+</div>
+
+<main>
+
+  <!-- PASO 1: Ingresar RUT (modo con RUT) -->
+  <div id="step-rut" class="card">
+    <div class="card-title">👤 Identifícate</div>
+    <div class="rut-wrap">
+      <input type="text" id="rut-input" placeholder="12345678-9"
+        inputmode="text" autocomplete="off" autocorrect="off" spellcheck="false"
+        oninput="onRutInput(this)" onkeydown="if(event.key==='Enter') buscar()">
+    </div>
+    <div class="rut-hint">Ingresa tu RUT sin puntos, con guión</div>
+    <div id="msg-rut" class="msg" style="margin-top:10px"></div>
+    <button class="btn btn-primary" style="margin-top:14px" onclick="buscar()" id="btn-buscar">
+      🔍 Verificar mi habitación
+    </button>
+  </div>
+
+  <!-- Info del trabajador (si está asignado a esta hab) -->
+  <div id="worker-card" class="worker-card">
+    <div class="worker-name" id="w-nombre">—</div>
+    <div class="worker-empresa">
+      <span style="background:#166534;color:white;border-radius:6px;padding:2px 8px;font-size:11px" id="w-empresa-badge">—</span>
+      <span id="w-rut" style="font-size:12px;font-family:monospace;color:#166534">—</span>
+    </div>
+    <div class="worker-dates">
+      <div class="date-box">
+        <div class="lbl">📅 Llegada</div>
+        <div class="val" id="w-llegada">—</div>
+      </div>
+      <div class="date-box">
+        <div class="lbl">🔚 Salida</div>
+        <div class="val" id="w-salida">—</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Advertencia: RUT encontrado pero en otra habitación -->
+  <div id="warn-card" class="warn-card">
+    <div class="warn-title">⚠️ Habitación diferente</div>
+    <div class="warn-text" id="warn-text">
+      Tu RUT está registrado en otra habitación. Verifica con Administración.
+    </div>
+  </div>
+
+  <!-- Botón confirmar presencia (oculto hasta encontrar al trabajador) -->
+  <div id="confirm-section" class="confirm-section">
+    <div style="font-size:12px;color:var(--gray);text-align:center">
+      ¿Confirmas que estás en la habitación <strong id="confirm-hab-num">—</strong>?
+    </div>
+    <button class="btn btn-confirm" id="btn-confirm" onclick="confirmarPresencia()">
+      ✅ Confirmar mi presencia
+    </button>
+  </div>
+
+  <!-- Confirmación exitosa -->
+  <div id="confirm-done" class="confirm-done">
+    <div class="icon">✅</div>
+    <h2>¡Presencia confirmada!</h2>
+    <p id="confirm-msg-sub">Tu llegada quedó registrada.</p>
+  </div>
+
+</main>
+
+<!-- Supabase SDK -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script>
+  // ── Supabase ──────────────────────────────────────────────────────────────
+  const SUPA_URL = 'https://pnkajjduvadcxealodcp.supabase.co';
+  const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBua2FqamR1dmFkY3hlYWxvZGNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUyNDQ1MzIsImV4cCI6MjA5MDgyMDUzMn0.NsL16NP16MVEwTSN-1ggAtwzTA-2tDPF7Ndbcsdl-Ro';
+  const sb = supabase.createClient(SUPA_URL, SUPA_KEY);
+
+  // ── Estado ────────────────────────────────────────────────────────────────
+  const params  = new URLSearchParams(window.location.search);
+  const HAB_NUM = params.get('hab') || '—';
+  let _asignacion = null;
+
+  // Mostrar número de habitación
+  document.getElementById('disp-hab').textContent = HAB_NUM;
+  document.getElementById('confirm-hab-num').textContent = HAB_NUM;
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+  function normRut(r) {
+    return r.trim().toUpperCase().replace(/\./g,'').replace(/\s/g,'');
+  }
+  function fmtFecha(iso) {
+    if (!iso) return '—';
+    return iso.substring(8,10)+'/'+iso.substring(5,7)+'/'+iso.substring(0,4);
+  }
+  function show(id)   { document.getElementById(id).style.display = ''; }
+  function hide(id)   { document.getElementById(id).style.display = 'none'; }
+  function cls(id,...c) { document.getElementById(id).classList.add(...c); }
+  function msg(id, txt, type='info') {
+    const el = document.getElementById(id);
+    el.textContent = txt;
+    el.className = `msg ${type} show`;
+  }
+  function clearMsg(id) { document.getElementById(id).className = 'msg'; }
+
+  function onRutInput(el) {
+    el.classList.remove('ok','err');
+    clearMsg('msg-rut');
+  }
+
+  // ── Buscar trabajador ─────────────────────────────────────────────────────
+  async function buscar() {
+    const rut = normRut(document.getElementById('rut-input').value);
+    if (!rut) { msg('msg-rut','⚠️ Ingresa tu RUT','err'); return; }
+    if (!/^\d{7,8}-[\dkK]$/.test(rut)) {
+      msg('msg-rut','Formato incorrecto. Ej: 12345678-9','err');
+      document.getElementById('rut-input').classList.add('err');
+      return;
+    }
+
+    const btn = document.getElementById('btn-buscar');
+    btn.disabled = true; btn.textContent = '🔍 Buscando…';
+
+    // Buscar asignación activa para este RUT
+    const { data, error } = await sb.from('v2_asignaciones')
+      .select('id, nombre_huesped, rut_huesped, id_cama, fecha_checkin, fecha_salida_programada, v2_empresas(nombre)')
+      .eq('rut_huesped', rut)
+      .is('fecha_checkout', null)
+      .order('fecha_checkin', { ascending: false })
+      .limit(1);
+
+    btn.disabled = false; btn.textContent = '🔍 Verificar mi habitación';
+
+    if (error) { msg('msg-rut','❌ Error de conexión. Intenta de nuevo.','err'); return; }
+
+    if (!data || !data.length) {
+      msg('msg-rut','RUT no encontrado en asignaciones activas. Consulta con Administración.','err');
+      document.getElementById('rut-input').classList.add('err');
+      return;
+    }
+
+    _asignacion = data[0];
+    const emp = _asignacion.v2_empresas?.nombre || '—';
+
+    // Llenar tarjeta trabajador
+    document.getElementById('w-nombre').textContent = _asignacion.nombre_huesped || '—';
+    document.getElementById('w-empresa-badge').textContent = emp;
+    document.getElementById('w-rut').textContent = rut;
+    document.getElementById('w-llegada').textContent = fmtFecha(_asignacion.fecha_checkin);
+    document.getElementById('w-salida').textContent  = fmtFecha(_asignacion.fecha_salida_programada);
+
+    // Ocultar step-rut
+    document.getElementById('step-rut').style.display = 'none';
+    document.getElementById('rut-input').classList.add('ok');
+
+    // ¿Está en ESTA habitación?
+    // Buscar si alguna cama en esta hab está asignada a este RUT
+    // id_cama tiene el id_custom (COPC...) — necesitamos verificar por numero_hab
+    const { data: camaData } = await sb.from('v2_habitaciones')
+      .select('id_custom')
+      .eq('numero_hab', HAB_NUM)
+      .limit(25);
+
+    const camasDeHab = (camaData || []).map(c => c.id_custom);
+    const esEstHab = camasDeHab.includes(_asignacion.id_cama);
+
+    if (esEstHab) {
+      // ✅ Es su habitación
+      document.getElementById('worker-card').classList.add('show');
+      document.getElementById('confirm-section').classList.add('show');
+    } else {
+      // ⚠️ Está asignado pero a otra habitación
+      document.getElementById('worker-card').classList.add('show');
+      document.getElementById('warn-card').classList.add('show');
+      document.getElementById('warn-text').innerHTML =
+        `Tu RUT aparece registrado en la habitación <strong>${_asignacion.id_cama||'otra'}</strong>, no en la <strong>${HAB_NUM}</strong>.<br><br>
+         Si crees que hay un error, consulta con Administración.`;
+      // Igual mostramos el botón de confirmar (por si el campamento lo autorizó)
+      document.getElementById('confirm-section').classList.add('show');
+    }
+  }
+
+  // ── Confirmar presencia ───────────────────────────────────────────────────
+  async function confirmarPresencia() {
+    const btn = document.getElementById('btn-confirm');
+    btn.disabled = true; btn.textContent = '⏳ Registrando…';
+
+    const hoy = new Date().toISOString().split('T')[0];
+
+    // Verificar si ya registró hoy
+    const { data: yaReg } = await sb.from('v2_censo_trabajadores')
+      .select('id')
+      .eq('numero_hab', HAB_NUM)
+      .eq('rut_trabajador', _asignacion.rut_huesped)
+      .eq('fecha_scan', hoy)
+      .limit(1);
+
+    if (yaReg && yaReg.length) {
+      btn.disabled = false; btn.textContent = '✅ Confirmar mi presencia';
+      document.getElementById('confirm-section').classList.remove('show');
+      document.getElementById('confirm-done').classList.add('show');
+      document.getElementById('confirm-msg-sub').textContent =
+        'Ya registraste tu presencia hoy. ¡Gracias!';
+      return;
+    }
+
+    // Insertar censo
+    const { error } = await sb.from('v2_censo_trabajadores').insert([{
+      numero_hab:       HAB_NUM,
+      rut_trabajador:   _asignacion.rut_huesped,
+      nombre_trabajador: _asignacion.nombre_huesped,
+      empresa:          _asignacion.v2_empresas?.nombre || null,
+      fecha_scan:       hoy,
+      asignacion_id:    _asignacion.id,
+    }]);
+
+    btn.disabled = false; btn.textContent = '✅ Confirmar mi presencia';
+
+    if (error) {
+      // Si la tabla no existe aún, avisar
+      if (error.code === '42P01') {
+        document.getElementById('confirm-section').classList.remove('show');
+        document.getElementById('confirm-done').classList.add('show');
+        document.getElementById('confirm-done').style.background = 'linear-gradient(135deg,#6366f1,#4f46e5)';
+        document.getElementById('confirm-msg-sub').textContent =
+          'La tabla de censo aún no está creada en la BD. Ejecuta el SQL primero.';
+        return;
+      }
+      alert('Error al registrar: ' + error.message);
+      return;
+    }
+
+    // ✅ Éxito
+    document.getElementById('confirm-section').classList.remove('show');
+    document.getElementById('confirm-done').classList.add('show');
+    document.getElementById('confirm-msg-sub').textContent =
+      `Presencia registrada el ${fmtFecha(hoy)} en hab. ${HAB_NUM}. ¡Bienvenido/a!`;
+  }
+</script>
+</body>
+</html>

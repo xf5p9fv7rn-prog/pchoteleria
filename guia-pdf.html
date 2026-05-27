@@ -1,0 +1,776 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+  <meta charset="UTF-8">
+  <title>Guía Completa PC Hotelería</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: #fff;
+      color: #1a202c
+    }
+
+    .page {
+      width: 210mm;
+      min-height: 297mm;
+      padding: 0;
+      page-break-after: always;
+      position: relative;
+      overflow: hidden;
+      background: #fff
+    }
+
+    .page:last-child {
+      page-break-after: auto
+    }
+
+    /* Hero */
+    .hero {
+      background: linear-gradient(135deg, #c0392b, #e74c3c);
+      color: #fff;
+      padding: 32px 28px 24px;
+      text-align: center
+    }
+
+    .hero h1 {
+      font-size: 22px;
+      font-weight: 900;
+      margin-bottom: 6px
+    }
+
+    .hero p {
+      font-size: 12px;
+      opacity: .85;
+      line-height: 1.5
+    }
+
+    .badge-row {
+      display: flex;
+      gap: 8px;
+      justify-content: center;
+      margin-top: 10px;
+      flex-wrap: wrap
+    }
+
+    .badge {
+      background: rgba(255, 255, 255, .2);
+      border: 1px solid rgba(255, 255, 255, .35);
+      border-radius: 99px;
+      padding: 3px 12px;
+      font-size: 10px;
+      font-weight: 700
+    }
+
+    .part-tag {
+      position: absolute;
+      top: 16px;
+      right: 20px;
+      background: rgba(0, 0, 0, .25);
+      border-radius: 8px;
+      padding: 4px 12px;
+      font-size: 11px;
+      font-weight: 900;
+      letter-spacing: .5px
+    }
+
+    /* Content */
+    .content {
+      padding: 20px 28px
+    }
+
+    .section-label {
+      font-size: 10px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #c0392b;
+      margin-bottom: 14px;
+      padding-bottom: 6px;
+      border-bottom: 2px solid #fee2e2
+    }
+
+    .steps {
+      display: flex;
+      flex-direction: column;
+      gap: 12px
+    }
+
+    .step {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 12px 14px
+    }
+
+    .num {
+      width: 36px;
+      height: 36px;
+      min-width: 36px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #c0392b, #e74c3c);
+      color: #fff;
+      font-size: 16px;
+      font-weight: 900;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 3px 10px rgba(192, 57, 43, .3)
+    }
+
+    .step-body {
+      flex: 1
+    }
+
+    .step-title {
+      font-size: 13px;
+      font-weight: 800;
+      color: #1a202c;
+      margin-bottom: 3px
+    }
+
+    .step-desc {
+      font-size: 11.5px;
+      color: #475569;
+      line-height: 1.5
+    }
+
+    .step-list {
+      margin-top: 5px;
+      padding-left: 14px
+    }
+
+    .step-list li {
+      font-size: 11px;
+      color: #374151;
+      margin-bottom: 2px;
+      line-height: 1.4
+    }
+
+    .box {
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 11px;
+      font-weight: 600;
+      line-height: 1.5;
+      margin-top: 6px
+    }
+
+    .box-amber {
+      background: #fff7ed;
+      border: 1px solid #fed7aa;
+      color: #92400e
+    }
+
+    .box-blue {
+      background: #eff6ff;
+      border: 1px solid #bfdbfe;
+      color: #1e40af
+    }
+
+    .box-green {
+      background: #f0fdf4;
+      border: 1px solid #bbf7d0;
+      color: #15803d
+    }
+
+    .box-red {
+      background: #fef2f2;
+      border: 1px solid #fecaca;
+      color: #b91c1c
+    }
+
+    /* Info boxes */
+    .info-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 14px
+    }
+
+    .info-box {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      padding: 12px;
+      text-align: center
+    }
+
+    .info-box .icon {
+      font-size: 22px;
+      margin-bottom: 4px
+    }
+
+    .info-box .label {
+      font-size: 9px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .5px;
+      color: #94a3b8;
+      margin-bottom: 3px
+    }
+
+    .info-box .val {
+      font-size: 12px;
+      font-weight: 800;
+      color: #c0392b
+    }
+
+    /* Footer bar */
+    .footer-bar {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: #1a202c;
+      color: #94a3b8;
+      font-size: 9px;
+      font-weight: 600;
+      text-align: center;
+      padding: 7px;
+      letter-spacing: .5px;
+      text-transform: uppercase
+    }
+
+    /* Timeline variant */
+    .timeline {
+      display: flex;
+      gap: 0;
+      margin-top: 10px
+    }
+
+    .tl-item {
+      flex: 1;
+      text-align: center;
+      position: relative
+    }
+
+    .tl-item:not(:last-child)::after {
+      content: '→';
+      position: absolute;
+      right: -8px;
+      top: 14px;
+      font-size: 16px;
+      color: #c0392b;
+      font-weight: 900
+    }
+
+    .tl-circle {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #c0392b, #e74c3c);
+      color: #fff;
+      font-size: 14px;
+      font-weight: 900;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 4px
+    }
+
+    .tl-label {
+      font-size: 9.5px;
+      font-weight: 700;
+      color: #475569;
+      line-height: 1.3
+    }
+
+    /* Contingencia colors */
+    .hero-amber {
+      background: linear-gradient(135deg, #d97706, #f59e0b)
+    }
+
+    .num-amber {
+      background: linear-gradient(135deg, #d97706, #f59e0b)
+    }
+
+    .box-emergency {
+      background: #fff1f2;
+      border: 2px solid #fca5a5;
+      border-radius: 10px;
+      padding: 12px 14px;
+      margin-top: 10px
+    }
+
+    .box-emergency h4 {
+      font-size: 13px;
+      font-weight: 800;
+      color: #b91c1c;
+      margin-bottom: 6px
+    }
+
+    .box-emergency ul {
+      padding-left: 14px
+    }
+
+    .box-emergency ul li {
+      font-size: 11px;
+      color: #7f1d1d;
+      margin-bottom: 2px
+    }
+
+    /* Logos */
+    .logos {
+      display: flex;
+      gap: 14px;
+      justify-content: center;
+      align-items: center;
+      margin-bottom: 10px
+    }
+
+    .logos img {
+      height: 32px;
+      filter: brightness(0) invert(1)
+    }
+
+    .logos span {
+      width: 1px;
+      height: 28px;
+      background: rgba(255, 255, 255, .3)
+    }
+
+    /* Print */
+    @media print {
+      body {
+        background: #fff
+      }
+
+      .page {
+        width: 100%;
+        min-height: 100vh
+      }
+
+      .no-print {
+        display: none !important
+      }
+    }
+
+    /* Screen print button */
+    .print-btn {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: linear-gradient(135deg, #c0392b, #e74c3c);
+      color: #fff;
+      border: none;
+      border-radius: 14px;
+      padding: 14px 24px;
+      font-size: 14px;
+      font-weight: 800;
+      cursor: pointer;
+      box-shadow: 0 6px 24px rgba(192, 57, 43, .4);
+      z-index: 999
+    }
+  </style>
+</head>
+
+<body>
+
+  <button class="print-btn no-print" onclick="window.print()">🖨️ Imprimir PDF</button>
+
+  <!-- ═══════════════════════════════════════════════════
+     PÁGINA 1 — SOLICITUD PREVIA
+═══════════════════════════════════════════════════ -->
+  <div class="page">
+    <div class="hero">
+      <div class="part-tag">PARTE 1 / 4</div>
+      <div class="logos">
+        <img src="aramark.png" alt="Aramark" onerror="this.style.display='none'">
+        <span></span>
+        <img src="angloamerican.png" alt="Anglo" onerror="this.style.display='none'">
+      </div>
+      <h1>📋 Solicitud Previa de Alojamiento</h1>
+      <p>Proceso obligatorio que cada empresa debe completar <strong>72 horas antes</strong> del ingreso al campamento.
+      </p>
+      <div class="badge-row">
+        <span class="badge">⏱️ Mínimo 72 hrs de anticipación</span>
+        <span class="badge">📧 Portal + Correo obligatorio</span>
+      </div>
+    </div>
+
+    <div class="content">
+      <div class="section-label">📌 Pasos para Solicitar Alojamiento</div>
+      <div class="steps">
+
+        <div class="step">
+          <div class="num">1</div>
+          <div class="step-body">
+            <div class="step-title">🌐 Ingresar al Portal de Solicitudes</div>
+            <div class="step-desc">El encargado de la empresa accede al portal oficial desde cualquier dispositivo.
+            </div>
+            <div class="box box-blue" style="margin-top:5px;font-family:monospace;font-size:12px;font-weight:800">
+              pchoteleria.netlify.app/solicitud-empresa.html</div>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="num">2</div>
+          <div class="step-body">
+            <div class="step-title">📥 Descargar la Plantilla Excel</div>
+            <div class="step-desc">Hacer clic en "Descargar Plantilla Excel". Completar todos los campos requeridos:
+            </div>
+            <ul class="step-list">
+              <li>Nombre completo (2 nombres + 2 apellidos, en MAYÚSCULAS)</li>
+              <li>RUT con dígito verificador (Ej: 12345678-9)</li>
+              <li>Empresa, contrato, gerencia, sexo (Masculino/Femenino)</li>
+              <li>Fecha ingreso y salida en formato DD/MM/YYYY</li>
+              <li>Tipo de turno (Día / Noche)</li>
+            </ul>
+            <div class="box box-amber">⚠️ No modificar la estructura del Excel (columnas y encabezados).</div>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="num">3</div>
+          <div class="step-body">
+            <div class="step-title">⬆️ Cargar Excel en el Portal</div>
+            <div class="step-desc">Completar el formulario con los datos de la empresa, adjuntar el Excel y presionar
+              <strong>"Enviar Solicitud"</strong>. Esperar la confirmación en pantalla.
+            </div>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="num">4</div>
+          <div class="step-body">
+            <div class="step-title">📧 Enviar Correo de Confirmación</div>
+            <div class="step-desc">Además del portal, enviar correo con el mismo Excel adjunto.</div>
+            <div class="box box-blue" style="margin-top:5px">
+              <strong>Para:</strong> hoteleriapc@aramark.cl<br>
+              <strong>Asunto:</strong> Nómina [Empresa] — Ingreso [Fecha]
+            </div>
+            <div class="box box-red" style="margin-top:5px">⚠️ Sin el correo el proceso NO se considera completo.</div>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="info-grid">
+        <div class="info-box">
+          <div class="icon">📧</div>
+          <div class="label">Correo</div>
+          <div class="val" style="font-size:11px">hoteleriapc@aramark.cl</div>
+        </div>
+        <div class="info-box">
+          <div class="icon">📞</div>
+          <div class="label">Administración</div>
+          <div class="val">+56 9 9433 0979</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer-bar">PC Hotelería · Aramark · Anglo American · Sistema de Gestión de Campamento</div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════
+     PÁGINA 2 — CHECK-IN
+═══════════════════════════════════════════════════ -->
+  <div class="page">
+    <div class="hero">
+      <div class="part-tag">PARTE 2 / 4</div>
+      <div class="logos">
+        <img src="aramark.png" alt="Aramark" onerror="this.style.display='none'">
+        <span></span>
+        <img src="angloamerican.png" alt="Anglo" onerror="this.style.display='none'">
+      </div>
+      <h1>✅ Check-In — Ingreso al Campamento</h1>
+      <p>Proceso de llegada e ingreso formal del trabajador a su habitación asignada.</p>
+      <div class="badge-row">
+        <span class="badge">🏕️ Presencial en Administración</span>
+        <span class="badge">📱 También desde celular</span>
+      </div>
+    </div>
+
+    <div class="content">
+      <div class="section-label">📌 Opciones de Check-In</div>
+
+      <div class="steps">
+
+        <div class="step" style="border-color:#bbf7d0;background:#f0fdf4">
+          <div class="num" style="background:linear-gradient(135deg,#15803d,#22c55e)">A</div>
+          <div class="step-body">
+            <div class="step-title" style="color:#15803d">📱 Opción 1: Consulta desde Celular (Mi Habitación)</div>
+            <div class="step-desc">Si la empresa tiene acceso habilitado, el trabajador puede consultar su habitación
+              directamente desde su teléfono:</div>
+            <div class="box box-blue" style="margin-top:5px;font-family:monospace;font-size:12px;font-weight:800">
+              pchoteleria.netlify.app/mi-habitacion.html</div>
+            <ul class="step-list" style="margin-top:6px">
+              <li>Ingresar RUT (con dígito verificador)</li>
+              <li>Ver número de habitación y cama asignada</li>
+              <li>Confirmar llegada tocando el botón "Confirmar Llegada"</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="step" style="border-color:#bfdbfe;background:#eff6ff">
+          <div class="num" style="background:linear-gradient(135deg,#1d4ed8,#3b82f6)">B</div>
+          <div class="step-body">
+            <div class="step-title" style="color:#1d4ed8">🏢 Opción 2: Check-In en Administración</div>
+            <div class="step-desc">El trabajador se presenta en la oficina de administración del campamento con su RUT.
+            </div>
+            <ul class="step-list">
+              <li>El administrador busca al trabajador en el sistema</li>
+              <li>Verifica empresa y habitación asignada</li>
+              <li>Registra el check-in en el panel de infraestructura</li>
+              <li>Entrega número de habitación y cama al trabajador</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="num">!</div>
+          <div class="step-body">
+            <div class="step-title">⚠️ Trabajadores sin Pre-Asignación</div>
+            <div class="step-desc">Si el trabajador NO aparece en el sistema:</div>
+            <ul class="step-list">
+              <li>Verificar que la empresa envió la nómina con 72 hrs de anticipación</li>
+              <li>Contactar al supervisor de la empresa</li>
+              <li>No asignar habitación sin registro en el sistema</li>
+            </ul>
+            <div class="box box-amber">⚠️ Sin solicitud previa aprobada, no hay asignación de habitación.</div>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="box box-green" style="margin-top:14px;font-size:12px">
+        💡 <strong>Sistema Automático:</strong> Cuando la empresa carga la nómina con la habitación asignada, el día de
+        llegada el trabajador aparece automáticamente en su cama sin que administración deba hacer nada.
+      </div>
+
+      <div class="info-grid" style="margin-top:12px">
+        <div class="info-box">
+          <div class="icon">🏠</div>
+          <div class="label">Portal Mi Habitación</div>
+          <div class="val" style="font-size:10px">pchoteleria.netlify.app<br>/mi-habitacion.html</div>
+        </div>
+        <div class="info-box">
+          <div class="icon">📞</div>
+          <div class="label">Administración</div>
+          <div class="val">+56 9 9433 0979</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer-bar">PC Hotelería · Aramark · Anglo American · Sistema de Gestión de Campamento</div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════
+     PÁGINA 3 — CHECK-OUT
+═══════════════════════════════════════════════════ -->
+  <div class="page">
+    <div class="hero">
+      <div class="part-tag">PARTE 3 / 4</div>
+      <div class="logos">
+        <img src="aramark.png" alt="Aramark" onerror="this.style.display='none'">
+        <span></span>
+        <img src="angloamerican.png" alt="Anglo" onerror="this.style.display='none'">
+      </div>
+      <h1>🚪 Check-Out — Salida del Campamento</h1>
+      <p>Proceso de egreso al término del turno. La habitación debe quedar libre para el siguiente trabajador.</p>
+      <div class="badge-row">
+        <span class="badge">📅 El día de salida programado</span>
+        <span class="badge">⚡ Automático si está configurado</span>
+      </div>
+    </div>
+
+    <div class="content">
+      <div class="section-label">📌 Proceso de Salida</div>
+
+      <div class="steps">
+
+        <div class="step">
+          <div class="num">1</div>
+          <div class="step-body">
+            <div class="step-title">🛏️ Dejar la Habitación Lista</div>
+            <div class="step-desc">El trabajador debe dejar la habitación en condiciones antes de su fecha de salida
+              programada:</div>
+            <ul class="step-list">
+              <li>Retirar todos sus pertenencias personales</li>
+              <li>Dejar ropa de cama ordenada</li>
+              <li>Reportar cualquier daño o desperfecto al administrador</li>
+              <li>Entregar cualquier llave o tarjeta de acceso</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="num">2</div>
+          <div class="step-body">
+            <div class="step-title">⚡ Check-Out Automático del Sistema</div>
+            <div class="step-desc">El sistema realiza el checkout automáticamente el día de la fecha de salida
+              programada. La cama queda disponible para el siguiente turno.</div>
+            <div class="box box-green">✅ No se requiere acción manual si la fecha de salida fue correctamente cargada en
+              la nómina.</div>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="num">3</div>
+          <div class="step-body">
+            <div class="step-title">🏢 Check-Out Manual en Administración</div>
+            <div class="step-desc">Si el trabajador sale antes de su fecha programada o requiere confirmación manual:
+            </div>
+            <ul class="step-list">
+              <li>Presentarse en la oficina de administración</li>
+              <li>El administrador registra la salida en el sistema</li>
+              <li>Se libera la cama inmediatamente</li>
+              <li>El registro queda en el historial del campamento</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="num">4</div>
+          <div class="step-body">
+            <div class="step-title">🏢 Salida Grupal por Empresa</div>
+            <div class="step-desc">Para grupos completos, el supervisor puede coordinar con administración la salida
+              grupal de todos los trabajadores de su empresa simultáneamente. Todas las camas quedan libres
+              automáticamente.</div>
+            <div class="box box-amber">⚠️ Avisar con anticipación si la salida es masiva para coordinar la limpieza de
+              habitaciones.</div>
+          </div>
+        </div>
+
+      </div>
+
+      <div
+        style="background:linear-gradient(135deg,#7f1d1d,#c0392b);border-radius:12px;padding:16px 20px;color:#fff;margin-top:16px;text-align:center">
+        <div style="font-size:18px;font-weight:900;margin-bottom:6px">📋 Recordatorio de Salida</div>
+        <div style="font-size:12px;opacity:.9;line-height:1.6">La fecha de salida del turno es el <strong>último día de
+            estadía</strong>. El checkout se registra ese mismo día. La habitación debe estar libre antes de las
+          <strong>12:00 hrs</strong> del día de salida.
+        </div>
+      </div>
+
+      <div class="info-grid" style="margin-top:12px">
+        <div class="info-box">
+          <div class="icon">📧</div>
+          <div class="label">Correo</div>
+          <div class="val" style="font-size:10px">hoteleriapc@aramark.cl</div>
+        </div>
+        <div class="info-box">
+          <div class="icon">📞</div>
+          <div class="label">Administración</div>
+          <div class="val">+56 9 9433 0979</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer-bar">PC Hotelería · Aramark · Anglo American · Sistema de Gestión de Campamento</div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════
+     PÁGINA 4 — CONTINGENCIA
+═══════════════════════════════════════════════════ -->
+  <div class="page">
+    <div class="hero hero-amber">
+      <div class="part-tag">PARTE 4 / 4</div>
+      <div class="logos">
+        <img src="aramark.png" alt="Aramark" onerror="this.style.display='none'">
+        <span></span>
+        <img src="angloamerican.png" alt="Anglo" onerror="this.style.display='none'">
+      </div>
+      <h1>🚨 Contingencia y Casos Especiales</h1>
+      <p>Procedimientos para situaciones fuera del flujo normal. Ante cualquier duda, contactar a administración.</p>
+      <div class="badge-row">
+        <span class="badge">🚨 Emergencias y excepciones</span>
+        <span class="badge">📞 Contacto directo disponible</span>
+      </div>
+    </div>
+
+    <div class="content">
+      <div class="section-label">🚨 Situaciones de Contingencia</div>
+
+      <div class="box-emergency">
+        <h4>❌ Trabajador no aparece en el sistema</h4>
+        <ul>
+          <li>Verificar que la empresa envió la nómina con mínimo 72 hrs de anticipación</li>
+          <li>Contactar al supervisor de la empresa para confirmar el envío</li>
+          <li>El administrador puede registrar manualmente en casos excepcionales</li>
+          <li>No asignar habitación sin autorización del jefe de turno</li>
+        </ul>
+      </div>
+
+      <div class="box-emergency" style="margin-top:10px">
+        <h4>🔄 Cambio de Trabajador (Reemplazo)</h4>
+        <ul>
+          <li>La empresa debe enviar correo con el reemplazo: quien sale y quien entra</li>
+          <li>Indicar fechas exactas de ambos trabajadores</li>
+          <li>El sistema puede reasignar la misma cama al nuevo trabajador</li>
+          <li>Plazo mínimo de aviso: 48 hrs antes del cambio</li>
+        </ul>
+      </div>
+
+      <div class="box-emergency" style="margin-top:10px">
+        <h4>🛏️ Habitación con Problemas (Mantención)</h4>
+        <ul>
+          <li>Reportar inmediatamente en administración cualquier desperfecto</li>
+          <li>No intentar reparar daños por cuenta propia</li>
+          <li>El administrador asignará habitación alternativa si es necesario</li>
+          <li>Completar el formulario de mantención disponible en recepción</li>
+        </ul>
+      </div>
+
+      <div class="box-emergency" style="margin-top:10px;border-color:#fed7aa;background:#fff7ed">
+        <h4 style="color:#92400e">⚠️ Extensión de Estadía</h4>
+        <ul style="">
+          <li style="color:#78350f">Solicitar con mínimo 48 hrs de anticipación</li>
+          <li style="color:#78350f">Enviar correo con nueva fecha de salida y número de contrato</li>
+          <li style="color:#78350f">Sujeto a disponibilidad de habitación</li>
+          <li style="color:#78350f">La empresa debe actualizar la nómina con la nueva fecha</li>
+        </ul>
+      </div>
+
+      <!-- Contactos -->
+      <div style="margin-top:16px">
+        <div class="section-label">📞 Contactos de Emergencia</div>
+        <div class="info-grid">
+          <div class="info-box">
+            <div class="icon">📞</div>
+            <div class="label">Administración 24/7</div>
+            <div class="val">+56 9 9433 0979</div>
+          </div>
+          <div class="info-box">
+            <div class="icon">📧</div>
+            <div class="label">Correo Oficial</div>
+            <div class="val" style="font-size:10px">hoteleriapc@aramark.cl</div>
+          </div>
+          <div class="info-box">
+            <div class="icon">🌐</div>
+            <div class="label">Portal Empresas</div>
+            <div class="val" style="font-size:9px">pchoteleria.netlify.app<br>/solicitud-empresa.html</div>
+          </div>
+          <div class="info-box">
+            <div class="icon">🏠</div>
+            <div class="label">Mi Habitación</div>
+            <div class="val" style="font-size:9px">pchoteleria.netlify.app<br>/mi-habitacion.html</div>
+          </div>
+        </div>
+      </div>
+
+      <div style="background:#1a202c;border-radius:12px;padding:14px 18px;color:#fff;margin-top:14px;text-align:center">
+        <div style="font-size:13px;font-weight:800;margin-bottom:4px">🏕️ PC Hotelería · Campamento Anglo American</div>
+        <div style="font-size:11px;color:#94a3b8;line-height:1.5">Sistema de gestión de alojamiento para trabajadores.
+          Para soporte técnico del sistema contactar al administrador del campamento.</div>
+      </div>
+
+    </div>
+
+    <div class="footer-bar">PC Hotelería · Aramark · Anglo American · Sistema de Gestión de Campamento · v2026</div>
+  </div>
+
+</body>
+
+</html>

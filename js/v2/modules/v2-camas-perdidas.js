@@ -321,13 +321,22 @@ function renderPorPabellon(filtro = 'todos') {
 }
 
 // ── Render KPIs ───────────────────────────────────────────────────────────────
-function renderKpis() {
-    // Suma camas_perdidas (puede ser >1 por hab cuando viene de vista SQL) o 1 en fallback JS
-    const total  = _perdidas.reduce((s, p) => s + (p.camas_perdidas ?? 1), 0);
-    const bloq   = _perdidas.filter(p => p.tipo === 'BLOQUEADA').reduce((s, p) => s + (p.camas_perdidas ?? 1), 0);
-    const parc   = _perdidas.filter(p => p.tipo === 'OCUPACION PARCIAL').reduce((s, p) => s + (p.camas_perdidas ?? 1), 0);
-    const conMot = _perdidas.filter(p => _registros[p.id_cama_perdida]?.motivo &&
-                                         _registros[p.id_cama_perdida]?.motivo !== 'sin_motivo').length;
+function renderKpis(filtro = 'todos') {
+    // Filtrar según tab activo
+    let subset = _perdidas;
+    if (filtro === 'anglo') subset = _perdidas.filter(p => p.es_anglo);
+    if (filtro === 'otras') subset = _perdidas.filter(p => !p.es_anglo);
+
+    const total  = subset.reduce((s, p) => s + (p.camas_perdidas ?? 1), 0);
+    const bloq   = subset.filter(p => p.tipo === 'BLOQUEADA').reduce((s, p) => s + (p.camas_perdidas ?? 1), 0);
+    const parc   = subset.filter(p => p.tipo === 'OCUPACION PARCIAL').reduce((s, p) => s + (p.camas_perdidas ?? 1), 0);
+    const conMot = subset.filter(p => _registros[p.id_cama_perdida]?.motivo &&
+                                      _registros[p.id_cama_perdida]?.motivo !== 'sin_motivo').length;
+
+    // % ocupación parcial sobre el total global (siempre sobre _perdidas completo)
+    const totalGlobal = _perdidas.reduce((s, p) => s + (p.camas_perdidas ?? 1), 0);
+    const pct = totalGlobal > 0 ? Math.round((total / totalGlobal) * 100) : 0;
+    const labelFiltro = filtro === 'anglo' ? '🏭 Solo Anglo' : filtro === 'otras' ? '🏢 Otras Empresas' : '📊 Todos';
 
     const el = document.getElementById('cp-kpis');
     if (!el) return;
@@ -336,7 +345,14 @@ function renderKpis() {
         kpi('🔒', 'Hab. Bloqueadas',       bloq,  '#b91c1c'),
         kpi('🟡', 'Ocupación Parcial',     parc,  '#f59e0b'),
         kpi('📋', 'Con Motivo Registrado', conMot,'#10b981'),
-    ].join('');
+    ].join('') +
+    (filtro !== 'todos' ? `
+    <div style="grid-column:1/-1;background:#f0f4ff;border:1.5px solid #c7d7fe;border-radius:12px;padding:10px 16px;
+         display:flex;align-items:center;gap:10px;font-size:13px;color:#3730a3;font-weight:700">
+      <span style="font-size:18px">ℹ️</span>
+      Mostrando <strong>${labelFiltro}</strong>: ${total} camas perdidas
+      (${pct}% del total global de ${totalGlobal})
+    </div>` : '');
 }
 
 // ── Filtro activo ─────────────────────────────────────────────────────────────
@@ -352,6 +368,7 @@ function setFiltro(f) {
             btn.style.borderColor= activo ? '#6366f1' : 'var(--border)';
         }
     });
+    renderKpis(f);   // ← KPIs actualizados al filtro seleccionado
     renderTabla(f);
 }
 
@@ -427,7 +444,7 @@ export async function renderV2CamasPerdidas(container) {
     // Cargar datos
     try {
         await Promise.all([detectarCamasPerdidas(), cargarRegistros()]);
-        renderKpis();
+        renderKpis(_filtro);
         renderTabla(_filtro);
     } catch (e) {
         document.getElementById('cp-lista').innerHTML =
@@ -482,7 +499,7 @@ export async function renderV2CamasPerdidas(container) {
             row.style.borderColor = '#10b981';
             setTimeout(() => { row.style.borderColor = 'var(--border)'; }, 1500);
         }
-        renderKpis();
+        renderKpis(_filtro);
         // Re-renderizar solo esa fila para mostrar botón "Limpiar"
         const p = _perdidas.find(x => x.id_cama_perdida === idCama);
         if (p && row) row.outerHTML = filaHTML(p);
@@ -490,7 +507,7 @@ export async function renderV2CamasPerdidas(container) {
 
     window._cpEliminar = async (idCama) => {
         await eliminarMotivo(idCama);
-        renderKpis();
+        renderKpis(_filtro);
         const p = _perdidas.find(x => x.id_cama_perdida === idCama);
         const row = document.getElementById(`row-${idCama}`);
         if (p && row) row.outerHTML = filaHTML(p);

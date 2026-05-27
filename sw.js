@@ -1,4 +1,5 @@
-const CACHE_NAME = 'v2-purge-fix-8';
+const CACHE_NAME = 'v2-purge-fix-16'; // 🔄 Incrementar en cada deploy para limpiar cache viejo
+
 
 
 const STATIC_ASSETS = [

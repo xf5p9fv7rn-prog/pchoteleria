@@ -104,6 +104,8 @@ const ESTADO_CONF = {
     noche:      { lbl: 'N',  bg: '#ede9fe', c: '#7c3aed' },
     '2_dia':    { lbl: '2D', bg: '#fef3c7', c: '#d97706' },
     '2_noche':  { lbl: '2N', bg: '#fee2e2', c: '#dc2626' },
+    '3_dia':    { lbl: '3D', bg: '#cffafe', c: '#0e7490' },  // teal — cama 3 día
+    '3_noche':  { lbl: '3N', bg: '#ede9fe', c: '#4a1d96' },  // violeta oscuro — cama 3 noche
 };
 
 let _periodoOffset = 0;
@@ -378,171 +380,203 @@ async function renderGrid() {
       </table>`;
 }
 
-// ── BILLING: cobro por N° contrato (cama ocupada × día) ────────────────
+// ── BILLING: basado en censo real de hoteleras ─────────────────────────
 async function renderBilling() {
     const body = document.getElementById('censo-body');
-    body.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-muted)">⏳ Calculando cobros…</div>';
+    body.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-muted)">⏳ Calculando desde censo de hoteleras…</div>';
 
     const pIni = fmtISO(_periodo.ini);
     const pFin = fmtISO(_periodo.fin);
 
-    // Traer todas las asignaciones que se solapan con el período
-    const { data: asigs, error } = await supabase.from('v2_asignaciones')
-        .select('id_cama,rut_huesped,nombre_huesped,numero_contrato,fecha_checkin,fecha_salida_programada,fecha_checkout,v2_empresas(nombre,turno,v2_gerencias(nombre)),v2_camas(numero_cama,v2_habitaciones(numero_hab))')
-        .lte('fecha_checkin', pFin)
-        .or(`fecha_checkout.is.null,fecha_checkout.gte.${pIni}`)
-        .not('estado_asignacion', 'eq', 'sin_checkout');
+    // ── 1. Registros del censo (fuente: hoteleras) ────────────────────────
+    const { data: registros, error: errReg } = await supabase
+        .from('v2_censo_registros')
+        .select('habitacion_id, fecha, estado')
+        .gte('fecha', pIni)
+        .lte('fecha', pFin)
+        .neq('estado', 'sin_ocupar');
+    if (errReg) { body.innerHTML = `<div style="color:#ef4444;padding:20px">❌ ${errReg.message}</div>`; return; }
 
-    if (error) { body.innerHTML = `<div style="color:#ef4444;padding:20px">❌ ${error.message}</div>`; return; }
-
-    // Calcular camas-día solapadas con el período para cada asignación
-    const diasPeriodo = _periodo.dias.map(d => fmtISO(d));
-
-    // Agrupar por N° contrato → empresa → detalle de trabajadores
-    const porContrato = {}; // contrato → { emp, ger, turno, dias: Set<fecha>, trabajadores: Map<rut, {nombre, camasDia}> }
-
-    (asigs || []).forEach(a => {
-        const cont = a.numero_contrato || '(sin contrato)';
-        const emp  = a.v2_empresas?.nombre || 'Sin empresa';
-        const ger  = a.v2_empresas?.v2_gerencias?.nombre || '—';
-        const turno= a.v2_empresas?.turno || '—';
-        const hab  = a.v2_camas?.v2_habitaciones?.numero_hab || '—';
-
-        if (!porContrato[cont]) porContrato[cont] = { emp, ger, turno, totalDias: 0, trabajadores: [] };
-
-        // Contar días ocupados dentro del período
-        const desde = a.fecha_checkin > pIni ? a.fecha_checkin : pIni;
-        const hasta = (() => {
-            const salida = a.fecha_salida_programada || pFin;
-            const chk    = a.fecha_checkout;
-            const real   = (chk && chk < salida) ? chk : salida;
-            return real < pFin ? real : pFin;
-        })();
-        if (desde > hasta) return;
-        const camasDia = Math.round((new Date(hasta) - new Date(desde)) / 86400000) + 1;
-
-        porContrato[cont].totalDias += camasDia;
-        porContrato[cont].trabajadores.push({ nombre: a.nombre_huesped, rut: a.rut_huesped, hab, desde, hasta, camasDia });
-    });
-
-    if (!Object.keys(porContrato).length) {
-        body.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-muted)">Sin asignaciones activas en este período</div>';
+    if (!registros?.length) {
+        body.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-muted)">⚠️ Sin registros de censo en este período.<br><span style="font-size:12px">Las hoteleras deben registrar el censo diario desde el portal de terreno.</span></div>';
         return;
     }
 
-    const grandTotal = Object.values(porContrato).reduce((s, v) => s + v.totalDias, 0);
-    const nContratos = Object.keys(porContrato).length;
-    const nTrab      = Object.values(porContrato).reduce((s, v) => s + v.trabajadores.length, 0);
+    // ── 2. Asignaciones activas en el período (con habitacion_id) ─────────
+    const PAGE = 1000; let asigAll = [], pg = 0;
+    while (true) {
+        const { data } = await supabase
+            .from('v2_asignaciones')
+            .select('id_cama, rut_huesped, nombre_huesped, numero_contrato, fecha_checkin, fecha_salida_programada, fecha_checkout, v2_empresas(nombre, turno, v2_gerencias(nombre)), v2_camas(numero_cama, habitacion_id, v2_habitaciones(numero_hab))')
+            .lte('fecha_checkin', pFin)
+            .or(`fecha_checkout.is.null,fecha_checkout.gte.${pIni}`)
+            .range(pg * PAGE, pg * PAGE + PAGE - 1);
+        if (data?.length) asigAll = asigAll.concat(data);
+        if (!data || data.length < PAGE) break;
+        pg++; if (pg > 20) break;
+    }
 
-    // KPIs resumen
-    const kpis = [
-        { icon: '📄', lbl: 'Contratos',    val: nContratos,                     c: '#6366f1' },
-        { icon: '🛏️', lbl: 'Total Camas-Día', val: grandTotal.toLocaleString('es-CL'), c: '#0ea5e9' },
-        { icon: '👷', lbl: 'Trabajadores',  val: nTrab,                          c: '#10b981' },
-        { icon: '📅', lbl: 'Días período',  val: _periodo.dias.length,           c: '#f59e0b' },
+    // ── 3. Mapa: habitacion_id → lista de asignaciones ────────────────────
+    const asigByHab = {};
+    asigAll.forEach(a => {
+        const hid = a.v2_camas?.habitacion_id;
+        if (!hid) return;
+        if (!asigByHab[hid]) asigByHab[hid] = [];
+        asigByHab[hid].push(a);
+    });
+
+    // ── 4. Cuántas camas por estado ───────────────────────────────────────
+    const estadoCamas = { dia:{'dia':1,'2_dia':2,'3_dia':3}, noche:{'noche':1,'2_noche':2,'3_noche':3} };
+
+    // ── 5. Cruzar census × asignaciones ──────────────────────────────────
+    // key: empresa|contrato|gerencia → { dia, noche, c3dia, c3noche, diasSet, trabajadoresSet }
+    const porEmpresa = {};
+    const SIN = 'Sin empresa|(sin contrato)|—';
+
+    registros.forEach(reg => {
+        const numDia   = estadoCamas.dia[reg.estado]   || 0;
+        const numNoche = estadoCamas.noche[reg.estado] || 0;
+        const es3      = reg.estado === '3_dia' || reg.estado === '3_noche';
+        if (numDia + numNoche === 0) return;
+
+        // Asignaciones activas en esta habitación en esta fecha
+        const activos = (asigByHab[reg.habitacion_id] || []).filter(a =>
+            a.fecha_checkin <= reg.fecha &&
+            (!a.fecha_checkout || a.fecha_checkout >= reg.fecha)
+        );
+
+        const agregar = (key, emp, cont, ger, turno, dia, noche, c3d, c3n, nombre, rut, hab) => {
+            if (!porEmpresa[key]) porEmpresa[key] = { emp, cont, ger, turno, dia:0, noche:0, c3dia:0, c3noche:0, total:0, dias: new Set(), trabajadores:{} };
+            porEmpresa[key].dia    += dia;
+            porEmpresa[key].noche  += noche;
+            porEmpresa[key].c3dia  += c3d;
+            porEmpresa[key].c3noche+= c3n;
+            porEmpresa[key].total  += dia + noche + c3d + c3n;
+            porEmpresa[key].dias.add(reg.fecha);
+            if (nombre && !porEmpresa[key].trabajadores[rut]) {
+                porEmpresa[key].trabajadores[rut] = { nombre, rut, hab };
+            }
+        };
+
+        if (!activos.length) {
+            // Registro sin asignación conocida
+            agregar(SIN, 'Sin empresa', '(sin contrato)', '—', '—',
+                es3 ? 0 : numDia, es3 ? 0 : numNoche,
+                es3 ? numDia : 0, es3 ? numNoche : 0, null, null, null);
+            return;
+        }
+
+        // Distribuir por cama
+        activos.forEach(a => {
+            const emp   = a.v2_empresas?.nombre || 'Sin empresa';
+            const cont  = a.numero_contrato || '(sin contrato)';
+            const ger   = a.v2_empresas?.v2_gerencias?.nombre || '—';
+            const turno = a.v2_empresas?.turno || '—';
+            const key   = `${emp}|${cont}|${ger}`;
+            const nc    = a.v2_camas?.numero_cama;
+            const hab   = a.v2_camas?.v2_habitaciones?.numero_hab || '—';
+            // cama 1 = día, cama 2 = noche, cama 3 = cama extra
+            const d  = nc === 1 ? 1 : 0;
+            const n  = nc === 2 ? 1 : 0;
+            const c3d = (nc === 3 && numDia > 0)   ? 1 : 0;
+            const c3n = (nc === 3 && numNoche > 0) ? 1 : 0;
+            agregar(key, emp, cont, ger, turno, d, n, c3d, c3n, a.nombre_huesped, a.rut_huesped, hab);
+        });
+    });
+
+    if (!Object.keys(porEmpresa).length) {
+        body.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-muted)">Sin datos cruzados para este período</div>';
+        return;
+    }
+
+    // ── 6. Totales generales ──────────────────────────────────────────────
+    const vals       = Object.values(porEmpresa);
+    const grandTotal = vals.reduce((s, v) => s + v.total, 0);
+    const grandDia   = vals.reduce((s, v) => s + v.dia, 0);
+    const grandNoche = vals.reduce((s, v) => s + v.noche, 0);
+    const grandC3    = vals.reduce((s, v) => s + v.c3dia + v.c3noche, 0);
+
+    // ── 7. Render ─────────────────────────────────────────────────────────
+    const kpiHtml = [
+        { icon:'🏢', lbl:'Empresas',       val: vals.length,                  c:'#6366f1' },
+        { icon:'☀️', lbl:'Camas Día',       val: grandDia.toLocaleString(),    c:'#2563eb' },
+        { icon:'🌙', lbl:'Camas Noche',     val: grandNoche.toLocaleString(),  c:'#7c3aed' },
+        { icon:'🛏️', lbl:'Cama 3 (extra)',  val: grandC3.toLocaleString(),     c:'#0e7490' },
+        { icon:'📊', lbl:'Total Camas-Día', val: grandTotal.toLocaleString(),  c:'#10b981' },
     ].map(k => `
-      <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:14px;padding:14px 18px;display:flex;align-items:center;gap:12px">
-        <div style="font-size:26px">${k.icon}</div>
-        <div>
-          <div style="font-size:22px;font-weight:900;color:${k.c}">${k.val}</div>
-          <div style="font-size:11px;color:var(--text-muted);font-weight:700;text-transform:uppercase">${k.lbl}</div>
-        </div>
+      <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:14px;padding:14px 16px;border-top:3px solid ${k.c}">
+        <div style="font-size:18px">${k.icon}</div>
+        <div style="font-size:22px;font-weight:900;color:${k.c}">${k.val}</div>
+        <div style="font-size:10px;color:var(--text-muted);font-weight:700;text-transform:uppercase">${k.lbl}</div>
       </div>`).join('');
 
-    // Filas por contrato (colapsables)
-    const contRows = Object.entries(porContrato)
-        .sort((a, b) => a[0].localeCompare(b[0]))
-        .map(([cont, v], idx) => {
-            const pct = grandTotal > 0 ? Math.round((v.totalDias / grandTotal) * 100) : 0;
-            const detalle = v.trabajadores
-                .sort((a, b) => b.camasDia - a.camasDia)
-                .map(t => `
-                  <tr style="border-bottom:1px solid #f1f5f9" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background=''">
-                    <td style="padding:6px 12px;font-size:12px;font-weight:600;color:var(--text-primary)">${t.nombre}</td>
-                    <td style="padding:6px 12px;font-size:11px;font-family:monospace;color:#64748b">${t.rut}</td>
-                    <td style="padding:6px 12px;font-size:12px;font-weight:700;color:#6366f1;text-align:center">${t.hab}</td>
-                    <td style="padding:6px 12px;font-size:11px;color:#64748b;text-align:center">${t.desde}</td>
-                    <td style="padding:6px 12px;font-size:11px;color:#64748b;text-align:center">${t.hasta}</td>
-                    <td style="padding:6px 12px;font-size:13px;font-weight:900;color:#10b981;text-align:right">${t.camasDia}</td>
-                  </tr>`).join('');
+    const rows = Object.entries(porEmpresa)
+        .sort((a, b) => b[1].total - a[1].total)
+        .map(([key, v]) => {
+            const pct  = grandTotal > 0 ? Math.round(v.total / grandTotal * 100) : 0;
+            const detId = 'bd-' + key.replace(/[^a-zA-Z0-9]/g,'_').slice(0,30);
+            const trabs = Object.values(v.trabajadores);
             return `
             <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:14px;margin-bottom:10px;overflow:hidden">
-              <div onclick="(function(el){var p=el.nextElementSibling;var ic=el.querySelector('.bi');var open=p.style.display==='none';p.style.display=open?'block':'none';ic.textContent=open?'▲':'▼';})(this)"
-                style="padding:14px 18px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;user-select:none;gap:12px;flex-wrap:wrap">
-                <div style="display:flex;align-items:center;gap:14px;flex:1;min-width:0">
-                  <span style="font-family:monospace;font-size:14px;font-weight:900;color:#6366f1;white-space:nowrap">${cont}</span>
-                  <div style="min-width:0">
-                    <div style="font-weight:700;font-size:13px;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${v.emp}</div>
-                    <div style="font-size:11px;color:var(--text-muted)">${v.ger} · ${v.turno} · ${v.trabajadores.length} trabajador${v.trabajadores.length!==1?'es':''}</div>
-                  </div>
+              <div onclick="var d=document.getElementById('${detId}');d.style.display=d.style.display==='none'?'block':'none'"
+                style="padding:14px 18px;cursor:pointer;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+                <div style="flex:1;min-width:160px">
+                  <div style="font-weight:800;font-size:14px">${v.emp}</div>
+                  <div style="font-size:11px;color:var(--text-muted)">${v.ger} · Contrato: <b>${v.cont}</b> · ${v.dias.size} días censados</div>
                 </div>
-                <div style="display:flex;align-items:center;gap:10px">
-                  <div style="text-align:right">
-                    <div style="font-size:22px;font-weight:900;color:#10b981">${v.totalDias.toLocaleString('es-CL')}</div>
-                    <div style="font-size:10px;color:var(--text-muted);font-weight:700">CAMAS-DÍA · ${pct}%</div>
-                  </div>
-                  <span class="bi" style="color:var(--text-muted);font-size:12px">▼</span>
+                <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+                  <span style="background:#dbeafe;color:#1d4ed8;border-radius:8px;padding:4px 10px;font-size:12px;font-weight:800">☀️ ${v.dia} día</span>
+                  <span style="background:#ede9fe;color:#7c3aed;border-radius:8px;padding:4px 10px;font-size:12px;font-weight:800">🌙 ${v.noche} noche</span>
+                  ${(v.c3dia + v.c3noche) > 0 ? `<span style="background:#cffafe;color:#0e7490;border-radius:8px;padding:4px 10px;font-size:12px;font-weight:800">🛏️ ${v.c3dia + v.c3noche} C3</span>` : ''}
+                  <span style="background:#dcfce7;color:#15803d;border-radius:8px;padding:4px 12px;font-size:13px;font-weight:900">= ${v.total}</span>
                 </div>
+                <div style="font-size:14px;color:#94a3b8">▼</div>
               </div>
-              <div style="display:none">
-                <div style="padding:6px 12px;background:#f8fafc;border-top:1px solid var(--border)">
-                  <div style="width:100%;background:#e2e8f0;border-radius:4px;height:4px">
-                    <div style="width:${pct}%;background:#10b981;height:4px;border-radius:4px"></div>
+              <div id="${detId}" style="display:none;padding:0 16px 14px;border-top:1px solid var(--border)">
+                <div style="display:flex;gap:10px;margin:10px 0 6px;flex-wrap:wrap">
+                  <span style="font-size:11px;font-weight:700;color:var(--text-muted)">Barra de ocupación:</span>
+                  <div style="flex:1;min-width:100px;background:var(--border);border-radius:99px;height:8px;margin-top:3px;overflow:hidden">
+                    <div style="height:100%;width:${pct}%;background:#10b981;border-radius:99px"></div>
                   </div>
+                  <span style="font-size:11px;font-weight:800;color:#10b981">${pct}%</span>
                 </div>
-                <table style="width:100%;border-collapse:collapse">
-                  <thead><tr style="background:#f8fafc">
-                    <th style="padding:6px 12px;font-size:10px;color:#94a3b8;font-weight:700;text-transform:uppercase;text-align:left">Trabajador</th>
-                    <th style="padding:6px 12px;font-size:10px;color:#94a3b8;font-weight:700;text-transform:uppercase;text-align:left">RUT</th>
-                    <th style="padding:6px 12px;font-size:10px;color:#94a3b8;font-weight:700;text-transform:uppercase;text-align:center">HAB</th>
-                    <th style="padding:6px 12px;font-size:10px;color:#94a3b8;font-weight:700;text-transform:uppercase;text-align:center">Desde</th>
-                    <th style="padding:6px 12px;font-size:10px;color:#94a3b8;font-weight:700;text-transform:uppercase;text-align:center">Hasta</th>
-                    <th style="padding:6px 12px;font-size:10px;color:#94a3b8;font-weight:700;text-transform:uppercase;text-align:right">Camas-Día</th>
-                  </tr></thead>
-                  <tbody>${detalle}</tbody>
-                  <tfoot><tr style="background:#ede9fe">
-                    <td colspan="5" style="padding:8px 12px;font-weight:800;font-size:12px;color:#4338ca">SUBTOTAL — ${cont}</td>
-                    <td style="padding:8px 12px;text-align:right;font-weight:900;font-size:15px;color:#6366f1">${v.totalDias.toLocaleString('es-CL')}</td>
-                  </tr></tfoot>
-                </table>
+                ${trabs.length ? `
+                <div style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px">Trabajadores detectados (${trabs.length})</div>
+                <div style="display:flex;flex-wrap:wrap;gap:4px">
+                  ${trabs.map(t => `<span style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:11px">${t.nombre} · <span style="font-family:monospace;font-size:10px;color:var(--text-muted)">${t.rut}</span> · HAB ${t.hab}</span>`).join('')}
+                </div>` : ''}
               </div>
             </div>`;
         }).join('');
 
     body.innerHTML = `
-      <div style="margin-bottom:14px">
-        <div style="font-size:13px;font-weight:700;color:var(--text-muted);margin-bottom:10px">
-          💰 Facturación por contrato · ${_periodo.label}
-          <span style="font-size:11px;font-weight:400;margin-left:8px">Fuente: camas ocupadas reales (check-in / check-out)</span>
+      <div style="margin-bottom:4px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <div style="font-size:13px;font-weight:700;color:var(--text-muted)">
+          💰 Facturación por empresa · <span style="color:#6366f1">${_periodo.label}</span>
         </div>
-        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
-          <label style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase">Desde</label>
-          <input type="date" id="billing-desde" value="${pIni}"
-            style="padding:7px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--bg-card);color:var(--text-primary);font-size:12px;outline:none">
-          <label style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase">Hasta</label>
-          <input type="date" id="billing-hasta" value="${pFin}"
-            style="padding:7px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--bg-card);color:var(--text-primary);font-size:12px;outline:none">
-          <button onclick="window._censoExportBilling()" id="btn-export-billing"
-            style="padding:8px 18px;border:none;border-radius:9px;background:linear-gradient(135deg,#10b981,#059669);color:#fff;font-weight:700;font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px">
-            📥 Detalle Excel
-          </button>
-          <button onclick="window._censoExportEstadoPago()" id="btn-export-pago"
-            style="padding:8px 18px;border:none;border-radius:9px;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;font-weight:700;font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px">
-            📋 Estado de Pago
-          </button>
-        </div>
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:16px">${kpis}</div>
-        <div style="display:flex;justify-content:space-between;align-items:center;background:linear-gradient(135deg,#0f172a,#1e293b);border-radius:14px;padding:14px 20px;margin-bottom:16px">
-          <div>
-            <div style="color:rgba(255,255,255,.6);font-size:11px;font-weight:700;text-transform:uppercase">TOTAL GENERAL CAMAS-DÍA A FACTURAR</div>
-            <div style="color:rgba(255,255,255,.5);font-size:11px;margin-top:2px">${nContratos} contratos · ${nTrab} trabajadores · período ${_periodo.label}</div>
-          </div>
-          <div style="font-size:38px;font-weight:900;color:#a5f3fc">${grandTotal.toLocaleString('es-CL')}</div>
-        </div>
-        <div style="font-size:12px;font-weight:700;color:var(--text-muted);margin-bottom:8px">DESGLOSE POR CONTRATO <span style="font-weight:400">(click para expandir)</span></div>
+        <span style="background:#fef9c3;color:#854d0e;border-radius:6px;padding:2px 8px;font-size:11px;font-weight:700">
+          📋 Fuente: Censo diario de hoteleras
+        </span>
+        <button onclick="window._censoExportBilling()" style="margin-left:auto;padding:8px 16px;border:none;border-radius:9px;background:linear-gradient(135deg,#10b981,#059669);color:#fff;font-weight:700;font-size:12px;cursor:pointer">📥 Excel</button>
+        <button onclick="window._censoExportEstadoPago()" style="padding:8px 16px;border:none;border-radius:9px;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;font-weight:700;font-size:12px;cursor:pointer">📋 Estado de Pago</button>
       </div>
-      ${contRows}`;
+      <input type="hidden" id="billing-desde" value="${pIni}">
+      <input type="hidden" id="billing-hasta" value="${pFin}">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin:14px 0">${kpiHtml}</div>
+      <div style="background:linear-gradient(135deg,#0f172a,#1e293b);border-radius:14px;padding:14px 20px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+        <div>
+          <div style="color:rgba(255,255,255,.6);font-size:11px;font-weight:700;text-transform:uppercase">TOTAL GENERAL CAMAS-DÍA (CENSO HOTELERAS)</div>
+          <div style="color:rgba(255,255,255,.5);font-size:11px;margin-top:2px">${vals.length} empresas · período ${_periodo.label}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:36px;font-weight:900;color:#a5f3fc">${grandTotal.toLocaleString()}</div>
+          <div style="font-size:11px;color:rgba(255,255,255,.5)">☀️ ${grandDia} día · 🌙 ${grandNoche} noche · 🛏️ ${grandC3} C3</div>
+        </div>
+      </div>
+      <div style="font-size:12px;font-weight:700;color:var(--text-muted);margin-bottom:8px">DESGLOSE POR EMPRESA <span style="font-weight:400">(click para expandir)</span></div>
+      ${rows}`;
 }
+
 // ── BAJADAS: salidas por pabellón y empresa ────────────────────────────
 
 async function renderBajadas() {

@@ -1,6 +1,6 @@
 // js/supabaseClient.js
 // Importamos Supabase directamente desde la nube (CDN)
-import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm';
+import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/+esm';
 
 const supabaseUrl = 'https://pnkajjduvadcxealodcp.supabase.co';
 // anon/public key — segura para el frontend, RLS controla el acceso por rol

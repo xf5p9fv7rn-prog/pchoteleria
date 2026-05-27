@@ -2447,3 +2447,101 @@ ul {
         bottom: 40px;
     }
 }
+
+/* ══════════════════════════════════════════════════════════════
+   🌙 MODO OSCURO — Activado con [data-theme="dark"] en <html>
+   ══════════════════════════════════════════════════════════════ */
+[data-theme="dark"] {
+    --bg-page:        #0f1117;
+    --bg-card:        #1a1d27;
+    --bg-sidebar:     #0d0f18;
+    --bg-sidebar-item: rgba(255,255,255,0.05);
+    --bg-sidebar-active: rgba(192,57,43,0.30);
+
+    --text-primary:   #e2e8f0;
+    --text-secondary: #94a3b8;
+    --text-muted:     #64748b;
+
+    --border:     #2d3748;
+    --border-md:  #4a5568;
+
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.35);
+    --shadow-md: 0 4px 16px rgba(0,0,0,0.45);
+    --shadow-lg: 0 8px 32px rgba(0,0,0,0.55);
+
+    color-scheme: dark;
+}
+
+[data-theme="dark"] body {
+    background: var(--bg-page);
+    color: var(--text-primary);
+}
+
+[data-theme="dark"] .sidebar {
+    background: var(--bg-sidebar);
+    border-right: 1px solid var(--border);
+}
+
+[data-theme="dark"] .header {
+    background: var(--bg-card);
+    border-bottom-color: var(--border);
+}
+
+[data-theme="dark"] .card,
+[data-theme="dark"] .kpi-card {
+    background: var(--bg-card);
+    border-color: var(--border);
+}
+
+[data-theme="dark"] .form-input,
+[data-theme="dark"] .form-select,
+[data-theme="dark"] .form-textarea {
+    background: #1e2231;
+    border-color: var(--border);
+    color: var(--text-primary);
+}
+
+[data-theme="dark"] .form-input:focus,
+[data-theme="dark"] .form-select:focus {
+    border-color: #818cf8;
+    box-shadow: 0 0 0 3px rgba(99,102,241,0.20);
+}
+
+[data-theme="dark"] .sidebar-toggle {
+    background: var(--bg-card);
+    border-color: var(--border);
+    color: var(--text-secondary);
+}
+
+[data-theme="dark"] .bottom-nav {
+    background: var(--bg-card);
+    border-top-color: var(--border);
+}
+
+[data-theme="dark"] .modal-backdrop {
+    background: rgba(0,0,0,0.75);
+}
+
+[data-theme="dark"] .modal {
+    background: var(--bg-card);
+    border-color: var(--border);
+}
+
+[data-theme="dark"] details[style*="bg-card"],
+[data-theme="dark"] .page-content {
+    background: transparent;
+}
+
+[data-theme="dark"] #btn-dark-mode {
+    background: #1e2231;
+    border-color: var(--border);
+    color: var(--text-primary);
+}
+
+/* Scrollbar en modo oscuro */
+[data-theme="dark"] ::-webkit-scrollbar-thumb {
+    background: #374151;
+}
+[data-theme="dark"] ::-webkit-scrollbar-track {
+    background: #1a1d27;
+}

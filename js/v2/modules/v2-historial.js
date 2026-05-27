@@ -279,7 +279,10 @@ function renderOcupacion(empresas, modo, periodoLabel) {
     <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:16px;overflow:hidden">
       <div style="padding:14px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
         <span style="font-size:14px;font-weight:800;color:var(--text-primary)">🛏️ Ocupación real por empresa</span>
-        <span style="background:#6366f122;color:#6366f1;font-size:12px;font-weight:700;padding:4px 12px;border-radius:20px">${periodoLabel}</span>
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="font-size:11px;color:var(--text-muted)">👆 Clic en empresa para ver detalle por día</span>
+          <span style="background:#6366f122;color:#6366f1;font-size:12px;font-weight:700;padding:4px 12px;border-radius:20px">${periodoLabel}</span>
+        </div>
       </div>
       <div style="overflow-x:auto">
         <table style="width:100%;border-collapse:collapse;min-width:650px">
@@ -295,12 +298,19 @@ function renderOcupacion(empresas, modo, periodoLabel) {
             const prom  = camas ? (dias/camas).toFixed(1) : 0;
             const pct   = Math.round(dias/maxDias*100);
             const color = colorStr(e.emp.nombre);
-            return `<tr style="border-bottom:1px solid var(--border);background:${i%2?'var(--bg)':'transparent'}">
+            const empId = `emp-detail-${i}`;
+            return `<tr class="emp-row" data-emp="${i}"
+                style="border-bottom:1px solid var(--border);background:${i%2?'var(--bg)':'transparent'};cursor:pointer;transition:background .15s"
+                onclick="toggleEmpDetail('${empId}',${i})"
+                onmouseover="this.style.background='${color}11'" onmouseout="this.style.background='${i%2?'var(--bg)':'transparent'}'">
               <td style="padding:12px 14px">
                 <div style="display:flex;align-items:center;gap:8px">
                   <div style="width:32px;height:32px;border-radius:8px;background:${color};color:#fff;font-weight:800;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0">${e.emp.nombre[0]}</div>
                   <div>
-                    <div style="font-weight:700;font-size:13px;color:var(--text-primary)">${e.emp.nombre}</div>
+                    <div style="font-weight:700;font-size:13px;color:var(--text-primary);display:flex;align-items:center;gap:6px">
+                      ${e.emp.nombre}
+                      <span id="arr-${empId}" style="font-size:10px;color:${color};transition:transform .2s">▼</span>
+                    </div>
                     <div style="height:5px;background:${color}33;border-radius:99px;margin-top:5px;width:120px">
                       <div style="height:100%;background:${color};border-radius:99px;width:${pct}%"></div>
                     </div>
@@ -313,11 +323,80 @@ function renderOcupacion(empresas, modo, periodoLabel) {
               <td style="padding:12px 14px"><span style="background:${color}22;color:${color};font-size:13px;font-weight:800;padding:4px 12px;border-radius:8px">${dias.toLocaleString('es-CL')}</span></td>
               <td style="padding:12px 14px;font-size:13px;font-weight:600;color:var(--text-primary)">${prom} días</td>
               <td style="padding:12px 14px"><span style="background:${pct>=60?'#dcfce7':pct>=30?'#fef9c3':'#f1f5f9'};color:${pct>=60?'#15803d':pct>=30?'#854d0e':'#475569'};font-size:12px;font-weight:700;padding:3px 10px;border-radius:20px">${pct}%</span></td>
+            </tr>
+            <tr id="${empId}" style="display:none">
+              <td colspan="7" style="padding:0;border-bottom:2px solid ${color}">
+                ${buildEmpDayDetail(e.items, color)}
+              </td>
             </tr>`;
           }).join('')}
           </tbody>
         </table>
       </div>
+    </div>`;
+
+    // Toggle accordion
+    window.toggleEmpDetail = function(id, idx) {
+        const row = document.getElementById(id);
+        const arr = document.getElementById('arr-' + id);
+        const open = row.style.display !== 'none';
+        row.style.display = open ? 'none' : 'table-row';
+        if (arr) arr.style.transform = open ? 'rotate(0deg)' : 'rotate(180deg)';
+    };
+}
+
+// Construye el detalle día × habitación para una empresa
+function buildEmpDayDetail(items, color) {
+    // Expandir cada estadía en días individuales que ocupó
+    const dayMap = {}; // { '2026-05-25': { 'COPC000001': count, ... } }
+
+    for (const a of items) {
+        const ini = new Date((a.fecha_checkin||'').split('T')[0]+'T00:00:00');
+        const fin = a.fecha_checkout
+            ? new Date(a.fecha_checkout.split('T')[0]+'T00:00:00')
+            : new Date();
+
+        // Por cada día que estuvo (desde checkin hasta checkout-1)
+        let cur = new Date(ini);
+        while (cur < fin) {
+            const key = cur.toISOString().split('T')[0];
+            if (!dayMap[key]) dayMap[key] = {};
+            const cama = a.id_cama || 'S/N';
+            dayMap[key][cama] = (dayMap[key][cama] || 0) + 1;
+            cur.setDate(cur.getDate() + 1);
+        }
+    }
+
+    const dias = Object.keys(dayMap).sort().reverse();
+    if (!dias.length) return `<div style="padding:16px;color:#9ca3af;text-align:center">Sin datos de días</div>`;
+
+    const rows = dias.map(d => {
+        const camasDelDia = dayMap[d];
+        const totalCamas  = Object.values(camasDelDia).reduce((s,c)=>s+c,0);
+        const fecha = new Date(d+'T12:00:00').toLocaleDateString('es-CL',{weekday:'short',day:'2-digit',month:'2-digit',year:'numeric'});
+
+        // Tarjetas de habitación
+        const camaCards = Object.entries(camasDelDia)
+            .sort((a,b) => b[1]-a[1])
+            .map(([cama, cnt]) =>
+                `<span style="background:${color}18;border:1px solid ${color}44;color:${color};border-radius:8px;padding:3px 10px;font-size:12px;font-weight:700;white-space:nowrap">
+                    🛏 ${cama} = ${cnt} cama${cnt>1?'s':''}
+                </span>`
+            ).join('');
+
+        return `<div style="display:flex;align-items:flex-start;gap:12px;padding:10px 20px;border-bottom:1px solid #f1f5f9">
+            <div style="min-width:140px;font-size:12px;font-weight:700;color:var(--text-primary);padding-top:3px">📅 ${fecha}</div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;flex:1">${camaCards}</div>
+            <div style="min-width:80px;text-align:right;font-size:13px;font-weight:900;color:${color};padding-top:2px">${totalCamas} cama${totalCamas>1?'s':''}</div>
+        </div>`;
+    }).join('');
+
+    return `<div style="background:#fafafa;padding:0">
+        <div style="padding:10px 20px;background:${color}11;border-bottom:1px solid ${color}33;font-size:12px;font-weight:800;color:${color};display:flex;justify-content:space-between">
+            <span>📊 Detalle diario — Habitaciones × Día</span>
+            <span>${dias.length} días con ocupación</span>
+        </div>
+        ${rows}
     </div>`;
 }
 

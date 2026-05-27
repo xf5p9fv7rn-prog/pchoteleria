@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Informe de Asistencia — PC Hotelería</title>
+<style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+        font-family: 'Segoe UI', Arial, sans-serif;
+        background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 100%);
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 30px;
+    }
+    .card {
+        background: #fff;
+        border-radius: 20px;
+        padding: 48px;
+        max-width: 620px;
+        width: 100%;
+        box-shadow: 0 30px 80px rgba(0,0,0,0.4);
+        text-align: center;
+    }
+    .logo-row { display: flex; align-items: center; justify-content: center; gap: 16px; margin-bottom: 28px; }
+    .logo-icon { font-size: 40px; }
+    .logo-text { font-size: 22px; font-weight: 800; color: #1e3a5f; }
+    .logo-text span { color: #c0392b; }
+    h1 { font-size: 26px; font-weight: 900; color: #0f172a; margin-bottom: 6px; }
+    .subtitle { font-size: 14px; color: #64748b; margin-bottom: 32px; }
+    .fecha-badge {
+        display: inline-block;
+        background: #eff6ff;
+        color: #1d4ed8;
+        padding: 6px 16px;
+        border-radius: 99px;
+        font-size: 13px;
+        font-weight: 700;
+        margin-bottom: 32px;
+    }
+
+    /* KPIs */
+    .kpis { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 28px; }
+    .kpi {
+        border-radius: 14px;
+        padding: 18px;
+        text-align: center;
+        border: 2px solid transparent;
+    }
+    .kpi-icon  { font-size: 22px; margin-bottom: 6px; }
+    .kpi-val   { font-size: 32px; font-weight: 900; line-height: 1; margin-bottom: 4px; }
+    .kpi-lbl   { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; opacity: .75; }
+    .kpi-blue  { background: #eff6ff; border-color: #bfdbfe; color: #1d4ed8; }
+    .kpi-green { background: #f0fdf4; border-color: #bbf7d0; color: #16a34a; }
+    .kpi-amber { background: #fffbeb; border-color: #fde68a; color: #b45309; }
+    .kpi-chart { background: #f8fafc; border-color: #e2e8f0; color: #334155; }
+
+    /* Empresas */
+    .empresa-card {
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 14px;
+        padding: 18px 20px;
+        margin-bottom: 12px;
+        text-align: left;
+        border-left: 5px solid #6366f1;
+    }
+    .empresa-card.critica { border-left-color: #ef4444; }
+    .empresa-card.buena   { border-left-color: #10b981; }
+    .empresa-nombre { font-weight: 800; font-size: 15px; color: #0f172a; margin-bottom: 4px; }
+    .empresa-meta   { font-size: 12px; color: #64748b; margin-bottom: 10px; }
+    .empresa-stats  { display: flex; gap: 16px; flex-wrap: wrap; }
+    .stat { font-size: 13px; font-weight: 700; }
+    .stat span { font-weight: 500; color: #64748b; }
+    .bar-wrap { margin-top: 10px; background: #e2e8f0; border-radius: 99px; height: 8px; overflow: hidden; }
+    .bar-fill { height: 100%; border-radius: 99px; }
+
+    .alerta {
+        background: #fef2f2;
+        border: 1px solid #fecaca;
+        border-radius: 12px;
+        padding: 14px 18px;
+        text-align: left;
+        margin-bottom: 24px;
+        font-size: 13px;
+        color: #991b1b;
+    }
+    .alerta strong { display: block; font-size: 14px; margin-bottom: 4px; }
+
+    .btn-download {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        background: linear-gradient(135deg, #1d4ed8, #3b82f6);
+        color: #fff;
+        border: none;
+        border-radius: 14px;
+        padding: 16px 36px;
+        font-size: 16px;
+        font-weight: 800;
+        cursor: pointer;
+        box-shadow: 0 8px 24px rgba(29, 78, 216, 0.4);
+        transition: all .2s;
+        width: 100%;
+        justify-content: center;
+        margin-top: 24px;
+    }
+    .btn-download:hover { transform: translateY(-2px); box-shadow: 0 12px 32px rgba(29,78,216,.5); }
+    .btn-download:disabled { opacity: .6; cursor: not-allowed; transform: none; }
+    .hint { font-size: 11px; color: #94a3b8; margin-top: 12px; }
+</style>
+</head>
+<body>
+
+<div class="card">
+    <div class="logo-row">
+        <span class="logo-icon">📋</span>
+        <div class="logo-text">PC <span>Hotelería</span></div>
+    </div>
+
+    <h1>Control de Asistencia</h1>
+    <p class="subtitle">Campamento Anglo American · Resumen ejecutivo</p>
+
+    <div class="fecha-badge">📅 25 de Mayo 2026 · 08:40 hrs</div>
+
+    <!-- KPIs -->
+    <div class="kpis">
+        <div class="kpi kpi-blue">
+            <div class="kpi-icon">🏢</div>
+            <div class="kpi-val">3</div>
+            <div class="kpi-lbl">Empresas</div>
+        </div>
+        <div class="kpi kpi-chart">
+            <div class="kpi-icon">👥</div>
+            <div class="kpi-val">340</div>
+            <div class="kpi-lbl">Total Activos</div>
+        </div>
+        <div class="kpi kpi-green">
+            <div class="kpi-icon">✅</div>
+            <div class="kpi-val">286</div>
+            <div class="kpi-lbl">Confirmados</div>
+        </div>
+        <div class="kpi kpi-amber">
+            <div class="kpi-icon">⏳</div>
+            <div class="kpi-val">54</div>
+            <div class="kpi-lbl">Sin Confirmar</div>
+        </div>
+    </div>
+
+    <!-- Alerta -->
+    <div class="alerta">
+        <strong>⚠️ WILUG LTD — Tasa crítica: 26%</strong>
+        14 de 19 trabajadores no han confirmado llegada. Requiere acción inmediata.
+    </div>
+
+    <!-- Empresas -->
+    <div class="empresa-card buena">
+        <div class="empresa-nombre">ARAMARK</div>
+        <div class="empresa-meta">264 trabajadores activos · 89% confirmados</div>
+        <div class="empresa-stats">
+            <div class="stat">235 <span>confirmados</span></div>
+            <div class="stat" style="color:#f59e0b">29 <span>pendientes</span></div>
+        </div>
+        <div class="bar-wrap"><div class="bar-fill" style="width:89%;background:#f59e0b"></div></div>
+    </div>
+    <div class="empresa-card critica">
+        <div class="empresa-nombre">ARTÍCULOS DE SEGURIDAD WILUG LTD</div>
+        <div class="empresa-meta">19 trabajadores activos · 26% confirmados</div>
+        <div class="empresa-stats">
+            <div class="stat">5 <span>confirmados</span></div>
+            <div class="stat" style="color:#ef4444">14 <span>pendientes</span></div>
+        </div>
+        <div class="bar-wrap"><div class="bar-fill" style="width:26%;background:#ef4444"></div></div>
+    </div>
+    <div class="empresa-card">
+        <div class="empresa-nombre">LOG. HUALPEN</div>
+        <div class="empresa-meta">57 trabajadores activos · 81% confirmados</div>
+        <div class="empresa-stats">
+            <div class="stat">46 <span>confirmados</span></div>
+            <div class="stat" style="color:#f59e0b">11 <span>pendientes</span></div>
+        </div>
+        <div class="bar-wrap"><div class="bar-fill" style="width:81%;background:#f59e0b"></div></div>
+    </div>
+
+    <button class="btn-download" id="btn-dl" onclick="generarWord()">
+        📄 Descargar Informe en Word (.docx)
+    </button>
+    <p class="hint">Se descargará automáticamente en tu carpeta de descargas</p>
+</div>
+
+<!-- docx.js via CDN -->
+<script src="https://unpkg.com/docx@8.5.0/build/index.umd.min.js"></script>
+<script>
+async function generarWord() {
+    const btn = document.getElementById('btn-dl');
+    btn.disabled = true;
+    btn.innerHTML = '⏳ Generando documento...';
+
+    try {
+        const {
+            Document, Packer, Paragraph, Table, TableRow, TableCell,
+            TextRun, HeadingLevel, AlignmentType, BorderStyle,
+            WidthType, ShadingType, convertInchesToTwip, Header,
+            ImageRun, Footer, PageBreak, TableLayoutType
+        } = docx;
+
+        // ── Colores ──────────────────────────────────────────────────
+        const AZUL   = '1D4ED8';
+        const ROJO   = 'C0392B';
+        const VERDE  = '16A34A';
+        const AMBER  = 'B45309';
+        const GRIS   = '64748B';
+        const BGBLUE = 'EFF6FF';
+        const BGRED  = 'FEF2F2';
+
+        // ── Helpers ──────────────────────────────────────────────────
+        const txt = (text, opts = {}) => new TextRun({
+            text: String(text),
+            size: opts.size || 22,
+            bold: opts.bold || false,
+            color: opts.color || '000000',
+            font: 'Calibri',
+            ...opts,
+        });
+
+        const par = (children, opts = {}) => new Paragraph({
+            children: Array.isArray(children) ? children : [children],
+            spacing: { before: opts.before || 80, after: opts.after || 80 },
+            alignment: opts.align || AlignmentType.LEFT,
+            ...opts,
+        });
+
+        const celdaHeader = (text, color = AZUL, bg = 'E0E7FF') => new TableCell({
+            children: [par(txt(text, { bold: true, color: 'FFFFFF', size: 20 }))],
+            shading: { fill: color, type: ShadingType.CLEAR, color: 'auto' },
+            width: { size: 2000, type: WidthType.DXA },
+        });
+
+        const celda = (text, color = '000000', bg = 'FFFFFF', bold = false) => new TableCell({
+            children: [par(txt(text, { color, bold, size: 20 }))],
+            shading: { fill: bg, type: ShadingType.CLEAR, color: 'auto' },
+        });
+
+        // ── Tabla KPI global ─────────────────────────────────────────
+        const tablaGlobal = new Table({
+            width: { size: 100, type: WidthType.PERCENTAGE },
+            rows: [
+                new TableRow({
+                    children: [
+                        celdaHeader('INDICADOR', AZUL),
+                        celdaHeader('VALOR',     AZUL),
+                        celdaHeader('DETALLE',   AZUL),
+                    ],
+                }),
+                new TableRow({ children: [
+                    celda('🏢 Empresas Activas',         '1E293B', 'F8FAFC', true),
+                    celda('3',                            AZUL, 'EFF6FF', true),
+                    celda('ARAMARK · WILUG LTD · LOG. HUALPEN', GRIS),
+                ]}),
+                new TableRow({ children: [
+                    celda('👥 Total Trabajadores Activos','1E293B', 'F8FAFC', true),
+                    celda('340',                          '334155', 'F1F5F9', true),
+                    celda('Suma de todas las empresas',   GRIS),
+                ]}),
+                new TableRow({ children: [
+                    celda('✅ Confirmados',               '1E293B', 'F8FAFC', true),
+                    celda('286',                          VERDE, 'F0FDF4', true),
+                    celda('84% del total activo',         VERDE),
+                ]}),
+                new TableRow({ children: [
+                    celda('⏳ Sin Confirmar',             '1E293B', 'F8FAFC', true),
+                    celda('54',                           AMBER, 'FFFBEB', true),
+                    celda('16% del total — requiere atención', AMBER),
+                ]}),
+                new TableRow({ children: [
+                    celda('📊 Tasa Global de Confirmación','1E293B', 'F8FAFC', true),
+                    celda('84%',                          AMBER, 'FFFBEB', true),
+                    celda('Meta recomendada: ≥ 95%',      GRIS),
+                ]}),
+            ],
+        });
+
+        // ── Tabla por empresa ────────────────────────────────────────
+        const tablaEmpresas = new Table({
+            width: { size: 100, type: WidthType.PERCENTAGE },
+            rows: [
+                new TableRow({ children: [
+                    celdaHeader('EMPRESA', AZUL),
+                    celdaHeader('ACTIVOS', AZUL),
+                    celdaHeader('CONFIRMADOS', AZUL),
+                    celdaHeader('PENDIENTES', AZUL),
+                    celdaHeader('TASA %', AZUL),
+                    celdaHeader('ESTADO', AZUL),
+                ]}),
+                new TableRow({ children: [
+                    celda('ARAMARK',    '1E293B', 'F0FDF4', true),
+                    celda('264',        '334155'),
+                    celda('235',        VERDE, 'F0FDF4', true),
+                    celda('29',         AMBER, 'FFFBEB'),
+                    celda('89%',        AMBER, 'FFFBEB', true),
+                    celda('🟡 Normal',  AMBER),
+                ]}),
+                new TableRow({ children: [
+                    celda('ARTÍCULOS DE SEGURIDAD WILUG LTD', '1E293B', 'FEF2F2', true),
+                    celda('19',         '334155'),
+                    celda('5',          ROJO, 'FEF2F2', true),
+                    celda('14',         ROJO, 'FEF2F2', true),
+                    celda('26%',        ROJO, 'FEE2E2', true),
+                    celda('🔴 CRÍTICO', ROJO, 'FEE2E2', true),
+                ]}),
+                new TableRow({ children: [
+                    celda('LOG. HUALPEN', '1E293B', 'FFFBEB', true),
+                    celda('57',           '334155'),
+                    celda('46',           AMBER, 'FFFBEB', true),
+                    celda('11',           AMBER, 'FFFBEB'),
+                    celda('81%',          AMBER, 'FFFBEB', true),
+                    celda('🟡 Normal',    AMBER),
+                ]}),
+                new TableRow({ children: [
+                    celda('TOTAL GLOBAL', '1E293B', 'E0E7FF', true),
+                    celda('340',          AZUL, 'E0E7FF', true),
+                    celda('286',          VERDE, 'DCFCE7', true),
+                    celda('54',           ROJO, 'FEE2E2', true),
+                    celda('84%',          AMBER, 'FFFBEB', true),
+                    celda('🟡 84%',       AMBER, 'FFFBEB', true),
+                ]}),
+            ],
+        });
+
+        // ── Tabla proyecciones ───────────────────────────────────────
+        const tablaProyeccion = new Table({
+            width: { size: 100, type: WidthType.PERCENTAGE },
+            rows: [
+                new TableRow({ children: [
+                    celdaHeader('ESCENARIO', '475569'),
+                    celdaHeader('CONFIRMADOS', '475569'),
+                    celdaHeader('TASA PROYECTADA', '475569'),
+                ]}),
+                new TableRow({ children: [
+                    celda('Solo se confirman los de WILUG LTD (+14)', '334155'),
+                    celda('300', '334155', 'F8FAFC'),
+                    celda('88.2%', AMBER, 'FFFBEB'),
+                ]}),
+                new TableRow({ children: [
+                    celda('Solo se confirman los de ARAMARK (+29)', '334155'),
+                    celda('315', '334155', 'F8FAFC'),
+                    celda('92.6%', VERDE, 'F0FDF4'),
+                ]}),
+                new TableRow({ children: [
+                    celda('Solo se confirman los de LOG. HUALPEN (+11)', '334155'),
+                    celda('297', '334155', 'F8FAFC'),
+                    celda('87.4%', AMBER, 'FFFBEB'),
+                ]}),
+                new TableRow({ children: [
+                    celda('✅ Se confirman TODOS (+54)', '065F46', 'DCFCE7', true),
+                    celda('340', VERDE, 'DCFCE7', true),
+                    celda('100% ✅', VERDE, 'DCFCE7', true),
+                ]}),
+            ],
+        });
+
+        // ── Documento ────────────────────────────────────────────────
+        const doc = new Document({
+            styles: {
+                default: {
+                    document: {
+                        run: { font: 'Calibri', size: 22 },
+                    },
+                },
+            },
+            sections: [{
+                properties: { page: { margin: {
+                    top:    convertInchesToTwip(1.0),
+                    bottom: convertInchesToTwip(1.0),
+                    left:   convertInchesToTwip(1.2),
+                    right:  convertInchesToTwip(1.2),
+                }}},
+                headers: {
+                    default: new Header({ children: [
+                        par([
+                            txt('PC Hotelería · Anglo American', { bold: true, color: AZUL, size: 18 }),
+                            txt('  |  Control de Asistencia', { color: GRIS, size: 18 }),
+                        ], { align: AlignmentType.RIGHT, before: 0, after: 0 }),
+                    ]}),
+                },
+                footers: {
+                    default: new Footer({ children: [
+                        par(txt('Generado automáticamente por PC Hotelería · 25 de mayo de 2026 · Documento confidencial', { color: GRIS, size: 16 }), { align: AlignmentType.CENTER }),
+                    ]}),
+                },
+                children: [
+
+                    // ── Título ──
+                    par(txt('📋  INFORME DE CONTROL DE ASISTENCIA', { bold: true, color: AZUL, size: 36 }),
+                        { heading: HeadingLevel.HEADING_1, align: AlignmentType.CENTER, before: 0, after: 120 }),
+
+                    par(txt('Campamento Anglo American  ·  25 de mayo de 2026  ·  08:40 hrs', { color: GRIS, size: 20 }),
+                        { align: AlignmentType.CENTER, before: 0, after: 280 }),
+
+                    // ── Sección 1 ──
+                    par(txt('1.  RESUMEN EJECUTIVO GLOBAL', { bold: true, color: AZUL, size: 26 }),
+                        { heading: HeadingLevel.HEADING_2, before: 160, after: 100 }),
+
+                    par(txt('El siguiente informe detalla el estado de confirmación de asistencia de los 340 trabajadores activos distribuidos en 3 empresas contratistas del campamento. La tasa global de confirmación se sitúa en el 84%, con 286 trabajadores confirmados y 54 pendientes de confirmación.', { size: 22, color: '1E293B' }),
+                        { before: 0, after: 160 }),
+
+                    tablaGlobal,
+
+                    par(txt(''), { before: 200 }),
+
+                    // ── Sección 2 ──
+                    par(txt('2.  DESGLOSE POR EMPRESA', { bold: true, color: AZUL, size: 26 }),
+                        { heading: HeadingLevel.HEADING_2, before: 200, after: 100 }),
+
+                    tablaEmpresas,
+
+                    par(txt(''), { before: 100 }),
+
+                    // ── Análisis WILUG ──
+                    par(txt('⚠️  ALERTA CRÍTICA — ARTÍCULOS DE SEGURIDAD WILUG LTD', { bold: true, color: ROJO, size: 24 }),
+                        { heading: HeadingLevel.HEADING_3, before: 200, after: 80,
+                          shading: { type: ShadingType.CLEAR, color: 'auto', fill: 'FEF2F2' } }),
+
+                    par(txt('WILUG LTD presenta la tasa más baja del campamento con solo el 26% de confirmaciones (5 de 19 trabajadores). Esta situación requiere intervención inmediata. Las posibles causas son: (a) ingreso reciente de trabajadores, (b) problemas de acceso al sistema de confirmación, o (c) trabajadores que aún no han llegado físicamente al campamento.', { size: 22, color: '991B1B' }),
+                        { before: 0, after: 160 }),
+
+                    par([
+                        txt('Acción recomendada: ', { bold: true, color: '991B1B', size: 22 }),
+                        txt('Verificar presencia física y utilizar la función "Confirmar todos (14)" desde el panel de Control de Asistencia.', { color: '1E293B', size: 22 }),
+                    ], { before: 0, after: 200 }),
+
+                    // ── Análisis ARAMARK ──
+                    par(txt('2.2  ARAMARK', { bold: true, color: AZUL, size: 24 }),
+                        { heading: HeadingLevel.HEADING_3, before: 160, after: 80 }),
+
+                    par(txt('ARAMARK es la empresa más grande del campamento, representando el 77.6% del total de trabajadores activos (264 de 340). Con 235 confirmados y una tasa del 89%, es la empresa con mejor desempeño. Sus 29 pendientes probablemente correspondan a trabajadores en tránsito o en turno nocturno.', { size: 22 }),
+                        { before: 0, after: 200 }),
+
+                    // ── Análisis LOG HUALPEN ──
+                    par(txt('2.3  LOG. HUALPEN', { bold: true, color: AZUL, size: 24 }),
+                        { heading: HeadingLevel.HEADING_3, before: 160, after: 80 }),
+
+                    par(txt('LOG. HUALPEN concentra 57 trabajadores activos (16.8% del total) con una tasa de confirmación del 81%, ligeramente por debajo del promedio global (84%). Los 11 pendientes deben confirmarse antes del cierre del día para superar el umbral del 90%.', { size: 22 }),
+                        { before: 0, after: 200 }),
+
+                    // ── Sección 3 ──
+                    par(txt('3.  PROYECCIONES DE ESCENARIOS', { bold: true, color: AZUL, size: 26 }),
+                        { heading: HeadingLevel.HEADING_2, before: 200, after: 100 }),
+
+                    tablaProyeccion,
+
+                    par(txt(''), { before: 100 }),
+
+                    // ── Sección 4 ──
+                    par(txt('4.  RECOMENDACIONES OPERATIVAS', { bold: true, color: AZUL, size: 26 }),
+                        { heading: HeadingLevel.HEADING_2, before: 200, after: 100 }),
+
+                    ...[
+                        ['🔴 Prioridad Alta', 'Contactar al supervisor de WILUG LTD y confirmar los 14 trabajadores pendientes. Usar el botón "Confirmar todos (14)" si la presencia física está verificada.'],
+                        ['🟡 Prioridad Media', 'Seguimiento a LOG. HUALPEN para confirmar 11 pendientes antes de las 12:00 hrs y superar el 90%.'],
+                        ['🟡 Prioridad Normal', 'ARAMARK con 89% probablemente alcance el 95%+ de forma orgánica durante el día. Monitorear cada 2 horas.'],
+                        ['📊 Exportación', 'Usar "Excel Completo" desde el panel para enviar el reporte al área de Gestión de Personas.'],
+                        ['🎯 Meta del día', 'Alcanzar al menos 95% global (323/340 trabajadores confirmados) antes de las 18:00 hrs.'],
+                    ].map(([titulo, detalle]) =>
+                        par([
+                            txt(`${titulo}: `, { bold: true, color: AZUL, size: 22 }),
+                            txt(detalle, { color: '1E293B', size: 22 }),
+                        ], { before: 80, after: 80 })
+                    ),
+
+                    par(txt(''), { before: 200 }),
+
+                    // ── Firma ──
+                    par(txt('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', { color: 'CBD5E1', size: 20 }),
+                        { before: 200, after: 80 }),
+
+                    par([
+                        txt('Documento generado por ', { color: GRIS, size: 18 }),
+                        txt('PC Hotelería · Sistema de Gestión de Campamento', { bold: true, color: AZUL, size: 18 }),
+                    ], { before: 0, after: 40 }),
+
+                    par(txt('Anglo American · Información confidencial · No distribuir sin autorización', { color: GRIS, size: 16 }),
+                        { before: 0, after: 0 }),
+                ],
+            }],
+        });
+
+        // ── Generar y descargar ──────────────────────────────────────
+        const blob = await Packer.toBlob(doc);
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement('a');
+        a.href     = url;
+        a.download = 'Informe_Asistencia_25Mayo2026_PCHoteleria.docx';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        btn.innerHTML = '✅ ¡Documento descargado!';
+        btn.style.background = 'linear-gradient(135deg,#059669,#10b981)';
+        setTimeout(() => {
+            btn.disabled = false;
+            btn.innerHTML = '📄 Descargar Informe en Word (.docx)';
+            btn.style.background = '';
+        }, 3000);
+
+    } catch(e) {
+        console.error(e);
+        btn.innerHTML = '❌ Error — revisa la consola';
+        btn.disabled = false;
+        alert('Error al generar el documento: ' + e.message + '\n\nAsegúrate de tener conexión a internet para cargar la librería.');
+    }
+}
+</script>
+</body>
+</html>

@@ -822,7 +822,7 @@
 
                 var ws = wb.addWorksheet('Nómina Trabajadores', {
                     pageSetup: { paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1 },
-                    views: [{ showGridLines: true, state: 'frozen', xSplit: 0, ySplit: 6 }]
+                    views: [{ showGridLines: true, state: 'frozen', xSplit: 0, ySplit: 4 }]
                 });
 
                 // ─── Columnas ────────────────────────────────────────────────────
@@ -839,67 +839,63 @@
                     { key: 'P', width: 8 }, { key: 'Q', width: 28 }
                 ];
 
+                // Columna G (RUT): forzar formato TEXTO a nivel de columna.
+                // Esto hace que cualquier pegado quede como valor puro (no fórmula).
+                ws.getColumn(7).numFmt = '@';
+
                 var NCOLS = 17;
 
-                // ─── FILAS 1-3: ENCABEZADO SIN CELDAS COMBINADAS ────────────────
-                // ⚡ IMPORTANTE: No usar mergeCells en ninguna fila para que el
-                //    pegado masivo de datos funcione sin errores de "celda combinada".
-                ws.getRow(1).height = 18;
-                ws.getRow(2).height = 44;
-                ws.getRow(3).height = 18;
+                // ─── FILA 1: LOGO + TÍTULO ──────────────────────────────────────
+                ws.getRow(1).height = 50;
 
-                // Pintar todas las celdas del encabezado en rojo Aramark
-                for (var r = 1; r <= 3; r++) {
-                    for (var c = 1; c <= NCOLS; c++) {
-                        var hCell = ws.getRow(r).getCell(c);
-                        hCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: ARAMARK_RED } };
-                        hCell.border = ALL_BORDERS;
-                    }
+                // Pintar fila 1 en rojo Aramark
+                for (var c = 1; c <= NCOLS; c++) {
+                    var hCell = ws.getRow(1).getCell(c);
+                    hCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: ARAMARK_RED } };
+                    hCell.border = ALL_BORDERS;
                 }
 
-                // Logo/texto en A2 (celda individual, sin merge)
+                // Logo en A1
                 try {
                     var resp = await fetch('./aramark.png');
                     var buffer = await resp.arrayBuffer();
                     var imageId = wb.addImage({ buffer: buffer, extension: 'png' });
-                    ws.addImage(imageId, { tl: { col: 0.1, row: 0.1 }, ext: { width: 175, height: 80 } });
+                    ws.addImage(imageId, { tl: { col: 0.1, row: 0.1 }, ext: { width: 160, height: 60 } });
                 } catch (e) {
-                    var logoCellX = ws.getRow(2).getCell(1);
+                    var logoCellX = ws.getRow(1).getCell(1);
                     logoCellX.value = 'ARAMARK';
                     logoCellX.font = { name: 'Calibri', bold: true, size: 16, color: { argb: WHITE } };
                     logoCellX.alignment = { horizontal: 'center', vertical: 'middle' };
                 }
 
-                // Título en E2 (celda individual, sin merge)
-                var titleCell = ws.getRow(2).getCell(5);
+                // Título en E1
+                var titleCell = ws.getRow(1).getCell(5);
                 titleCell.value = 'SOLICITUD DE ALOJAMIENTO  ·  PC HOTELERÍA  ·  Turno ' + turnoTitle;
                 titleCell.font = { name: 'Calibri', bold: true, size: 14, color: { argb: WHITE } };
                 titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: ARAMARK_RED } };
                 titleCell.alignment = { horizontal: 'left', vertical: 'middle' };
 
-                // ─── FILA 4: ADMINISTRADOR ANGLO (sin merge) ─────────────────────
-                ws.getRow(4).height = 28;
-                for (var c4 = 1; c4 <= NCOLS; c4++) {
-                    var r4Cell = ws.getRow(4).getCell(c4);
-                    r4Cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: ARAMARK_DARK } };
-                    r4Cell.border = ALL_BORDERS;
+                // ─── FILA 2: ADMINISTRADOR ANGLO ────────────────────────────────
+                ws.getRow(2).height = 26;
+                for (var c2 = 1; c2 <= NCOLS; c2++) {
+                    var r2Cell = ws.getRow(2).getCell(c2);
+                    r2Cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: ARAMARK_DARK } };
+                    r2Cell.border = ALL_BORDERS;
                 }
-                // Etiqueta en A4 (sin merge)
-                var angloLb = ws.getRow(4).getCell(1);
+                var angloLb = ws.getRow(2).getCell(1);
                 angloLb.value = 'Admin. Anglo:';
                 angloLb.font = { name: 'Calibri', bold: true, size: 10, color: { argb: WHITE } };
                 angloLb.alignment = { horizontal: 'left', vertical: 'middle' };
 
-                // Valor en B4 (sin merge, fondo crema)
-                var angloVal = ws.getRow(4).getCell(2);
+                var angloVal = ws.getRow(2).getCell(2);
                 var adminNombre = window.angloAdmin || 'Ingrese aquí el nombre del Administrador de Contrato AngloAmerican';
                 angloVal.value = adminNombre;
                 angloVal.font = { name: 'Calibri', size: 11, italic: !window.angloAdmin, color: { argb: window.angloAdmin ? GRAY_TEXT : 'FF999999' } };
                 angloVal.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFAF0' } };
                 angloVal.alignment = { horizontal: 'left', vertical: 'middle' };
 
-                // ─── FILA 5: CABECERAS ────────────────────────────────────────────
-                ws.getRow(5).height = 30;
+                // ─── FILA 3: CABECERAS ───────────────────────────────────────────
+                ws.getRow(3).height = 30;
                 var headers = [
                     'FECHA', 'EMPRESA', 'N° CONTRATO', 'GERENCIA', 'RAZÓN SOCIAL',
                     'NOMBRE COMPLETO HUÉSPED', 'RUT (ej: 12345678-9)', 'CONTACTO', 'HAB.',
@@ -907,18 +903,32 @@
                     'FECHA INICIO', 'FECHA TÉRMINO', 'SEXO (F/M)', 'OBSERVACIÓN'
                 ];
                 headers.forEach(function (h, i) {
-                    var cell = ws.getRow(5).getCell(i + 1);
+                    var cell = ws.getRow(3).getCell(i + 1);
                     cell.value = h;
                     styleHeader(cell);
                 });
 
 
-                // ─── FILAS 6+: 350 FILAS EDITABLES (soporta empresas con hasta 350 trabajadores) ──
+                // ─── FILAS 4+: 350 FILAS EDITABLES ──────────────────────────────
                 var FILAS = 350;
-                var lastRow = 5 + FILAS;   // = fila 355
-                var shiftOpts = '"4x3,4x4,Turno H,7x7,8x6,14x14"';
+                var lastRow = 3 + FILAS;   // = fila 353
+                var shiftOpts = '"4x3,4x4,5x2,7x7,8x6,14x14"';
 
-                for (var row = 6; row <= lastRow; row++) {
+                // Construye fórmula MOD-11 para columna oculta de verificación (col R=18)
+                var buildRutHelperFormula = function (r) {
+                    var g = 'G' + r;
+                    var cl = 'SUBSTITUTE(SUBSTITUTE(UPPER(' + g + '),".",""),"-","")';
+                    var bod = 'LEFT(' + cl + ',LEN(' + cl + ')-1)';
+                    var pad = 'RIGHT("00000000"&' + bod + ',8)';
+                    var muls = [3, 2, 7, 6, 5, 4, 3, 2];
+                    var sumE = muls.map(function (m, i) { return 'VALUE(MID(' + pad + ',' + (i + 1) + ',1))*' + m; }).join('+');
+                    var rv = '11-MOD(' + sumE + ',11)';
+                    var expDV = 'IF(' + rv + '=11,"0",IF(' + rv + '=10,"K",TEXT(' + rv + ',"0")))';
+                    var actDV = 'UPPER(RIGHT(' + cl + ',1))';
+                    return 'IF(' + g + '="","",IF(AND(LEN(' + cl + ')>2,' + actDV + '=' + expDV + '),"OK","ERROR"))';
+                };
+
+                for (var row = 4; row <= lastRow; row++) {
                     ws.getRow(row).height = 20;
 
                     // Col A: Fecha (pre-rellenada con hoy)
@@ -951,13 +961,20 @@
                     styleData(cellF);
                     cellF.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE6F7FF' } }; // azul claro
 
-                    // Col G: RUT (azul claro — validación visual por formato condicional)
+                    // Col G: RUT — formato TEXTO forzado por celda (además del nivel de columna).
+                    // Con numFmt '@', cualquier Ctrl+V pega texto puro: las fórmulas NO se evalúan.
                     var cellG = ws.getRow(row).getCell(7);
                     styleData(cellG);
+                    cellG.numFmt = '@'; // ← texto puro — sólo valores
                     cellG.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE6F7FF' } };
 
-                    // NOTA: La validación MOD-11 del RUT se aplica como formato condicional
+                    // La validación MOD-11 del RUT se aplica como formato condicional
                     // DESPUÉS del bucle (no por celda) para evitar corrupción del archivo.
+
+                    // Col R (18): columna oculta de verificación RUT — calcula "OK" o "ERROR" por fila
+                    var hCell = ws.getRow(row).getCell(18);
+                    hCell.value = { formula: buildRutHelperFormula(row), result: '' };
+                    hCell.font = { name: 'Calibri', size: 1, color: { argb: 'FFFFFFFF' } };
 
                     // Col H: Contacto
                     styleData(ws.getRow(row).getCell(8));
@@ -1005,25 +1022,171 @@
                     styleData(ws.getRow(row).getCell(17));
                 }
 
+                // ─── COLUMNA R OCULTA + INDICADOR DE ERRORES RUT ─────────────────
+                ws.getColumn(18).width = 0.1; // Efectivamente oculta (width 0 puede dar error en Excel)
+                // Encabezado para columna R (invisible)
+                var hdrR = ws.getRow(3).getCell(18);
+                hdrR.value = '_RUT_VALID';
+                hdrR.font = { name: 'Calibri', size: 1, color: { argb: 'FFFFFFFF' } };
+
+                // Indicador de errores en O2 (header area — visible y prominente)
+                var countF = 'COUNTIF(R4:R' + lastRow + ',"ERROR")';
+                var errIndicator = ws.getRow(2).getCell(15); // O2
+                errIndicator.value = {
+                    formula: 'IF(' + countF + '>0,"RUTS INVALIDOS: "&' + countF + '&" — NO ENVIAR","OK - TODOS LOS RUT VALIDOS")',
+                    result: 'OK - TODOS LOS RUT VALIDOS'
+                };
+                errIndicator.font = { name: 'Calibri', bold: true, size: 11, color: { argb: WHITE } };
+                errIndicator.alignment = { horizontal: 'center', vertical: 'middle' };
+                errIndicator.border = ALL_BORDERS;
+                errIndicator.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1B5E20' } }; // verde oscuro por defecto
+
+                // CF en O2: rojo si hay errores, verde si todo OK
+                ws.addConditionalFormatting({
+                    ref: 'O2',
+                    rules: [
+                        {
+                            type: 'expression', priority: 1,
+                            formulae: [countF + '>0'],
+                            style: {
+                                fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFCC0000' }, bgColor: { argb: 'FFCC0000' } },
+                                font: { color: { argb: 'FFFFFFFF' }, bold: true, name: 'Calibri', size: 11 }
+                            }
+                        },
+                        {
+                            type: 'expression', priority: 2,
+                            formulae: [countF + '=0'],
+                            style: {
+                                fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1B5E20' }, bgColor: { argb: 'FF1B5E20' } },
+                                font: { color: { argb: 'FFFFFFFF' }, bold: true, name: 'Calibri', size: 11 }
+                            }
+                        }
+                    ]
+                });
+
                 // ─── VALIDACIONES POR RANGO — API correcta ExcelJS: ws.dataValidations.add() ──
-                ws.dataValidations.add('J6:J' + lastRow, { type: 'list', allowBlank: true, showDropDown: false, formulae: [shiftOpts], showErrorMessage: true, errorStyle: 'error', errorTitle: 'Turno inválido', error: 'Seleccione de la lista' });
-                ws.dataValidations.add('K6:K' + lastRow, { type: 'list', allowBlank: true, showDropDown: false, formulae: ['"4x3,Turno H,8x6,7x7,14x14"'], showErrorMessage: true, errorStyle: 'error', errorTitle: 'Sistema inválido', error: 'Seleccione de la lista' });
-                ws.dataValidations.add('L6:L' + lastRow, { type: 'list', allowBlank: true, showDropDown: false, formulae: ['"Dia,Noche"'], showErrorMessage: true, errorStyle: 'error', errorTitle: 'Tipo inválido', error: 'Seleccione: Dia o Noche' });
-                ws.dataValidations.add('M6:M' + lastRow, { type: 'list', allowBlank: true, showDropDown: false, formulae: ['"Pendiente,Confirmado,Cancelado"'], showErrorMessage: true, errorStyle: 'error', errorTitle: 'Estado inválido', error: 'Seleccione de la lista' });
-                ws.dataValidations.add('P6:P' + lastRow, { type: 'list', allowBlank: true, showDropDown: false, formulae: ['"F,M"'], showErrorMessage: true, errorStyle: 'error', errorTitle: 'Sexo inválido', error: 'F = Femenino · M = Masculino' });
+                ws.dataValidations.add('J4:J' + lastRow, { type: 'list', allowBlank: true, showDropDown: false, formulae: [shiftOpts], showErrorMessage: true, errorStyle: 'error', errorTitle: 'Turno inválido', error: 'Seleccione de la lista' });
+                ws.dataValidations.add('K4:K' + lastRow, { type: 'list', allowBlank: true, showDropDown: false, formulae: ['"Turno H,Turno 1,Turno 2"'], showErrorMessage: true, errorStyle: 'error', errorTitle: 'Sistema inválido', error: 'Seleccione de la lista' });
+                ws.dataValidations.add('L4:L' + lastRow, { type: 'list', allowBlank: true, showDropDown: false, formulae: ['"Dia,Noche"'], showErrorMessage: true, errorStyle: 'error', errorTitle: 'Tipo inválido', error: 'Seleccione: Dia o Noche' });
+                ws.dataValidations.add('M4:M' + lastRow, { type: 'list', allowBlank: true, showDropDown: false, formulae: ['"Pendiente,Confirmado,Cancelado"'], showErrorMessage: true, errorStyle: 'error', errorTitle: 'Estado inválido', error: 'Seleccione de la lista' });
+                ws.dataValidations.add('P4:P' + lastRow, { type: 'list', allowBlank: true, showDropDown: false, formulae: ['"F,M"'], showErrorMessage: true, errorStyle: 'error', errorTitle: 'Sexo inválido', error: 'F = Femenino · M = Masculino' });
 
 
-                // NOTA: El formato condicional MOD-11 fue eliminado porque ExcelJS
-                // genera XML malformado con fórmulas tan complejas, corrompiendo el archivo.
-                // La validación del RUT se hace en el servidor al procesar el archivo.
+                // ─── FORMATO CONDICIONAL: validación RUT MOD-11 ────────────────────
+                // Verde = DV correcto · Rojo = DV incorrecto
+                // Algoritmo: pad cuerpo a 8 dígitos + multiplicadores fijos {3,2,7,6,5,4,3,2}
+                // Evita INDIRECT y arrays {} que corrompen algunos archivos ExcelJS.
+                (function () {
+                    // cl  = RUT sin puntos ni guión (ej: "201117151")
+                    var cl = 'SUBSTITUTE(SUBSTITUTE(UPPER(G4),".",""),"-","")';
+                    // bod = cuerpo sin el último carácter (dígito verificador)
+                    var bod = 'LEFT(' + cl + ',LEN(' + cl + ')-1)';
+                    // pad = cuerpo rellenado con ceros a la izquierda hasta 8 dígitos
+                    var pad = 'RIGHT("00000000"&' + bod + ',8)';
+                    // Suma MOD-11 descompuesta (multiplica de izquierda a derecha con muls {3,2,7,6,5,4,3,2})
+                    var muls = [3, 2, 7, 6, 5, 4, 3, 2];
+                    var sumE = muls.map(function (m, i) {
+                        return 'VALUE(MID(' + pad + ',' + (i + 1) + ',1))*' + m;
+                    }).join('+');
+                    // r = residuo
+                    var r = '11-MOD(' + sumE + ',11)';
+                    // DV esperado: 11→"0", 10→"K", resto→número
+                    var expDV = 'IF(' + r + '=11,"0",IF(' + r + '=10,"K",TEXT(' + r + ',"0")))';
+                    // DV declarado (último carácter del RUT)
+                    var actDV = 'UPPER(RIGHT(' + cl + ',1))';
+                    // Condición base: celda no vacía y longitud mínima razonable
+                    var hasVal = 'AND(G4<>"",LEN(' + cl + ')>2)';
 
+                    var fValid = 'AND(' + hasVal + ',' + actDV + '=' + expDV + ')';
+                    var fInvalid = 'AND(' + hasVal + ',' + actDV + '<>' + expDV + ')';
+
+                    ws.addConditionalFormatting({
+                        ref: 'G4:G' + lastRow,
+                        rules: [
+                            {
+                                // REGLA 1 (alta prioridad): VERDE = DV correcto ✅
+                                type: 'expression',
+                                priority: 1,
+                                formulae: [fValid],
+                                style: {
+                                    fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFC6EFCE' }, bgColor: { argb: 'FFC6EFCE' } },
+                                    font: { color: { argb: 'FF276221' }, bold: true, name: 'Calibri', size: 10 },
+                                    border: {
+                                        top: { style: 'medium', color: { argb: 'FF4CAF50' } },
+                                        left: { style: 'medium', color: { argb: 'FF4CAF50' } },
+                                        bottom: { style: 'medium', color: { argb: 'FF4CAF50' } },
+                                        right: { style: 'medium', color: { argb: 'FF4CAF50' } }
+                                    }
+                                }
+                            },
+                            {
+                                // REGLA 2 (menor prioridad): ROJO = DV incorrecto ❌
+                                type: 'expression',
+                                priority: 2,
+                                formulae: [fInvalid],
+                                style: {
+                                    fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFC7CE' }, bgColor: { argb: 'FFFFC7CE' } },
+                                    font: { color: { argb: 'FF9C0006' }, bold: true, name: 'Calibri', size: 10 },
+                                    border: {
+                                        top: { style: 'medium', color: { argb: 'FFEE3124' } },
+                                        left: { style: 'medium', color: { argb: 'FFEE3124' } },
+                                        bottom: { style: 'medium', color: { argb: 'FFEE3124' } },
+                                        right: { style: 'medium', color: { argb: 'FFEE3124' } }
+                                    }
+                                }
+                            }
+                        ]
+                    });
+
+                    // Validación con STOP: Excel NO permite salir de la celda si el DV es incorrecto
+                    var validOrEmpty = 'OR(G4="",AND(' + hasVal + ',' + actDV + '=' + expDV + '))';
+                    ws.dataValidations.add('G4:G' + lastRow, {
+                        type: 'custom',
+                        allowBlank: true,
+                        showInputMessage: true,
+                        promptTitle: 'Formato RUT',
+                        prompt: 'Ingrese con guion: 12345678-9\no con K: 12345678-K\nVerde = DV valido  /  Rojo = DV incorrecto',
+                        showErrorMessage: true,
+                        errorStyle: 'stop',
+                        errorTitle: '❌ RUT Invalido',
+                        error: 'El digito verificador no corresponde.\nCorri ja el RUT antes de continuar.\nEj. correcto: 20111715-1',
+                        formulae: [validOrEmpty]
+                    });
+                })();
+
+                // ─── PROTECCIÓN DE HOJA: forzar "solo valores" al pegar ───────────────
+                // Con formatCells:false, Excel NO puede aplicar el formato fuente al pegar.
+                // Efecto: Ctrl+V funciona igual, pero solo pega los VALORES (no colores ni fórmulas).
+                // Los datos de las filas 4-lastRow se desbloquean para permitir edición normal.
+                for (var lockRow = 4; lockRow <= lastRow; lockRow++) {
+                    for (var lockCol = 1; lockCol <= 17; lockCol++) {
+                        var lc = ws.getRow(lockRow).getCell(lockCol);
+                        lc.protection = { locked: false };
+                    }
+                }
+                // También desbloquear la celda de indicador de error (O2) para que CF funcione
+                ws.getRow(2).getCell(15).protection = { locked: true }; // O2 es solo lectura
+                ws.protect('AramarkPCH2026', {
+                    selectLockedCells: true,   // Puede leer encabezados
+                    selectUnlockedCells: true,   // Puede editar datos
+                    formatCells: false,  // ← CLAVE: bloquea formato → paste fuerza solo valores
+                    formatColumns: false,
+                    formatRows: false,
+                    insertColumns: false,
+                    insertRows: false,
+                    deleteColumns: false,
+                    deleteRows: false,
+                    sort: true,   // Puede ordenar
+                    autoFilter: true    // Puede filtrar
+                });
 
                 // ─── LEYENDA de colores (fila final, sin merge) ───────────────────
                 var legendRow = lastRow + 2;
                 ws.getRow(legendRow).height = 16;
                 var legCell = ws.getRow(legendRow).getCell(1);
-                legCell.value = '🔵 Azul = Obligatorio   🟢 Verde = Fecha inicio   🔴 Rojo = Fecha término   ⚠️ RUT rojo = DV incorrecto';
+                legCell.value = '🔵 Azul = Obligatorio   🟢 Verde = Fecha inicio   🔴 Rojo = Fecha término   ✅ RUT verde = DV correcto   ❌ RUT rojo = DV incorrecto';
                 legCell.font = { name: 'Calibri', size: 8, italic: true, color: { argb: 'FF718096' } };
+
 
                 // ─── GENERAR Y DESCARGAR ──────────────────────────────────────────
                 var xlsBuffer = await wb.xlsx.writeBuffer();
@@ -1198,11 +1361,18 @@
             } else {
                 badge.style.display = 'none';
             }
+
+            // Contar RUTs inválidos
+            const rutsInvalidos = window.workers.filter(w => w.rut && !w.rutValido);
+            const hayInvalidos = rutsInvalidos.length > 0;
+
             document.getElementById('worker-list').innerHTML = window.workers.map(w => {
-                const rutAlert = w.rut && !w.rutValido
-                    ? `<span style="background:#fee2e2;color:#b91c1c;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;margin-left:6px">RUT inválido ⚠️</span>` : '';
+                const isInvalid = w.rut && !w.rutValido;
+                const rutAlert = isInvalid
+                    ? `<span style="background:#fee2e2;color:#b91c1c;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:800;margin-left:6px">❌ RUT inválido — DV no corresponde</span>` : '';
+                const rowBg = isInvalid ? 'background:#fff5f5;border-left:4px solid #ef4444;' : '';
                 return `
-                <div class="worker-item">
+                <div class="worker-item" style="${rowBg}">
                     <div>
                         <div class="worker-name">${w.name}</div>
                         <div class="worker-meta">${w.rut || '-'}${rutAlert} · ${w.legalName || ''}</div>
@@ -1213,9 +1383,51 @@
                     </div>
                 </div>`;
             }).join('');
+
             document.getElementById('count').textContent = window.workers.length;
             document.getElementById('worker-preview').style.display = 'block';
-            document.getElementById('submit-btn').disabled = false;
+
+            // ── Banner de error / éxito según validez de RUTs ──
+            let banner = document.getElementById('rut-validation-banner');
+            if (!banner) {
+                banner = document.createElement('div');
+                banner.id = 'rut-validation-banner';
+                const preview = document.getElementById('worker-preview');
+                preview.insertBefore(banner, preview.firstChild);
+            }
+
+            const btn = document.getElementById('submit-btn');
+
+            if (hayInvalidos) {
+                banner.innerHTML = `
+                <div style="background:#fef2f2;border:2px solid #ef4444;border-radius:12px;padding:14px 18px;margin-bottom:14px">
+                    <div style="font-weight:900;font-size:15px;color:#b91c1c;margin-bottom:6px">🚫 No se puede enviar — ${rutsInvalidos.length} RUT(s) con dígito verificador incorrecto</div>
+                    <div style="font-size:12px;color:#991b1b;margin-bottom:8px">Corrige los siguientes RUTs en tu archivo Excel y vuelve a cargarlo:</div>
+                    <ul style="margin:0;padding-left:18px;font-size:12px;color:#7f1d1d">
+                        ${rutsInvalidos.slice(0, 10).map(w => `<li><strong>${w.name}</strong> — RUT: <code>${w.rut}</code></li>`).join('')}
+                        ${rutsInvalidos.length > 10 ? `<li style="list-style:none;margin-top:4px">... y ${rutsInvalidos.length - 10} más</li>` : ''}
+                    </ul>
+                </div>`;
+                // Bloquear el botón ENVIAR completamente
+                btn.disabled = true;
+                btn.style.opacity = '0.4';
+                btn.style.cursor = 'not-allowed';
+                btn.title = 'Corrige los RUTs inválidos antes de enviar';
+            } else {
+                banner.innerHTML = `
+                <div style="background:#f0fdf4;border:2px solid #22c55e;border-radius:12px;padding:12px 18px;margin-bottom:14px;display:flex;align-items:center;gap:10px">
+                    <span style="font-size:22px">✅</span>
+                    <div>
+                        <div style="font-weight:800;font-size:14px;color:#15803d">Todos los RUTs son válidos</div>
+                        <div style="font-size:11px;color:#166534">${window.workers.length} trabajadores listos para enviar</div>
+                    </div>
+                </div>`;
+                // Habilitar el botón ENVIAR
+                btn.disabled = false;
+                btn.style.opacity = '';
+                btn.style.cursor = '';
+                btn.title = '';
+            }
         }
 
         window.submitRequest = async () => {
@@ -1238,16 +1450,12 @@
                 return;
             }
 
-            // ─ Advertir sobre RUTs inválidos (no bloquear, solo informar) ─
+            // ─ BLOQUEO DURO: nunca permitir envío con RUTs inválidos ─
             const rutsInvalidos = window.workers.filter(w => w.rut && !w.rutValido);
             if (rutsInvalidos.length > 0) {
-                const continuar = confirm(
-                    `⚠️ ${rutsInvalidos.length} trabajador(es) tienen RUT con dígito verificador incorrecto:\n\n` +
-                    rutsInvalidos.slice(0, 5).map(w => `  • ${w.name} — RUT: ${w.rut}`).join('\n') +
-                    (rutsInvalidos.length > 5 ? `\n  ... y ${rutsInvalidos.length - 5} más` : '') +
-                    `\n\n¿Desea enviar igualmente? (Se enviarán con el RUT tal como está)`
-                );
-                if (!continuar) return;
+                // Re-renderizar el banner por si el usuario editó manualmente el submit
+                renderPreview();
+                return; // NO hay bypass posible
             }
 
             const btn = document.getElementById('submit-btn');
@@ -1278,15 +1486,19 @@
                 const todasLasFilas = window.workers
                     .filter(w => w.name || w.nombre)
                     .map(w => ({
-                        rut_trabajador:   _rut(w.rut),
+                        rut_trabajador: _rut(w.rut),
                         nombre_trabajador: String(w.name || w.nombre || '').trim(),
-                        empresa:          String(w.company || companyName || '').trim(),
-                        gerencia:         String(w.management || gerencia || '').trim() || null,
-                        fecha_llegada:    w.arrivalDate  || null,
-                        fecha_salida:     w.departureDate || null,
-                        genero:           _ng(w.sex || w.gender || w.genero),
-                        hab_solicitada:   _hab(w.assignedRoom || w.hab_solicitada),
-                        n_contrato:       String(w.contract || contractNumber || '').trim() || null
+                        empresa: String(w.company || companyName || '').trim(),
+                        gerencia: String(w.management || gerencia || '').trim() || null,
+                        fecha_llegada: w.arrivalDate || null,
+                        fecha_salida: w.departureDate || null,
+                        genero: _ng(w.sex || w.gender || w.genero),
+                        hab_solicitada: _hab(w.assignedRoom || w.hab_solicitada),
+                        n_contrato: String(w.contract || contractNumber || '').trim() || null,
+                        shift_type: String(w.shiftType || '').trim() || null,
+                        shift_name: String(w.shiftName || '').trim() || null,
+                        shift_system: String(w.shiftSystem || '').trim() || null,
+                        status: 'pendiente',  // ✅ IMPORTANTE: marcar como pendiente para que aparezca en la app
                     }));
 
                 // Separar filas válidas (con RUT) de las que no tienen RUT
@@ -1316,16 +1528,65 @@
                 statusDiv.style.color = '#68d391';
                 statusDiv.textContent = `✅ ${filas.length} trabajadores enviados correctamente`;
 
+                // Generar número de folio único
+                const folio = 'B2B-' + Date.now().toString(36).toUpperCase();
+
+                // Guardar confirmación en localStorage
+                try {
+                    const historial = JSON.parse(localStorage.getItem('b2b_folios') || '[]');
+                    historial.unshift({ folio, empresa: companyName, trabajadores: filas.length, fecha: new Date().toISOString() });
+                    localStorage.setItem('b2b_folios', JSON.stringify(historial.slice(0, 20)));
+                } catch (_) { }
+
+                // Mostrar pantalla de confirmación premium
                 setTimeout(() => {
-                    alert(
-                        `✅ ¡Solicitud enviada!\n\n` +
-                        `Empresa: ${companyName}\n` +
-                        `Trabajadores: ${filas.length}\n` +
-                        (contractNumber ? `Contrato: ${contractNumber}\n` : '') +
-                        `\nEl administrador revisará y aprobará la solicitud.`
-                    );
-                    window.location.reload();
-                }, 800);
+                    document.body.innerHTML = `
+                    <div style="min-height:100vh;background:linear-gradient(145deg,#ecfdf5,#f0fdf4,#ffffff);display:flex;align-items:center;justify-content:center;font-family:'Inter',sans-serif;padding:24px">
+                      <div style="background:white;border-radius:28px;padding:40px 36px;max-width:480px;width:100%;box-shadow:0 24px 60px rgba(16,185,129,.12),0 4px 20px rgba(0,0,0,.06);text-align:center">
+                        <div style="width:80px;height:80px;background:linear-gradient(135deg,#10b981,#059669);border-radius:50%;margin:0 auto 20px;display:flex;align-items:center;justify-content:center;font-size:38px;box-shadow:0 8px 30px rgba(16,185,129,.35)">✅</div>
+                        <h1 style="font-size:24px;font-weight:900;color:#064e3b;margin:0 0 8px">¡Solicitud Enviada!</h1>
+                        <p style="font-size:14px;color:#6b7280;margin:0 0 28px;line-height:1.6">Tu nómina fue recibida exitosamente.<br>El equipo de PC Hotelería la revisará pronto.</p>
+
+                        <div style="background:#f0fdf4;border:1.5px solid #6ee7b7;border-radius:16px;padding:20px;margin-bottom:20px">
+                          <div style="font-size:11px;font-weight:700;color:#059669;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Nº de Folio</div>
+                          <div style="font-size:26px;font-weight:900;color:#065f46;letter-spacing:2px;font-family:monospace">${folio}</div>
+                          <div style="font-size:11px;color:#6b7280;margin-top:4px">Guarda este número para seguimiento</div>
+                        </div>
+
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:24px;text-align:left">
+                          <div style="background:#f8fafc;border-radius:12px;padding:14px">
+                            <div style="font-size:10px;font-weight:700;color:#94a3b8;text-transform:uppercase;margin-bottom:4px">Empresa</div>
+                            <div style="font-size:14px;font-weight:800;color:#1e293b">${companyName}</div>
+                          </div>
+                          <div style="background:#f8fafc;border-radius:12px;padding:14px">
+                            <div style="font-size:10px;font-weight:700;color:#94a3b8;text-transform:uppercase;margin-bottom:4px">Trabajadores</div>
+                            <div style="font-size:24px;font-weight:900;color:#10b981">${filas.length}</div>
+                          </div>
+                          <div style="background:#f8fafc;border-radius:12px;padding:14px">
+                            <div style="font-size:10px;font-weight:700;color:#94a3b8;text-transform:uppercase;margin-bottom:4px">Fecha</div>
+                            <div style="font-size:13px;font-weight:700;color:#1e293b">${new Date().toLocaleDateString('es-CL', { day: 'numeric', month: 'long', year: 'numeric' })}</div>
+                          </div>
+                          <div style="background:#f8fafc;border-radius:12px;padding:14px">
+                            <div style="font-size:10px;font-weight:700;color:#94a3b8;text-transform:uppercase;margin-bottom:4px">Estado</div>
+                            <div style="font-size:13px;font-weight:700;color:#10b981">✅ Recibido</div>
+                          </div>
+                        </div>
+
+                        <div style="background:#fffbeb;border:1.5px solid #fde68a;border-radius:12px;padding:14px;margin-bottom:20px;font-size:13px;color:#92400e;line-height:1.6">
+                          📧 Recibirás confirmación por parte del equipo de administración.<br>
+                          Puedes consultar el estado con el folio <strong>${folio}</strong>.
+                        </div>
+
+                        <div style="display:flex;gap:10px">
+                          <button onclick="window.print()" style="flex:0 0 auto;padding:14px 18px;background:#f1f5f9;border:none;border-radius:12px;font-size:13px;font-weight:700;color:#475569;cursor:pointer">🖨️ Imprimir</button>
+                          <button onclick="location.reload()" style="flex:1;padding:14px;background:linear-gradient(135deg,#10b981,#059669);color:white;border:none;border-radius:12px;font-size:14px;font-weight:800;cursor:pointer;box-shadow:0 4px 16px rgba(16,185,129,.3)">
+                            + Nueva Solicitud
+                          </button>
+                        </div>
+                      </div>
+                    </div>`;
+                }, 600);
+
 
             } catch (err) {
                 console.error(err);

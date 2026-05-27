@@ -87,7 +87,7 @@ async function ejecutarGrupo(rows) {
     // Incluimos fecha_salida_programada para detectar rotaciones de turno
     const [camasData, asigActivas] = await Promise.all([
         _fetchAllPages('v2_camas', 'id_cama,habitacion_id,estado', 'id_cama'),
-        _fetchAllPages('v2_asignaciones', 'id_cama,empresa_id,fecha_salida_programada', 'id_cama',
+        _fetchAllPages('v2_asignaciones', 'id_cama,empresa_id,fecha_salida_programada,rut_huesped', 'id_cama',
             q => q.is('fecha_checkout', null))
     ]);
     console.log(`[Motor] 🛏️ v2_camas: ${camasData.length} camas | v2_asignaciones activas: ${asigActivas.length}`);
@@ -245,6 +245,15 @@ async function ejecutarGrupo(rows) {
         }
     }
 
+    // ── Índice rut → cama activa (para detectar trabajadores ya asignados) ──────
+    // Permite saltar duplicados si la carga tiene el mismo RUT+habitación ya registrado.
+    const rutACamaActiva = {}; // rut_normalizado → id_cama
+    for(const a of asigActivas||[]) {
+        // Normalizar igual que el motor: quitar puntos, guiones y espacios
+        const rutNorm = String(a.rut_huesped||'').replace(/[.\-\s]/g,'').toUpperCase();
+        if(rutNorm) rutACamaActiva[rutNorm] = String(a.id_cama);
+    }
+
     // Upsert huéspedes
     const huespedes=rows.map(r=>({
         rut:  r.rut_trabajador?String(r.rut_trabajador).replace(/\./g,'').trim().toUpperCase():null,
@@ -268,6 +277,8 @@ async function ejecutarGrupo(rows) {
     // ── Rastreador de camas por fechas (permite misma cama en turnos distintos) ──
     // Map<camaId → [{checkin, salida}]>
     const camasUsadasLote = new Map();
+    // ── Guardia intra-lote: RUTs ya procesados en ESTE grupo (segunda línea de defensa) ──
+    const rutsProcesadosLote = new Set();
 
     // Verifica si una cama está libre para el período [checkin, salida]
     function camaLibreEnFechas(camaId, checkin, salida) {
@@ -312,13 +323,28 @@ async function ejecutarGrupo(rows) {
     });
 
     for(const row of rowsOrdenados) {
-        const rut=row.rut_trabajador?String(row.rut_trabajador).replace(/\./g,'').trim().toUpperCase():null;
+        const rut = row.rut_trabajador ? String(row.rut_trabajador).replace(/[.\-\s]/g,'').trim().toUpperCase().slice(0,12) : null;
         const nombre=row.nombre_trabajador||'';
         const habPedida=row.hab_solicitada?String(row.hab_solicitada).replace(/[.,\s]/g,'').trim():'';
         const rowCheckin = row.fecha_llegada || hoy;
         const rowSalida  = row.fecha_salida  || null;
 
         if(!rut||!nombre){ fallidos.push(`RUT/nombre vacío`); continue; }
+
+        // ── ¿Este RUT ya tiene asignación activa? → NUNCA duplicar ─────────────────────
+        const camaActualDelRut = rutACamaActiva[rut];
+        if(camaActualDelRut) {
+            console.log(`[Motor] ⏭ ${nombre} (${rut}) ya tiene cama activa ${camaActualDelRut} — omitido (DB)`);
+            rowsActualizadas.push(row.id);
+            continue;
+        }
+        // ── Guardia intra-lote: mismo RUT dos veces en el Excel → skip absoluto ──
+        if(rutsProcesadosLote.has(rut)) {
+            console.log(`[Motor] ⏭ ${nombre} (${rut}) duplicado en este lote — omitido (intra-lote)`);
+            rowsActualizadas.push(row.id);
+            continue;
+        }
+
 
         let camaAsignada=null;
 
@@ -382,22 +408,57 @@ async function ejecutarGrupo(rows) {
         }
         _logCount++;
 
-        // ── Sin cama tras intentar hab_pedida → quedar pendiente con sugerencias ──
-        if(!camaAsignada && habPedida) {
-            // Generar hasta 5 sugerencias de habitaciones disponibles
-            const sugs = [];
-            for(const [habId, hab] of Object.entries(habMap)) {
-                if(hab.libres.length > 0 && sugs.length < 5) {
-                    const numLegible = idCustomToNumero[habId] || habId;
-                    sugs.push(numLegible);
+        // ── Sin cama en hab_pedida → buscar en todo el campamento (NO quedar pendiente) ──
+        if (!camaAsignada && habPedida) {
+            // Primero registrar el motivo para el log/resumen
+            const razon = habByNumero[habPedida]
+                ? `Hab. ${habPedida} llena → reubicado`
+                : `Hab. ${habPedida} no encontrada → reubicado`;
+            console.warn(`[Motor] ⚠️ ${nombre}: ${razon} — buscando cama libre en todo el campamento...`);
+
+            // Nivel A: misma empresa ya en alguna habitación
+            const habsConEstaEmpresa = new Set(
+                (asigActivas||[])
+                    .filter(a => String(a.empresa_id) === String(empresaId))
+                    .map(a => camaIndex[String(a.id_cama)]?.habitacion_id)
+                    .filter(Boolean)
+            );
+            for (const habId of habsConEstaEmpresa) {
+                const hab = habMap[habId];
+                if (hab) {
+                    const ci = hab.libres.findIndex(cId => camaLibreEnFechas(cId, rowCheckin, rowSalida));
+                    if (ci >= 0) { camaAsignada = hab.libres[ci]; registrarCamaUsada(camaAsignada, rowCheckin, rowSalida); break; }
                 }
             }
-            const razon = habByNumero[habPedida]
-                ? `Hab. ${habPedida} está llena`
-                : `Hab. ${habPedida} no encontrada en BD`;
-            sinAsignar.push({ nombre, rut, habPedida, razon, sugerencias: sugs, rowId: row.id });
-            console.warn(`[Motor] ⏸ ${nombre}: ${razon} → queda pendiente`);
-            continue; // NO auto-asignar → queda como pendiente
+            // Nivel B: habitación vacía
+            if (!camaAsignada) {
+                for (const [habId, hab] of Object.entries(habMap)) {
+                    const yaOcupada = (asigActivas||[]).some(a =>
+                        camaIndex[String(a.id_cama)]?.habitacion_id === habId);
+                    if (!yaOcupada) {
+                        const ci = hab.libres.findIndex(cId => camaLibreEnFechas(cId, rowCheckin, rowSalida));
+                        if (ci >= 0) { camaAsignada = hab.libres[ci]; registrarCamaUsada(camaAsignada, rowCheckin, rowSalida); break; }
+                    }
+                }
+            }
+            // Nivel C: cualquier cama libre en el campamento
+            if (!camaAsignada) {
+                for (const hab of Object.values(habMap)) {
+                    const ci = hab.libres.findIndex(cId => camaLibreEnFechas(cId, rowCheckin, rowSalida));
+                    if (ci >= 0) { camaAsignada = hab.libres[ci]; registrarCamaUsada(camaAsignada, rowCheckin, rowSalida); break; }
+                }
+            }
+
+            if (camaAsignada) {
+                const habAsig = idCustomToNumero[camaIndex[String(camaAsignada)]?.habitacion_id] || '?';
+                console.log(`[Motor] 🔄 ${nombre}: reubicado de hab ${habPedida} → hab ${habAsig} cama ${camaAsignada}`);
+                _automaticos++;
+            } else {
+                // Genuinamente sin camas en TODO el campamento
+                sinAsignar.push({ nombre, rut, habPedida, razon: `Sin camas libres en todo el campamento`, sugerencias: [], rowId: row.id });
+                console.warn(`[Motor] ❌ ${nombre}: sin camas disponibles en ningún lado`);
+                continue;
+            }
         }
 
         // ESCENARIO 2: solo si NO tenía hab_pedida → auto-asignación libre (date-aware)
@@ -446,6 +507,13 @@ async function ejecutarGrupo(rows) {
                               habIdFinal.startsWith('COPC')  ? 'COPC'  : habIdFinal.slice(0,8);
         if(_logCount<=20) console.log(`[Motor] 📍 ${nombre}: hab_pedida="${habPedida||'auto'}" → edificio=${edificioFinal} cama=${camaAsignada}`);
 
+        // ── Pre-asignación o activa ───────────────────────────────────────────────
+        // pre_asignado si la llegada es HOY o futura (conversion a 'activa' ocurre
+        // automáticamente a las 00:00:01 del día de llegada, NO al cargar el Excel).
+        const esRotacion = camasEnRotacion.has(String(camaAsignada));
+        const esFuturo   = row.fecha_llegada && row.fecha_llegada >= hoy; // >= incluye hoy
+        const estadoAsig = esFuturo ? 'pre_asignado' : 'activa';
+
         asignaciones.push({
             rut_huesped:             rut,
             nombre_huesped:          nombre,
@@ -454,33 +522,95 @@ async function ejecutarGrupo(rows) {
             fecha_checkin:           row.fecha_llegada||hoy,
             fecha_salida_programada: row.fecha_salida||null,
             numero_contrato:         row.n_contrato||null,
-            _edificio:               edificioFinal    // solo para el informe local
+            // estado_asignacion se rastrea internamente con _estadoAsig (no va a BD)
+            _estadoAsig:             estadoAsig,
+            _edificio:               edificioFinal
         });
+        // Marcar este RUT como ya asignado en este lote → previene duplicado si el mismo
+        // RUT aparece más de una vez en el Excel (intra-lote)
+        rutACamaActiva[rut] = camaAsignada;
+        rutsProcesadosLote.add(rut);
         rowsActualizadas.push(row.id);
     } // fin for(row of rows)
 
     if(asignaciones.length>0) {
 
-        // Limpiar campo interno antes de insertar en BD
+        // ── Checkout automático de ocupantes en rotación ─────────────────────
+        // Si una cama asignada a este lote está en camasEnRotacion, el ocupante
+        // actual tiene fecha_salida_programada <= fechaLlegada del nuevo.
+        // Debemos hacerle checkout antes de insertar para evitar violar el índice
+        // único idx_cama_activa_unica (solo puede haber 1 activo sin checkout por cama).
+        const camasRotacionNuevas = asignaciones
+            .filter(a => camasEnRotacion.has(String(a.id_cama)))
+            .map(a => a.id_cama);
+        if(camasRotacionNuevas.length > 0) {
+            // Para cada cama en rotación, registrar la fecha_checkout del ocupante saliente
+            for(const camaId of camasRotacionNuevas) {
+                const nuevaLlegada = asignaciones.find(a => a.id_cama === camaId)?.fecha_checkin || hoy;
+                const {error: errCO} = await supabase.from('v2_asignaciones')
+                    .update({ fecha_checkout: nuevaLlegada })
+                    .eq('id_cama', camaId)
+                    .is('fecha_checkout', null);
+                if(errCO) console.warn(`[Motor] ⚠️ Checkout rotación cama ${camaId}:`, errCO.message);
+                else console.log(`[Motor] 🔄 Checkout automático cama ${camaId} → fecha ${nuevaLlegada}`);
+            }
+        }
+
+        // Limpiar campos internos antes de insertar en BD
         const asignacionesDB = asignaciones.map(a => {
-            const {_edificio, ...rest} = a;
-            return rest;
+            const {_edificio, _estadoAsig, ...rest} = a;
+            return { ...rest, estado_asignacion: _estadoAsig || 'activa' };
         });
-        const {error:errA}=await supabase.from('v2_asignaciones').insert(asignacionesDB);
 
-        if(errA) return {ok:false,msg:'Error insertando asignaciones: '+errA.message};
+        // ── INSERT individual por trabajador (reemplaza upsert+ignoreDuplicates) ──
+        // ignoreDuplicates silenciosamente omitía asignaciones → estado fantasma
+        // Ahora: si hay conflicto de clave única, actualizamos la fila existente.
+        const rowsInsertados = []; // ids de solicitudes con asignación OK
+        for (let i = 0; i < asignacionesDB.length; i++) {
+            const asig   = asignacionesDB[i];
+            const rowId  = rowsActualizadas[i]; // id de la solicitud b2b correspondiente
 
-        // ── Actualizar estado de camas a 'Ocupada' ──────────────────────────────
-        const camasAsignadas = asignaciones.map(a=>a.id_cama);
-        const {error:errC}=await supabase.from('v2_camas')
-            .update({estado:'Ocupada'})
-            .in('id_cama', camasAsignadas);
-        if(errC) console.warn('[Motor] Error actualizando estado camas:', errC.message);
+            const { error: errIns } = await supabase.from('v2_asignaciones').insert(asig);
 
-        // Marcar solicitudes como aceptadas
-        await supabase.from('v2_solicitudes_b2b')
-            .update({status:'aceptada'})
-            .in('id', rowsActualizadas);
+            if (!errIns) {
+                // INSERT exitoso
+                rowsInsertados.push(rowId);
+            } else if (errIns.code === '23505') {
+                // Conflicto de clave única — actualizar asignación existente
+                const { error: errUpd } = await supabase.from('v2_asignaciones')
+                    .update({
+                        rut_huesped:             asig.rut_huesped,
+                        nombre_huesped:          asig.nombre_huesped,
+                        empresa_id:              asig.empresa_id,
+                        fecha_checkin:           asig.fecha_checkin,
+                        fecha_salida_programada: asig.fecha_salida_programada,
+                        numero_contrato:         asig.numero_contrato,
+                        estado_asignacion:       asig.estado_asignacion,
+                    })
+                    .eq('id_cama', asig.id_cama)
+                    .is('fecha_checkout', null);
+                if (!errUpd) rowsInsertados.push(rowId);
+                else console.warn(`[Motor] ⚠️ No se pudo actualizar asig existente cama ${asig.id_cama}:`, errUpd.message);
+            } else {
+                console.warn(`[Motor] ⚠️ Error insertando asignación cama ${asig.id_cama}:`, errIns.message);
+            }
+        }
+
+        // ── Camas: Ocupada vs PreAsignada ────────────────────────────────────
+        const camasActivas      = asignaciones.filter(a=>a._estadoAsig==='activa').map(a=>a.id_cama);
+        const camasPreAsignadas = asignaciones.filter(a=>a._estadoAsig==='pre_asignado').map(a=>a.id_cama);
+        if(camasActivas.length>0)
+            await supabase.from('v2_camas').update({estado:'Ocupada'}).in('id_cama',camasActivas);
+        if(camasPreAsignadas.length>0)
+            await supabase.from('v2_camas').update({estado:'Disponible'}).in('id_cama',camasPreAsignadas);
+
+        // Marcar como aceptadas SOLO las que tienen asignación creada/actualizada exitosamente
+        if (rowsInsertados.length > 0) {
+            await supabase.from('v2_solicitudes_b2b')
+                .update({status:'aceptada_asignada'})
+                .in('id', rowsInsertados);
+        }
+
 
     }
     // Marcar fallidos como rechazados (excluye sinAsignar que siguen pendientes)
@@ -693,11 +823,18 @@ function grupoCardHTML(empresa, rows) {
     const conHab = rows.filter(r=>r.hab_solicitada).length;
     const sinHab = rows.length - conHab;
 
-    const workerRows = rows.map(r=>{
+    const workerRows = rows.map((r, idx) => {
         const rutB64 = btoa(unescape(encodeURIComponent(r.rut_trabajador||'')));
         const nombreB64 = btoa(unescape(encodeURIComponent(r.nombre_trabajador||'')));
         return `
         <tr style="border-bottom:1px solid #f1f5f9;transition:background .15s" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background=''">
+            <td style="padding:7px 10px;text-align:center">
+                <input type="checkbox" id="chk-${gKey}-${idx}" data-gkey="${gKey}"
+                    checked
+                    style="width:16px;height:16px;cursor:pointer;accent-color:#16a34a"
+                    onchange="window._solUpdateSelCount(${gKey})"
+                    onclick="event.stopPropagation()">
+            </td>
             <td style="padding:7px 10px;font-weight:700;font-size:13px">${r.nombre_trabajador||'—'}</td>
             <td style="padding:7px 10px;font-family:monospace;font-size:12px;color:#6366f1">${r.rut_trabajador||'—'}</td>
             <td style="padding:7px 10px;text-align:center">
@@ -717,6 +854,7 @@ function grupoCardHTML(empresa, rows) {
             </td>
         </tr>`;
     }).join('');
+
 
     const idsJson = JSON.stringify(ids);
 
@@ -764,6 +902,13 @@ function grupoCardHTML(empresa, rows) {
                 <table style="width:100%;border-collapse:collapse;font-size:13px">
                     <thead>
                         <tr style="background:#f8fafc">
+                            <th style="padding:8px 10px;text-align:center;width:36px">
+                                <input type="checkbox" id="chk-all-${gKey}" checked
+                                    title="Seleccionar / deseleccionar todos"
+                                    style="width:16px;height:16px;cursor:pointer;accent-color:#16a34a"
+                                    onclick="event.stopPropagation()"
+                                    onchange="window._solToggleAll(${gKey},this.checked)">
+                            </th>
                             <th style="padding:8px 10px;text-align:left;font-size:10px;color:#94a3b8;font-weight:700;text-transform:uppercase">Nombre</th>
                             <th style="padding:8px 10px;text-align:left;font-size:10px;color:#94a3b8;font-weight:700;text-transform:uppercase">RUT</th>
                             <th style="padding:8px 10px;text-align:center;font-size:10px;color:#94a3b8;font-weight:700;text-transform:uppercase">Habitación</th>
@@ -778,12 +923,13 @@ function grupoCardHTML(empresa, rows) {
             <!-- Panel de sugerencias (se inyecta dinámicamente) -->
             <div id="suger-panel-${gKey}"></div>
             ${isPending?`
-            <div style="padding:14px 20px;background:#f8fafc;border-top:1px solid #e2e8f0;display:flex;gap:10px;justify-content:flex-end">
+            <div style="padding:14px 20px;background:#f8fafc;border-top:1px solid #e2e8f0;display:flex;gap:10px;justify-content:flex-end;align-items:center">
+                <span id="sel-count-${gKey}" style="font-size:12px;color:#64748b;margin-right:auto">✅ ${rows.length} de ${rows.length} seleccionados</span>
                 <button onclick="event.stopPropagation();window._solRechazarGrupo(${idsJson})"
                     style="padding:10px 22px;border:none;border-radius:10px;background:#fee2e2;color:#b91c1c;font-weight:800;font-size:13px;cursor:pointer">
                     ❌ Rechazar grupo
                 </button>
-                <button onclick="event.stopPropagation();window._solAceptarGrupo(${gKey})"
+                <button id="btn-aceptar-${gKey}" onclick="event.stopPropagation();window._solAceptarSeleccionados(${gKey})"
                     style="padding:10px 28px;border:none;border-radius:10px;background:linear-gradient(135deg,#16a34a,#22c55e);color:#fff;font-weight:800;font-size:13px;cursor:pointer;box-shadow:0 2px 8px rgba(34,197,94,.35)">
                     ✅ Aceptar y Asignar (${rows.length})
                 </button>
@@ -1013,7 +1159,7 @@ window._solAsignarSugerida = async function(solicitudId, rutB64, camaId) {
         const empresaId = empRows?.[0]?.id || null;
         // Insertar asignación
         const {error:eA} = await supabase.from('v2_asignaciones').insert({
-            id_cama: camaId, rut_huesped: rut,
+            id_cama: camaId, rut_huesped: (rut || '').slice(0, 12),
             nombre_huesped: sol.nombre_trabajador || rut,
             empresa_id: empresaId,
             fecha_checkin:           sol.fecha_llegada||new Date().toISOString().split('T')[0],
@@ -1022,7 +1168,7 @@ window._solAsignarSugerida = async function(solicitudId, rutB64, camaId) {
         });
         if(eA) throw new Error(eA.message);
         await supabase.from('v2_camas').update({estado:'Ocupada'}).eq('id_cama',camaId);
-        await supabase.from('v2_solicitudes_b2b').update({status:'aceptada',hab_solicitada:String(camaId)}).eq('id',solicitudId);
+        await supabase.from('v2_solicitudes_b2b').update({status:'aceptada'}).eq('id',solicitudId);
         if(sol.n_contrato) await _ajustarCupo(sol.n_contrato, +1);
         toast(`✅ ${rut} asignado a cama ${camaId}`);
         window._renderV2Solicitudes?.();
@@ -1127,15 +1273,87 @@ export async function renderV2Solicitudes(container) {
             <button onclick="window._renderV2Solicitudes()" style="padding:9px 18px;border:none;border-radius:10px;background:#c0392b;color:#fff;font-weight:700;font-size:13px;cursor:pointer">🔄 Actualizar</button>
         </div>
         <div id="sol-kpis" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px;margin-bottom:24px"></div>
-        <div style="display:flex;gap:8px;margin-bottom:20px">
+        <div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap">
             <button class="sol-tab active" id="tab-pending" onclick="window._solTab('pending')">⏳ Pendientes <span id="tab-cnt"></span></button>
+            <button id="tab-conhab"
+                style="padding:10px 22px;border:none;border-radius:10px;font-weight:800;font-size:13px;cursor:pointer;background:linear-gradient(135deg,#15803d,#22c55e);color:#fff;box-shadow:0 2px 10px rgba(21,128,61,.35);display:flex;align-items:center;gap:6px"
+                onclick="window._solCargarExcelConHab()">📂 Cargas con Habitación
+            </button>
             <button class="sol-tab" id="tab-history" onclick="window._solTab('history')">📋 Historial</button>
         </div>
+        <!-- Input oculto para Excel de habitaciones -->
+        <input type="file" id="_sol-excel-conhab" accept=".xlsx,.xls,.csv" style="display:none"
+               onchange="window._solProcesarExcelConHab(this)">
         <div id="sol-body"></div>
     </div>`;
 
     window._renderV2Solicitudes = () => renderV2Solicitudes(container);
     window._solTab = t => renderTab(t);
+
+    // ── Helpers de selección por checkboxes ───────────────────────────────────
+    window._solToggleAll = (gKey, checked) => {
+        document.querySelectorAll(`input[data-gkey="${gKey}"]`).forEach(cb => cb.checked = checked);
+        window._solUpdateSelCount(gKey);
+    };
+
+    window._solUpdateSelCount = (gKey) => {
+        const all  = [...document.querySelectorAll(`input[data-gkey="${gKey}"]`)];
+        const sel  = all.filter(cb => cb.checked).length;
+        const total = all.length;
+        const countEl = document.getElementById(`sel-count-${gKey}`);
+        const btnEl   = document.getElementById(`btn-aceptar-${gKey}`);
+        const allChk  = document.getElementById(`chk-all-${gKey}`);
+        if (countEl) countEl.textContent = `✅ ${sel} de ${total} seleccionados`;
+        if (btnEl) {
+            btnEl.textContent = sel > 0 ? `✅ Aceptar y Asignar (${sel})` : '— Ninguno seleccionado';
+            btnEl.disabled = sel === 0;
+            btnEl.style.opacity = sel === 0 ? '0.45' : '1';
+        }
+        if (allChk) allChk.indeterminate = sel > 0 && sel < total;
+    };
+
+    // ── Aceptar solo los trabajadores marcados con checkbox ───────────────────
+    window._solAceptarSeleccionados = (gKey) => {
+        const allRows  = window._gruposData[gKey];
+        if (!allRows?.length) { toast('Error: grupo no encontrado', 'error'); return; }
+
+        // Obtener índices de los checkboxes marcados
+        const checkedIdxs = [...document.querySelectorAll(`input[data-gkey="${gKey}"]`)]
+            .map((cb, i) => cb.checked ? i : -1)
+            .filter(i => i >= 0);
+
+        const selected = checkedIdxs.map(i => allRows[i]);
+        if (!selected.length) { toast('Selecciona al menos un trabajador', 'error'); return; }
+
+        const skipped = allRows.length - selected.length;
+        if (skipped > 0) {
+            const ok = confirm(`⚠️ Cargarás ${selected.length} de ${allRows.length} trabajadores.\n${skipped} trabajador(es) NO serán cargados.\n\n¿Confirmar?`);
+            if (!ok) return;
+        }
+
+        const overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:99999;display:flex;align-items:center;justify-content:center';
+        overlay.innerHTML = `<div style="background:#fff;border-radius:16px;padding:32px 40px;text-align:center;min-width:280px">
+            <div style="font-size:36px;margin-bottom:12px">⚙️</div>
+            <div style="font-weight:800;font-size:16px;margin-bottom:6px">Asignando camas…</div>
+            <div style="font-size:13px;color:#64748b">Procesando ${selected.length} trabajadores seleccionados</div>
+        </div>`;
+        document.body.appendChild(overlay);
+
+        ejecutarGrupo(selected).then(res => {
+            overlay.remove();
+            if (!res.ok) { toast('🚨 ' + res.msg, 'error'); return; }
+            const sinA = res.sinAsignar || [];
+            if (sinA.length > 0) {
+                // Reusar el flujo existente del modal de sin asignar
+                window._gruposData[gKey] = selected; // temporalmente apuntar al subgrupo
+            }
+            toast(`✅ ${res.asignados} asignado(s) correctamente`, 'success');
+            window._renderV2Solicitudes?.();
+            refreshBadge();
+        }).catch(e => { overlay.remove(); toast('🚨 ' + e.message, 'error'); });
+    };
+
     window._solAceptarGrupo = gKey => {
         const rows = window._gruposData[gKey];
         if(!rows||!rows.length){ toast('Error: grupo no encontrado','error'); return; }
@@ -1264,7 +1482,7 @@ export async function renderV2Solicitudes(container) {
                                 const empresaId2 = empRows?.[0]?.id || null;
                                 const {error:eA} = await supabase.from('v2_asignaciones').insert({
                                     id_cama: camaId,
-                                    rut_huesped: sol.rut_trabajador,
+                                    rut_huesped: (sol.rut_trabajador || '').slice(0, 12),
                                     nombre_huesped: sol.nombre_trabajador || sol.rut_trabajador,
                                     empresa_id: empresaId2,
                                     fecha_checkin: sol.fecha_llegada || new Date().toISOString().split('T')[0],
@@ -1275,7 +1493,7 @@ export async function renderV2Solicitudes(container) {
                                 if(eA) throw new Error(eA.message);
                                 await supabase.from('v2_camas').update({estado:'Ocupada'}).eq('id_cama', camaId);
                                 await supabase.from('v2_solicitudes_b2b')
-                                    .update({status:'aceptada', hab_solicitada: String(camaId)}).eq('id', rowId);
+                                    .update({status:'aceptada'}).eq('id', rowId);
                                 if(sol.n_contrato) await _ajustarCupo(sol.n_contrato, +1);
 
                                 // Quitar al trabajador del modal
@@ -1404,6 +1622,288 @@ export async function renderV2Solicitudes(container) {
     };
     window._solRechazarGrupo = ids => rechazarGrupo(ids);
 
+    // ── Botón "Cargas con Habitación" ───────────────────────────────────
+    window._solCargarExcelConHab = function() {
+        const inp = document.getElementById('_sol-excel-conhab');
+        if(inp) { inp.value = ''; inp.click(); }
+    };
+
+    window._solProcesarExcelConHab = async function(inputEl) {
+        const file = inputEl?.files?.[0];
+        if(!file) return;
+
+        if(!window.XLSX) {
+            const s = document.createElement('script');
+            s.src = 'https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js';
+            await new Promise((res,rej) => { s.onload=res; s.onerror=rej; document.head.appendChild(s); });
+        }
+
+        const ov = document.createElement('div');
+        ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:99999;display:flex;align-items:center;justify-content:center';
+        ov.innerHTML = `<div style="background:#fff;border-radius:20px;padding:36px 44px;text-align:center;min-width:360px;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+            <div style="font-size:44px;margin-bottom:14px">📂</div>
+            <div style="font-weight:900;font-size:17px;margin-bottom:10px;color:#0f172a">Cargas con Habitación</div>
+            <div id="_chab_step" style="font-size:13px;color:#64748b;min-height:20px;margin-bottom:6px">Leyendo archivo...</div>
+            <div id="_chab_detail" style="font-size:11px;color:#94a3b8;min-height:16px"></div>
+        </div>`;
+        document.body.appendChild(ov);
+        const step   = t => { const el=document.getElementById('_chab_step');   if(el) el.textContent=t; };
+        const detail = t => { const el=document.getElementById('_chab_detail'); if(el) el.textContent=t; };
+
+        try {
+            const buf = await file.arrayBuffer();
+            const wb  = XLSX.read(buf, { type:'array', cellDates:true });
+            const ws  = wb.Sheets[wb.SheetNames[0]];
+
+            // ── Auto-detectar la fila de cabeceras real ───────────────────────────
+            // El Excel de Aramark/Hualpén tiene 1-3 filas de título antes de los headers reales.
+            // Leemos como array de arrays y buscamos la primera fila con palabras clave conocidas.
+            const allRows = XLSX.utils.sheet_to_json(ws, { header:1, defval:'', raw:false });
+            if(!allRows.length) throw new Error('El archivo está vacío.');
+
+            const norm0 = s => String(s).toLowerCase()
+                .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+                .replace(/[^a-z0-9]/g,'');
+
+            // Palabras clave — se busca la fila con MÁS coincidencias (no solo la primera con ≥2)
+            // Las keywords de alta especificidad (que no suelen aparecer en instrucciones) tienen más peso
+            const HEADER_KEYWORDS = ['hab','habitacion','nombre','empresa','rut','run','pt','fecha','gerencia','contrato','tipo','llegada','salida','checkin','checkout'];
+            let headerRowIdx = -1;
+            let bestHits = 1; // requiere al menos 2
+            for(let i=0; i < Math.min(20, allRows.length); i++) {
+                const rowNorm = allRows[i].map(c => norm0(String(c)));
+                const hits = HEADER_KEYWORDS.filter(kw => rowNorm.some(c => c.includes(kw))).length;
+                if(hits > bestHits) { bestHits = hits; headerRowIdx = i; }
+            }
+            if(headerRowIdx === -1) throw new Error(
+                'No se encontró la fila de cabeceras en las primeras 20 filas del Excel.\n' +
+                'Asegúrate de que el archivo tenga una fila con: NOMBRE, HAB, EMPRESA, FECHA, etc.'
+            );
+
+            const headers = allRows[headerRowIdx].map(h => String(h).trim());
+            // Construir raw como array de objetos usando los headers encontrados
+            const raw = [];
+            for(let i = headerRowIdx + 1; i < allRows.length; i++) {
+                const rowArr = allRows[i];
+                // Ignorar filas completamente vacías
+                if(rowArr.every(c => !String(c).trim())) continue;
+                const obj = {};
+                headers.forEach((h, ci) => { obj[h] = rowArr[ci] ?? ''; });
+                raw.push(obj);
+            }
+            if(!raw.length) throw new Error('No hay filas de datos después de los encabezados.');
+
+            step(`${raw.length} filas de datos (cabeceras en fila ${headerRowIdx+1})...`);
+
+
+            // Detector flexible: normaliza espacios, tildes y mayúsculas (reutiliza norm0)
+            const norm = norm0;
+
+            const fc = (...cands) => headers.find(h =>
+                cands.some(c => norm(h).includes(norm(c))));
+
+            // ── Nombre: puede venir en columna única o dividida ──────────────────
+            const cNomCompleto = fc('nombrecomp','nombretrab','nombre_comp','nombre_trab','nombre trabajador','nombres y apellidos','huesped','completo');
+            const cNomSolo     = fc('nombre','name','nombres');
+            const cApePat      = fc('apellidopat','apellidop','apepat','paterno','apellido1','primerape');
+            const cApeMat      = fc('apellidomat','apellidom','apemat','materno','apellido2','segundoape');
+            const cApeSolo     = fc('apellido'); // si hay solo una col de apellido
+            // RUT — puede venir como PT, RUT, RUN, DNI, CEDULA, ID, EMPLOYEE...
+            const cRut = fc('rut','run','dni','cedula','identificacion','id trabajador','pt','employee','empid','cod trab','num trab','id trab','nro trab','numero trab');
+            // Empresa
+            const cEmp = fc('empresa','company','contratista','razon social','razon_social','cliente');
+            // Gerencia
+            const cGer = fc('gerencia','area','unidad','departamento','gcia');
+            // Contrato
+            const cCon = fc('contrato','ncontrato','nro contrato','num contrato','numcontrato','n contrato','nrocontrato','contract','cod contrato');
+            // Habitación (la más importante)
+            const cHab = fc('hab','habitacion','room','pieza','numero hab','nro hab','num hab','cama','bed','cod hab','codhabitacion','n hab','nro habitacion','num habitacion','pza','depto','dormitorio','n pza','pza n','hab n','n de hab','nhabitacion','nhab','nrode habitacion','numerode habitacion','n de habitacion','pabellon','pabel','sector','nro.','numero de habitacion','hab num','hab_num','habitacion num','n habitacion','nrohabitacion','numerohab','nrodehab','numerodehab');
+            // Fechas — FECHA INI / FECHA TERM son los nombres exactos del Excel Aramark/Hualpen
+            const cLle = fc('llegada','checkin','ingreso','inicio','fecha llegada','fechallegada','entrada','desde','fecha inicio','ini','fechaini','fecha ini');
+            const cSal = fc('salida','checkout','termino','fin','fecha salida','fechasalida','hasta','fecha fin','fecha termino','term','fechaterm','fecha term');
+            // Género (SEX / SEXO / GÉNERO)
+            const cGen = fc('genero','sexo','gender','sex','sexo trab');
+            // TIPO: turno día / turno noche — busca 'tipo' primero (no 'turno' para evitar confusión
+            // con la col TURNO que contiene "Turno 1", "Turno 2" y no es la jornada)
+            const cTipo = fc('tipo','tipoturno','tipo turno','jornada','shift');
+
+            // ── Validaciones con mensaje informativo ────────────────────────────
+            const tieneNombre = !!(cNomCompleto || cNomSolo || cApePat || cApeSolo);
+            const tieneRut    = !!cRut;
+
+            if(!tieneNombre && !tieneRut) {
+                const colsList = headers.slice(0,10).join(', ');
+                throw new Error(
+                    `No se encontró columna de Nombre ni RUT.\n\n` +
+                    `Columnas encontradas en tu Excel:\n${colsList}${headers.length>10?` … (+${headers.length-10} más)`:''}\n\n` +
+                    `Se busca: NOMBRE, NOMBRES, APELLIDO PATERNO, RUT, RUN…`
+                );
+            }
+            if(!cHab) {
+                const colsList = headers.join(', ');
+                // No lanzar error — advertir y continuar sin asignación de hab (motor auto-asigna)
+                detail(`⚠️ No se encontró columna de Habitación. Se cargará sin hab. asignada para que el motor la busque automáticamente.\nColumnas encontradas: ${colsList}`);
+            }
+
+            detail(`Columnas detectadas: ${[cRut&&'RUT',tieneNombre&&'Nombre',cHab&&'Hab',cTipo&&'Tipo',cLle&&'Llegada',cSal&&'Salida'].filter(Boolean).join(', ')}`);
+
+            const hoy = new Date().toISOString().split('T')[0];
+            function parseFecha(v) {
+                if(!v) return null;
+                if(v instanceof Date) return v.toISOString().split('T')[0];
+                const s = String(v).trim();
+                // Formato YYYY-MM-DD (ISO) — usar directamente
+                if(/^\d{4}-\d{1,2}-\d{1,2}$/.test(s)) return s.substring(0,10);
+                // Número serial de Excel
+                const n = parseFloat(s);
+                if(!isNaN(n) && n > 40000 && !/[\/\-]/.test(s))
+                    return new Date(Date.UTC(1899,11,30)+n*864e5).toISOString().split('T')[0];
+                // Formato con separadores: puede ser DD/MM/YYYY o MM/DD/YYYY
+                const dm = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+                if(dm) {
+                    let day = parseInt(dm[1], 10);
+                    let mon = parseInt(dm[2], 10);
+                    const yr  = dm[3].length===2 ? 2000+parseInt(dm[3],10) : parseInt(dm[3],10);
+                    // Si dm[1] > 12 → definitivamente es el día (formato europeo DD/MM)
+                    // Si dm[2] > 12 → definitivamente es el mes al revés → dm[1] es el mes (formato americano MM/DD)
+                    if(day > 12 && mon <= 12) {
+                        // europeo DD/MM — ya tenemos day y mon correctos
+                    } else if(mon > 12 && day <= 12) {
+                        // americano MM/DD → dm[1] es mes, dm[2] es día
+                        [day, mon] = [mon, day];
+                    }
+                    // Validar rango final
+                    if(mon < 1 || mon > 12 || day < 1 || day > 31) return null;
+                    return `${yr}-${String(mon).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+                }
+                return null;
+            }
+
+            function parseTurno(v) {
+                if(!v) return null;
+                const s = norm(String(v));
+                if(s.includes('noche') || s.includes('night') || s==='n') return 'Turno Noche';
+                if(s.includes('dia') || s.includes('day') || s==='d') return 'Turno Día';
+                return String(v).trim() || null; // devolver el valor tal cual si no reconoce
+            }
+
+            const registros = []; let sinHab=0;
+            for(const row of raw) {
+                // Construir nombre: prioridad a columna única, luego concatenar partes
+                let nom = '';
+                if(cNomCompleto) {
+                    nom = String(row[cNomCompleto]||'').trim();
+                } else {
+                    const ap  = cApePat ? String(row[cApePat]||'').trim() : '';
+                    const am  = cApeMat ? String(row[cApeMat]||'').trim() : '';
+                    const ap2 = cApeSolo && !cApePat ? String(row[cApeSolo]||'').trim() : '';
+                    const nm  = cNomSolo ? String(row[cNomSolo]||'').trim() : '';
+                    // Formato chileno: APELLIDO PATERNO APELLIDO MATERNO NOMBRES
+                    nom = [ap, am||ap2, nm].filter(Boolean).join(' ').trim();
+                }
+
+                const rut  = String(row[cRut]||'').replace(/[.\s]/g,'').trim().toUpperCase();
+                const emp  = String(row[cEmp]||'').trim();
+                const ger  = cGer ? String(row[cGer]||'').trim() : '';
+                const con  = cCon ? String(row[cCon]||'').trim() : '';
+                const hab  = cHab ? (String(row[cHab]||'').replace(/[\s.,]/g,'').trim() || null) : null;
+                const lle  = parseFecha(cLle ? row[cLle] : null) || hoy;
+                const sal  = parseFecha(cSal ? row[cSal] : null) || null;
+                const gR   = cGen ? String(row[cGen]||'').trim().toUpperCase() : '';
+                const gen  = gR.startsWith('F')?'F':gR.startsWith('M')?'M':null;
+                const tipo = cTipo ? parseTurno(row[cTipo]) : null;
+
+                if(!nom && !rut) continue;
+                if(!hab) sinHab++; // no hab → sigue (hab_solicitada quedará null → motor auto-asigna)
+
+                registros.push({
+                    empresa:           emp||'Sin empresa',
+                    nombre_trabajador: nom||rut,
+                    rut_trabajador:    rut||null,
+                    genero:            gen,
+                    n_contrato:        con||null,
+                    gerencia:          ger||null,
+                    hab_solicitada:    hab,
+                    fecha_llegada:     lle,
+                    fecha_salida:      sal,
+                    status:            'pendiente',
+                });
+            }
+            if(!registros.length) throw new Error('No se extrajeron filas válidas. Revisa que el archivo tenga datos y habitaciones asignadas.');
+
+
+
+            step(`Subiendo ${registros.length} trabajadores...`);
+
+            let insertedIds=[];
+            for(let i=0; i<registros.length; i+=200) {
+                const lote=registros.slice(i,i+200);
+                const {data:ins,error:eI}=await supabase.from('v2_solicitudes_b2b').insert(lote).select('id,empresa,n_contrato');
+                if(eI) throw new Error('Error BD: '+eI.message);
+                if(ins) insertedIds=insertedIds.concat(ins);
+                detail(`${Math.min(i+200,registros.length)} / ${registros.length} guardados`);
+            }
+
+            step('Ejecutando motor de asignación...');
+            detail('');
+            let fullRows=[];
+            const allIds=insertedIds.map(r=>r.id);
+            for(let i=0; i<allIds.length; i+=500) {
+                const {data:fr}=await supabase.from('v2_solicitudes_b2b').select('*').in('id',allIds.slice(i,i+500));
+                if(fr) fullRows=fullRows.concat(fr);
+            }
+
+            const gruposM={};
+            for(const r of fullRows) {
+                const k=(r.empresa||'')+'|'+(r.n_contrato||'sin-c');
+                if(!gruposM[k]) gruposM[k]=[];
+                gruposM[k].push(r);
+            }
+
+            const resultados=[]; let empN=0;
+            for(const [k,rows] of Object.entries(gruposM)) {
+                const empNombre=rows[0]?.empresa||k;
+                empN++;
+                step(`Asignando (${empN}/${Object.keys(gruposM).length}): ${empNombre}`);
+                detail(`${rows.length} trabajadores`);
+                try { const res=await ejecutarGrupo(rows); resultados.push({empresa:empNombre,...res,total:rows.length}); }
+                catch(eM) { resultados.push({empresa:empNombre,ok:false,msg:eM.message,total:rows.length}); }
+            }
+
+            ov.remove();
+
+            const totalAsig=resultados.reduce((s,r)=>s+(r.asignados||0),0);
+            const totalFall=resultados.reduce((s,r)=>s+(r.fallidos?.length||0),0);
+            const resHTML=resultados.map(r=>{
+                const col=r.ok?'#15803d':'#b91c1c', bg=r.ok?'#dcfce7':'#fee2e2', ico=r.ok?'✅':'❌';
+                return `<div style="display:flex;justify-content:space-between;padding:8px 12px;background:${bg};border-radius:8px;margin-bottom:6px">
+                    <span style="font-weight:700;font-size:13px;color:${col}">${ico} ${r.empresa}</span>
+                    <span style="font-size:12px;font-weight:700;color:${col}">${r.ok?`${r.asignados}/${r.total} asignados`:r.msg}</span></div>`;
+            }).join('');
+
+            const modal=document.createElement('div');
+            modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px';
+            modal.innerHTML=`<div style="background:#fff;border-radius:20px;padding:28px 32px;max-width:480px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.28)">
+                <div style="display:flex;align-items:center;gap:12px;margin-bottom:18px">
+                    <div style="font-size:36px">📂</div>
+                    <div><div style="font-weight:900;font-size:17px;color:#0f172a">Carga completada</div>
+                    <div style="font-size:12px;color:#64748b;margin-top:3px">✅ ${totalAsig} asignados${totalFall>0?` · ⚠️ ${totalFall} sin cama`:''}${sinHab>0?` · ℹ️ ${sinHab} omitidas`:''}</div></div>
+                </div>
+                <div style="max-height:260px;overflow-y:auto;margin-bottom:16px">${resHTML}</div>
+                <button onclick="this.closest('[style*=fixed]').remove();window._solTab('history')"
+                    style="width:100%;padding:12px;border:none;border-radius:12px;background:linear-gradient(135deg,#15803d,#22c55e);color:#fff;font-weight:900;font-size:14px;cursor:pointer">
+                    📋 Ver en Historial
+                </button></div>`;
+            document.body.appendChild(modal);
+            refreshBadge();
+            setTimeout(()=>window._solTab?.('history'),200);
+
+        } catch(e) {
+            ov.remove();
+            alert('❌ Error al procesar la carga:\n'+e.message);
+        }
+    };
+
     await renderTab('pending');
 }
 
@@ -1459,14 +1959,63 @@ async function renderTab(tab) {
                 .map(([emp,rows])=>grupoCardHTML(emp,rows))
                 .join('');
         } else {
-            // ── HISTORIAL: agrupado por empresa ───────────────────────────────
+            // HISTORIAL: agrupado por empresa + contrato + fecha_llegada + fecha_salida
+            // Dos cargas de la misma empresa con fechas distintas = tarjetas separadas
+            const hoy2 = new Date().toISOString().split('T')[0];
             const grupos={};
             for(const r of reqs) {
-                const key=(r.empresa||'Sin empresa')+'||'+(r.status||'');
-                if(!grupos[key]) grupos[key]={empresa:r.empresa||'Sin empresa',status:r.status,rows:[]};
+                const key=(r.empresa||'Sin empresa')+'||'+(r.n_contrato||'')+'||'+(r.fecha_llegada||'sin-llegada')+'||'+(r.fecha_salida||'sin-salida');
+                if(!grupos[key]) grupos[key]={
+                    empresa:  r.empresa||'Sin empresa',
+                    contrato: r.n_contrato||null,
+                    fechaIn:  r.fecha_llegada||null,
+                    fechaOut: r.fecha_salida||null,
+                    status:   r.status,
+                    rows:[]
+                };
                 grupos[key].rows.push(r);
+                if(r.fecha_llegada&&(!grupos[key].fechaIn||r.fecha_llegada<grupos[key].fechaIn)) grupos[key].fechaIn=r.fecha_llegada;
+                if(r.fecha_salida&&(!grupos[key].fechaOut||r.fecha_salida>grupos[key].fechaOut)) grupos[key].fechaOut=r.fecha_salida;
             }
-            const cards=Object.values(grupos).sort((a,b)=>a.empresa.localeCompare(b.empresa)).map(g=>{
+
+            // Determinar status del grupo y de-duplicar trabajadores
+            for (const key in grupos) {
+                const g = grupos[key];
+                
+                // Priorizar status 'aceptada' > 'finalizado' > otros
+                if (g.rows.some(r => r.status === 'aceptada')) {
+                    g.status = 'aceptada';
+                } else if (g.rows.some(r => r.status === 'finalizado')) {
+                    g.status = 'finalizado';
+                } else {
+                    g.status = g.rows[0]?.status || 'aceptada';
+                }
+
+                // De-duplicar por trabajador
+                const uniqueRows = {};
+                for (const r of g.rows) {
+                    const workerKey = r.rut_trabajador || r.nombre_trabajador;
+                    const existing = uniqueRows[workerKey];
+                    if (!existing) {
+                        uniqueRows[workerKey] = r;
+                    } else {
+                        const priority = { 'aceptada': 3, 'finalizado': 2, 'pendiente': 1 };
+                        const getPrio = status => priority[status] || 0;
+                        if (getPrio(r.status) > getPrio(existing.status)) {
+                            uniqueRows[workerKey] = r;
+                        }
+                    }
+                }
+                g.rows = Object.values(uniqueRows);
+            }
+
+            const cards=Object.values(grupos)
+                .sort((a,b)=>{
+                    const ec=a.empresa.localeCompare(b.empresa);
+                    if(ec!==0) return ec;
+                    return (b.fechaOut||'').localeCompare(a.fechaOut||'');
+                })
+                .map(g=>{
                 const rechazados=g.rows.filter(r=>r.status==='rechazada');
                 const isRechazado=g.status==='rechazada';
                 const rKey = _grupoIdx++;
@@ -1475,6 +2024,8 @@ async function renderTab(tab) {
                 const stColor=isRechazado?'#b91c1c':'#15803d';
                 const stLabel=isRechazado?'❌ Rechazada':'✅ Aceptada';
                 const tableId=`hist-table-${rKey}`;
+                const periodo=(g.fechaIn||g.fechaOut)?`${fmt(g.fechaIn)} → ${fmt(g.fechaOut)}`:'Sin fecha';
+                const contratoTag=g.contrato?`<span style="font-size:10px;background:#e0f2fe;color:#0369a1;padding:1px 7px;border-radius:99px;font-weight:700;margin-left:4px">${g.contrato}</span>`:'';
 
                 const workerRows=g.rows.map(r=>{
                     const sid=r.id;
@@ -1518,8 +2069,8 @@ async function renderTab(tab) {
                         <div style="display:flex;align-items:center;gap:10px">
                             <div style="width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#c0392b,#e74c3c);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:900;font-size:16px">${g.empresa.charAt(0).toUpperCase()}</div>
                             <div>
-                                <div style="font-weight:800;font-size:14px">${g.empresa}</div>
-                                <div style="font-size:11px;color:#64748b">${g.rows.length} trabajadores</div>
+                                <div style="font-weight:800;font-size:14px">${g.empresa}${contratoTag}</div>
+                                <div style="font-size:11px;color:#64748b;margin-top:2px">📅 ${periodo} · ${g.rows.length} trabajadores</div>
                             </div>
                         </div>
                         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
@@ -1561,7 +2112,7 @@ async function renderTab(tab) {
             body.innerHTML=`
                 <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:12px;padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;gap:10px">
                     <span style="font-size:20px">💡</span>
-                    <span style="font-size:13px;color:#92400e;font-weight:600">Haz clic en el nombre de la empresa para ver o colapsar la lista de trabajadores.</span>
+                    <span style="font-size:13px;color:#92400e;font-weight:600">Cada tarjeta es una carga. La misma empresa con distintas fechas de turno aparece como tarjetas separadas.</span>
                 </div>
                 ${cards}`;
         }
@@ -1658,7 +2209,7 @@ window._solReasignarUno = async function(solicitudId, rut, empresa, contrato) {
         // 5. Crear asignación
         const {error:eAsig} = await supabase.from('v2_asignaciones').insert({
             id_cama:                 cama.id_cama,
-            rut_huesped:             rut,
+            rut_huesped:             (rut || '').slice(0, 12),
             empresa_id:              empresaId,
             fecha_checkin:           sol.fecha_llegada || new Date().toISOString().split('T')[0],
             fecha_salida_programada: sol.fecha_salida  || null,

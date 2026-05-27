@@ -1,0 +1,796 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <title>Guía de Check-In — PC Hotelería Anglo American</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap"
+    rel="stylesheet">
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: #f8fafc;
+      color: #1a202c;
+      min-height: 100vh;
+    }
+
+    /* ── HERO HEADER ── */
+    .hero {
+      background: linear-gradient(135deg, #c0392b 0%, #e74c3c 50%, #c0392b 100%);
+      color: #fff;
+      padding: 48px 24px 56px;
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(circle at 20% 50%, rgba(255, 255, 255, 0.12) 0%, transparent 50%),
+        radial-gradient(circle at 80% 20%, rgba(255, 255, 255, 0.08) 0%, transparent 40%);
+    }
+
+    .hero-inner {
+      position: relative;
+      z-index: 1;
+      max-width: 700px;
+      margin: 0 auto;
+    }
+
+    .hero-logo {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 20px;
+      margin-bottom: 28px;
+      flex-wrap: wrap;
+    }
+
+    .hero-logo img {
+      height: 44px;
+      filter: brightness(0) invert(1);
+    }
+
+    .hero-logo-divider {
+      width: 1px;
+      height: 40px;
+      background: rgba(255, 255, 255, 0.3);
+    }
+
+    .hero h1 {
+      font-size: clamp(22px, 5vw, 36px);
+      font-weight: 900;
+      margin-bottom: 12px;
+      letter-spacing: -0.5px;
+    }
+
+    .hero p {
+      font-size: clamp(13px, 2.5vw, 16px);
+      opacity: 0.82;
+      font-weight: 500;
+      line-height: 1.6;
+    }
+
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(255, 255, 255, 0.18);
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      border-radius: 99px;
+      padding: 6px 16px;
+      font-size: 12px;
+      font-weight: 700;
+      margin-top: 20px;
+      letter-spacing: 0.5px;
+    }
+
+    /* ── ALERTA IMPORTANTE ── */
+    .alert-box {
+      max-width: 760px;
+      margin: -24px auto 0;
+      padding: 0 20px;
+      position: relative;
+      z-index: 10;
+    }
+
+    .alert-inner {
+      background: #fff;
+      border-left: 5px solid #f59e0b;
+      border-radius: 14px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+      padding: 20px 24px;
+      display: flex;
+      align-items: flex-start;
+      gap: 16px;
+    }
+
+    .alert-icon {
+      font-size: 28px;
+      flex-shrink: 0;
+    }
+
+    .alert-inner h3 {
+      font-size: 14px;
+      font-weight: 800;
+      color: #92400e;
+      margin-bottom: 4px;
+    }
+
+    .alert-inner p {
+      font-size: 13px;
+      color: #78350f;
+      line-height: 1.6;
+    }
+
+    /* ── CONTENIDO PRINCIPAL ── */
+    .main {
+      max-width: 760px;
+      margin: 0 auto;
+      padding: 40px 20px 60px;
+    }
+
+    /* ── INTRO ── */
+    .intro-text {
+      text-align: center;
+      margin-bottom: 40px;
+      padding: 24px;
+      background: #fff;
+      border-radius: 16px;
+      border: 1px solid #e2e8f0;
+      box-shadow: 0 2px 12px rgba(0, 0, 0, 0.05);
+    }
+
+    .intro-text h2 {
+      font-size: 18px;
+      font-weight: 800;
+      color: #c0392b;
+      margin-bottom: 8px;
+    }
+
+    .intro-text p {
+      font-size: 14px;
+      color: #475569;
+      line-height: 1.7;
+    }
+
+    /* ── PASOS ── */
+    .steps-list {
+      display: flex;
+      flex-direction: column;
+      gap: 28px;
+    }
+
+    .step-card {
+      background: #fff;
+      border-radius: 20px;
+      overflow: hidden;
+      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.07);
+      border: 1px solid #e2e8f0;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    .step-card:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.12);
+    }
+
+    .step-header {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 20px 24px;
+      border-bottom: 1px solid #f1f5f9;
+    }
+
+    .step-number {
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #c0392b, #e74c3c);
+      color: #fff;
+      font-size: 20px;
+      font-weight: 900;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      box-shadow: 0 4px 14px rgba(192, 57, 43, 0.35);
+    }
+
+    .step-header-text {
+      flex: 1;
+    }
+
+    .step-tag {
+      display: inline-block;
+      background: #fee2e2;
+      color: #c0392b;
+      font-size: 10px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      border-radius: 99px;
+      padding: 2px 10px;
+      margin-bottom: 4px;
+    }
+
+    .step-tag.green {
+      background: #dcfce7;
+      color: #15803d;
+    }
+
+    .step-tag.blue {
+      background: #dbeafe;
+      color: #1d4ed8;
+    }
+
+    .step-tag.amber {
+      background: #fef9c3;
+      color: #92400e;
+    }
+
+    .step-tag.purple {
+      background: #ede9fe;
+      color: #6d28d9;
+    }
+
+    .step-title {
+      font-size: 17px;
+      font-weight: 800;
+      color: #1a202c;
+    }
+
+    .step-body {
+      display: flex;
+      flex-direction: column;
+    }
+
+
+    .step-content {
+      padding: 20px 24px;
+    }
+
+    .step-desc {
+      font-size: 14px;
+      color: #475569;
+      line-height: 1.75;
+      margin-bottom: 16px;
+    }
+
+    .step-checklist {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .step-checklist li {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      font-size: 13px;
+      color: #374151;
+      font-weight: 500;
+      line-height: 1.5;
+    }
+
+    .step-checklist li::before {
+      content: '✓';
+      background: #dcfce7;
+      color: #15803d;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      font-weight: 900;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    .step-warning {
+      margin-top: 14px;
+      background: #fff7ed;
+      border: 1px solid #fed7aa;
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-size: 12px;
+      color: #92400e;
+      font-weight: 600;
+      line-height: 1.5;
+    }
+
+    .step-warning::before {
+      content: '⚠️ ';
+    }
+
+    .step-tip {
+      margin-top: 14px;
+      background: #eff6ff;
+      border: 1px solid #bfdbfe;
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-size: 12px;
+      color: #1e40af;
+      font-weight: 600;
+      line-height: 1.5;
+    }
+
+    .step-tip::before {
+      content: '💡 ';
+    }
+
+    .step-img-wrap {
+      border-top: 1px solid #f1f5f9;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px 24px;
+      background: #f8fafc;
+    }
+
+    .step-img-wrap img {
+      width: 100%;
+      max-width: 100%;
+      max-height: 380px;
+      border-radius: 12px;
+      object-fit: contain;
+      box-shadow: 0 4px 16px rgba(0,0,0,.10);
+    }
+
+    /* ── CONECTOR ENTRE PASOS ── */
+    .step-connector {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 4px 0;
+    }
+
+    .step-connector::before {
+      content: '';
+      width: 2px;
+      height: 28px;
+      background: linear-gradient(to bottom, #e2e8f0, #c0392b, #e2e8f0);
+      border-radius: 99px;
+    }
+
+    /* ── RESUMEN FINAL ── */
+    .summary-box {
+      margin-top: 48px;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      border-radius: 20px;
+      padding: 32px 28px;
+      color: #fff;
+    }
+
+    .summary-box h3 {
+      font-size: 18px;
+      font-weight: 800;
+      margin-bottom: 6px;
+    }
+
+    .summary-box p {
+      font-size: 13px;
+      opacity: 0.65;
+      margin-bottom: 20px;
+    }
+
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 14px;
+    }
+
+    .summary-item {
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 12px;
+      padding: 14px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .summary-item-icon {
+      font-size: 22px;
+    }
+
+    .summary-item-label {
+      font-size: 12px;
+      font-weight: 700;
+      color: rgba(255, 255, 255, 0.8);
+    }
+
+    /* ── CONTACTO ── */
+    .contact-bar {
+      margin-top: 32px;
+      background: #fff;
+      border-radius: 14px;
+      border: 1px solid #e2e8f0;
+      padding: 18px 24px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .contact-bar p {
+      font-size: 13px;
+      color: #475569;
+      font-weight: 500;
+      flex: 1;
+      min-width: 200px;
+    }
+
+    .contact-bar strong {
+      color: #c0392b;
+    }
+
+    /* ── FOOTER ── */
+    footer {
+      text-align: center;
+      padding: 24px;
+      font-size: 11px;
+      color: #94a3b8;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      border-top: 1px solid #e2e8f0;
+      margin-top: 20px;
+    }
+
+    @media print {
+      .step-card:hover {
+        transform: none;
+        box-shadow: none;
+      }
+
+      body {
+        background: #fff;
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- ── HERO ── -->
+  <div class="hero">
+    <div class="hero-inner">
+      <div class="hero-logo">
+        <img src="aramark.png" alt="Aramark">
+        <div class="hero-logo-divider"></div>
+        <img src="angloamerican.png" alt="Anglo American" onerror="this.style.display='none'">
+      </div>
+      <h1>🏨 Guía de Check-In de Trabajadores</h1>
+      <p>Procedimiento oficial para el ingreso al Campamento PC Hotelería.<br>
+        Cada empresa debe asegurarse de que <strong>todos sus trabajadores</strong> completen este proceso.</p>
+      <div class="hero-badge">📋 Versión 2026 · Obligatorio para todos los turnos</div>
+    </div>
+  </div>
+
+  <!-- ── ALERTA IMPORTANTE ── -->
+  <div class="alert-box">
+    <div class="alert-inner">
+      <div class="alert-icon">⚠️</div>
+      <div>
+        <h3>IMPORTANTE — Responsabilidad de la Empresa</h3>
+        <p>El supervisor o encargado de cada empresa es responsable de verificar que
+          <strong>el 100% de sus trabajadores</strong> realicen el check-in completo antes de las
+          <strong>23:59 hrs del día de ingreso</strong>. Los registros incompletos afectan directamente
+          la facturación y el control de ocupación del campamento.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── MAIN ── -->
+  <div class="main">
+
+    <!-- Intro -->
+    <div class="intro-text">
+      <h2>¿Cómo funciona el proceso de Check-In?</h2>
+      <p>El sistema de check-in tiene <strong>2 etapas</strong>: primero el trabajador pasa por Recepción
+        con su carnet (autorización manual), y luego <strong>él mismo confirma su llegada</strong>
+        desde su teléfono a través del portal digital "Mi Habitación".</p>
+    </div>
+
+    <!-- PASOS -->
+    <div class="steps-list">
+
+      <!-- PASO 1 -->
+      <div class="step-card">
+        <div class="step-header">
+          <div class="step-number">1</div>
+          <div class="step-header-text">
+            <div class="step-tag">Recepción · Obligatorio</div>
+            <div class="step-title">🪪 Presentar Carnet de Identidad en Recepción</div>
+          </div>
+        </div>
+        <div class="step-body">
+          <div class="step-content">
+            <p class="step-desc">
+              Al llegar al campamento, el trabajador debe dirigirse directamente a la
+              <strong>mesa de Recepción</strong> y entregar su <strong>Carnet de Identidad vigente</strong>
+              al personal de hotelería. Este paso es obligatorio y no puede omitirse.
+            </p>
+            <ul class="step-checklist">
+              <li>Presentar el Carnet de Identidad (cédula chilena vigente)</li>
+              <li>El personal verifica la identidad en el sistema</li>
+              <li>Se confirma que el trabajador está en la lista de la empresa</li>
+              <li>El personal anota o registra la hora de ingreso físico</li>
+            </ul>
+            <div class="step-warning">
+              Si el trabajador NO aparece en el sistema, debe comunicarlo inmediatamente
+              a su supervisor de empresa antes de retirarse de Recepción.
+            </div>
+          </div>
+          <div class="step-img-wrap">
+            <img src="assets/guia/paso1.png"
+              alt="Paso 1 - Carnet en Recepción">
+          </div>
+        </div>
+      </div>
+
+      <div class="step-connector"></div>
+
+      <!-- PASO 2 -->
+      <div class="step-card">
+        <div class="step-header">
+          <div class="step-number">2</div>
+          <div class="step-header-text">
+            <div class="step-tag green">Sistema · Automático</div>
+            <div class="step-title">✅ Autorización por parte de Recepción</div>
+          </div>
+        </div>
+        <div class="step-body">
+          <div class="step-content">
+            <p class="step-desc">
+              El personal de Recepción activa en el sistema la <strong>autorización de check-in</strong>
+              para ese trabajador específico. Esto habilita al trabajador para que pueda confirmar
+              su llegada desde su teléfono en el siguiente paso.
+            </p>
+            <ul class="step-checklist">
+              <li>Recepción abre el sistema PC Hotelería en su computador</li>
+              <li>Busca al trabajador por RUT o nombre</li>
+              <li>Presiona "Autorizar Check-In" en el perfil del trabajador</li>
+              <li>El sistema cambia el estado a "Autorizado ✅"</li>
+            </ul>
+            <div class="step-tip">
+              Una vez autorizado, el trabajador recibirá acceso digital a su habitación asignada.
+              La autorización es instantánea en el sistema.
+            </div>
+          </div>
+          <div class="step-img-wrap">
+            <img src="assets/guia/paso2.png"
+              alt="Paso 2 - Autorización Sistema">
+          </div>
+        </div>
+      </div>
+
+      <div class="step-connector"></div>
+
+      <!-- PASO 3 -->
+      <div class="step-card">
+        <div class="step-header">
+          <div class="step-number">3</div>
+          <div class="step-header-text">
+            <div class="step-tag blue">Trabajador · Portal Digital</div>
+            <div class="step-title">📱 Acceder al Portal "Mi Habitación" desde el Teléfono</div>
+          </div>
+        </div>
+        <div class="step-body">
+          <div class="step-content">
+            <p class="step-desc">
+              Una vez autorizado por Recepción, el trabajador debe abrir el portal digital
+              <strong>"Mi Habitación"</strong> desde su teléfono celular. Este portal está disponible
+              escaneando el <strong>código QR</strong> en Recepción o ingresando la dirección directamente.
+            </p>
+            <ul class="step-checklist">
+              <li>Escanear el código QR disponible en Recepción</li>
+              <li>O escribir la dirección en el navegador del teléfono</li>
+              <li>No es necesario descargar ninguna aplicación</li>
+              <li>Funciona en cualquier teléfono con internet (Android o iPhone)</li>
+            </ul>
+            <div
+              style="margin-top:14px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; padding:12px 16px;">
+              <div
+                style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">
+                Dirección del Portal</div>
+              <div style="font-size:15px;font-weight:800;color:#c0392b;font-family:monospace;">
+                campamento.aramark.cl/mi-habitacion</div>
+            </div>
+          </div>
+          <div class="step-img-wrap">
+            <img src="assets/guia/p2_3.png"
+              alt="Paso 3 - Acceder al Portal">
+
+          </div>
+        </div>
+      </div>
+
+      <div class="step-connector"></div>
+
+      <!-- PASO 4 -->
+      <div class="step-card">
+        <div class="step-header">
+          <div class="step-number">4</div>
+          <div class="step-header-text">
+            <div class="step-tag blue">Trabajador · Portal Digital</div>
+            <div class="step-title">🔢 Ingresar tu RUT en el Portal</div>
+          </div>
+        </div>
+        <div class="step-body">
+          <div class="step-content">
+            <p class="step-desc">
+              En el portal, el trabajador debe ingresar su <strong>RUT</strong> en el campo
+              de búsqueda y presionar <strong>"Buscar mi habitación"</strong>. El sistema lo
+              identificará automáticamente y mostrará los datos de su asignación.
+            </p>
+            <ul class="step-checklist">
+              <li>Escribir el RUT (con o sin guión, con o sin dígito verificador)</li>
+              <li>Si el RUT termina en K, usar el botón <strong>–K</strong> que aparece en el campo</li>
+              <li>Presionar el botón rojo "🔍 Buscar mi habitación"</li>
+              <li>El sistema mostrará el nombre y los datos de la asignación</li>
+            </ul>
+            <div class="step-tip">
+              El portal acepta el RUT en múltiples formatos: 12345678-9, 123456789, 12345678K.
+              No es necesario escribirlo perfecto.
+            </div>
+          </div>
+          <div class="step-img-wrap">
+            <img src="assets/guia/p2_4.png"
+              alt="Paso 4 - Ingresar RUT">
+
+          </div>
+        </div>
+      </div>
+
+      <div class="step-connector"></div>
+
+      <!-- PASO 5 -->
+      <div class="step-card">
+        <div class="step-header">
+          <div class="step-number">5</div>
+          <div class="step-header-text">
+            <div class="step-tag green">Trabajador · Acción Final</div>
+            <div class="step-title">🟢 Confirmar Llegada — "CONFIRMAR LLEGADA"</div>
+          </div>
+        </div>
+        <div class="step-body">
+          <div class="step-content">
+            <p class="step-desc">
+              Después de que el sistema muestre los datos correctos, el trabajador debe presionar
+              el botón verde <strong>"✅ CONFIRMAR LLEGADA"</strong>. Este es el paso final que
+              registra oficialmente su check-in en el sistema.
+            </p>
+            <ul class="step-checklist">
+              <li>Verificar que el nombre y empresa sean correctos</li>
+              <li>Presionar el botón verde "✅ CONFIRMAR LLEGADA"</li>
+              <li>El sistema revelará el número de habitación asignada</li>
+              <li>Guardar o anotar el número de habitación y número de cama</li>
+            </ul>
+            <div class="step-warning">
+              Si aparece "🔒 INGRESO AÚN NO AUTORIZADO", significa que Recepción no ha
+              autorizado el ingreso aún. El trabajador debe volver a Recepción.
+            </div>
+          </div>
+          <div class="step-img-wrap">
+            <img src="assets/guia/p2_5.png"
+              alt="Paso 5 - Confirmar Llegada">
+
+          </div>
+        </div>
+      </div>
+
+      <div class="step-connector"></div>
+
+      <!-- PASO 6 -->
+      <div class="step-card">
+        <div class="step-header">
+          <div class="step-number">6</div>
+          <div class="step-header-text">
+            <div class="step-tag purple">Supervisor Empresa · Control</div>
+            <div class="step-title">📊 Verificación del Supervisor de Empresa</div>
+          </div>
+        </div>
+        <div class="step-body">
+          <div class="step-content">
+            <p class="step-desc">
+              El supervisor o encargado de cada empresa debe revisar en el <strong>Portal de Asistencia</strong>
+              que <strong>todos los trabajadores de su empresa</strong> figuren como
+              <strong>"✅ CONFIRMADO"</strong>. Cualquier trabajador pendiente debe ser contactado
+              para completar su check-in.
+            </p>
+            <ul class="step-checklist">
+              <li>Acceder al portal administrativo como supervisor</li>
+              <li>Ir a la sección "Control de Asistencia"</li>
+              <li>Buscar el nombre de su empresa en el listado</li>
+              <li>Verificar que todos los trabajadores estén en estado "✅ CONFIRMADO"</li>
+              <li>Para los "⏳ PENDIENTES", contactarlos para que completen el proceso</li>
+              <li>Usar el botón "Confirmar todos" solo como último recurso</li>
+            </ul>
+            <div class="step-tip">
+              El portal muestra el porcentaje de confirmación en tiempo real.
+              Objetivo: 100% de confirmación antes de las 23:59 hrs del día de ingreso.
+            </div>
+          </div>
+          <div class="step-img-wrap">
+            <img src="assets/guia/paso6.png"
+              alt="Paso 6 - Supervisor Verificación">
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /steps-list -->
+
+    <!-- ── RESUMEN FINAL ── -->
+    <div class="summary-box">
+      <h3>📋 Resumen del Proceso Completo</h3>
+      <p>Los 6 pasos en menos de 5 minutos por trabajador</p>
+      <div class="summary-grid">
+        <div class="summary-item">
+          <div class="summary-item-icon">🪪</div>
+          <div class="summary-item-label">Paso 1<br>Presentar Carnet</div>
+        </div>
+        <div class="summary-item">
+          <div class="summary-item-icon">✅</div>
+          <div class="summary-item-label">Paso 2<br>Autorización</div>
+        </div>
+        <div class="summary-item">
+          <div class="summary-item-icon">📱</div>
+          <div class="summary-item-label">Paso 3<br>Abrir Portal</div>
+        </div>
+        <div class="summary-item">
+          <div class="summary-item-icon">🔢</div>
+          <div class="summary-item-label">Paso 4<br>Ingresar RUT</div>
+        </div>
+        <div class="summary-item">
+          <div class="summary-item-icon">🟢</div>
+          <div class="summary-item-label">Paso 5<br>Confirmar Llegada</div>
+        </div>
+        <div class="summary-item">
+          <div class="summary-item-icon">📊</div>
+          <div class="summary-item-label">Paso 6<br>Verificar Equipo</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── CONTACTO ── -->
+    <div class="contact-bar">
+      <div>📞</div>
+      <p>¿Problemas con el check-in? Comuníquese con <strong>Recepción del Campamento</strong>,
+        con su <strong>supervisor de empresa</strong> o llame a Administración:
+        <strong>+56 9 9433 0979</strong> · <strong>hoteleriapc@aramark.cl</strong></p>
+    </div>
+
+    <!-- NAV ENTRE PARTES -->
+    <div style="display:flex;gap:12px;justify-content:center;margin-top:28px;flex-wrap:wrap">
+      <a href="guia-parte1.html" style="padding:13px 22px;background:#e2e8f0;color:#475569;border-radius:12px;font-weight:800;font-size:13px;text-decoration:none">← Parte 1: Solicitud Previa</a>
+      <a href="guia-checkout.html" style="padding:13px 22px;background:linear-gradient(135deg,#d97706,#f59e0b);color:#fff;border-radius:12px;font-weight:800;font-size:13px;text-decoration:none;box-shadow:0 4px 14px rgba(217,119,6,.3)">Parte 3: Check-Out →</a>
+    </div>
+
+  </div><!-- /main -->
+
+  <footer>
+    PC Hotelería · Anglo American · Sistema de Gestión de Campamento · v2026
+  </footer>
+
+</body>
+
+</html>

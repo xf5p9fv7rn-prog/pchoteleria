@@ -179,10 +179,59 @@ export async function renderV2Anglo(container) {
 
 // ── GLOBALS ──────────────────────────────────────────────────────────────────
 function _bindGlobals() {
-    // RUT: buscar solo si tiene 8+ dígitos (para no disparar en medio del tipeo)
-    window._aSearch     = v => { clearTimeout(_timer); const r=v.replace(/\D/g,''); if(r.length<8){_hideCard();return;} _timer=setTimeout(()=>_buscar(r),350); };
-    // Blur: buscar aunque tenga 7 dígitos (RUTs cortos tipo 7654321)
-    window._aSearchBlur = v => { clearTimeout(_timer); const r=v.replace(/\D/g,''); if(r.length>=7) _buscar(r); };
+    // Normalizar RUT: quitar puntos/guiones/espacios, conservar K, uppercase
+    window._normRut = v => v.replace(/[.\s]/g,'').toUpperCase().replace(/-/g,'').replace(/[^0-9K]/g,'');
+    // RUT «completo» = tiene guion, termina en K, o ≥9 chars (cuerpo 8 dígitos + DV)
+    window._rutCompleto = v => v.includes('-') || v.toUpperCase().endsWith('K') || window._normRut(v).length >= 9;
+
+    // Validar dígito verificador chileno (módulo 11)
+    window._validarDV = rut => {
+        if (rut.length < 8) return false;
+        const dv   = rut.slice(-1);          // último carácter = DV
+        const body = rut.slice(0, -1);       // cuerpo sin DV
+        if (!/^\d+$/.test(body)) return false;
+        let sum = 0, factor = 2;
+        for (let i = body.length - 1; i >= 0; i--) {
+            sum += parseInt(body[i]) * factor;
+            factor = factor === 7 ? 2 : factor + 1;
+        }
+        const rem = 11 - (sum % 11);
+        const esperado = rem === 11 ? '0' : rem === 10 ? 'K' : String(rem);
+        return dv === esperado;
+    };
+
+    window._aSearch = v => {
+        clearTimeout(_timer);
+        if (!window._rutCompleto(v)) { _hideCard(); return; }
+        const norm = window._normRut(v);
+        // Validar DV antes de buscar
+        if (!window._validarDV(norm)) {
+            _hideCard();
+            const msg = document.getElementById('a-msg');
+            msg.style.display='block'; msg.style.background='rgba(239,68,68,.1)';
+            msg.style.color='#991b1b'; msg.style.cursor='default'; msg.onclick=null;
+            msg.textContent = `❌ RUT ${v.trim()} no es válido — revisa el dígito verificador`;
+            return;
+        }
+        document.getElementById('a-msg').style.display = 'none';
+        _timer = setTimeout(() => _buscar(norm), 350);
+    };
+    // Al salir del campo: buscar si parece completo (≥8 chars normalizados)
+    window._aSearchBlur = v => {
+        clearTimeout(_timer);
+        const r = window._normRut(v);
+        if (r.length < 8) return;
+        if (!window._validarDV(r)) {
+            _hideCard();
+            const msg = document.getElementById('a-msg');
+            msg.style.display='block'; msg.style.background='rgba(239,68,68,.1)';
+            msg.style.color='#991b1b'; msg.style.cursor='default'; msg.onclick=null;
+            msg.textContent = `❌ RUT ${v.trim()} no es válido — revisa el dígito verificador`;
+            return;
+        }
+        _buscar(r);
+    };
+
 
     window._aAgregar = _agregar;
     window._aCargarTodos = _cargarTodos;
@@ -224,7 +273,7 @@ function _hideCard() {
 
 // ── REGISTRAR NUEVO TRABAJADOR ────────────────────────────────────────────
 async function _registrarNuevo() {
-    const rut = document.getElementById('ar').value.replace(/\D/g,'');
+    const rut = window._normRut(document.getElementById('ar').value); // conservar K
     const nombre = document.getElementById('an-nombre').value.trim();
     const cargo = document.getElementById('an-cargo').value.trim();
     const gerencia = document.getElementById('an-gerencia').value.trim();
@@ -232,7 +281,6 @@ async function _registrarNuevo() {
     if (!rut || !nombre) { _msg('⚠️ Completa al menos RUT y Nombre',false); return; }
     const {error} = await supabase.from('v2_usuarios_anglo').insert({rut, nombre, cargo:cargo||null, gerencia:gerencia||null, turno});
     if (error) { _msg('❌ Error al guardar: '+error.message, false); return; }
-    // Ocultar formulario y cargar el nuevo trabajador normalmente
     document.getElementById('a-nuevo').style.display='none';
     await _buscar(rut);
 }
@@ -351,18 +399,35 @@ function _seleccionarHab(numero) {
 // ── BUSCAR RUT ────────────────────────────────────────────────────────────────
 
 async function _buscar(rut) {
-    const {data} = await supabase.from('v2_usuarios_anglo').select('*').eq('rut',rut).maybeSingle();
+    // Buscar por RUT normalizado (ilike para tolerar distintos formatos en BD)
+    const body = rut.replace(/[^0-9]/g, ''); // solo dígitos del cuerpo para búsqueda flexible
+    const {data} = await supabase.from('v2_usuarios_anglo').select('*')
+        .or(`rut.eq.${rut},rut.ilike.%${body}%`).limit(1).maybeSingle();
     const nuevoEl = document.getElementById('a-nuevo');
     if (!data) {
         _hideCard();
-        // Mostrar formulario de nuevo trabajador
+        // ✅ NO auto-abrir: mostrar solo un banner colapsado que requiere clic
         if (nuevoEl) {
-            nuevoEl.style.display='block';
-            document.getElementById('an-nombre').value='';
-            document.getElementById('an-cargo').value='';
-            document.getElementById('an-gerencia').value='';
-            setTimeout(()=>document.getElementById('an-nombre')?.focus(),50);
+            nuevoEl.style.display = 'none'; // ocultar formulario
         }
+        // Mostrar aviso pequeño — el usuario hace clic para abrir el formulario
+        const msg = document.getElementById('a-msg');
+        msg.style.display = 'block';
+        msg.style.background = 'rgba(99,102,241,.08)';
+        msg.style.color = '#4338ca';
+        msg.style.cursor = 'pointer';
+        msg.innerHTML = `👤 RUT <b>${rut}</b> no encontrado en el sistema — <u>haz clic aquí para registrarlo</u>`;
+        msg.onclick = () => {
+            msg.style.display = 'none';
+            msg.onclick = null;
+            if (nuevoEl) {
+                nuevoEl.style.display = 'block';
+                document.getElementById('an-nombre').value = '';
+                document.getElementById('an-cargo').value = '';
+                document.getElementById('an-gerencia').value = '';
+                setTimeout(() => document.getElementById('an-nombre')?.focus(), 50);
+            }
+        };
         return;
     }
     if (nuevoEl) nuevoEl.style.display='none';
@@ -544,7 +609,7 @@ async function _cargarTodos() {
             // Check-in
             await doCheckin({idCama:camaId,rutHuesped:item.rut,nombreHuesped:item.nombre,empresaId,fechaCheckin:hoy,fechaSalidaProgramada:item.salida||null,esPreAsignacion:false});
 
-            await supabase.from('v2_asignaciones').update({huesped_confirmo:true}).eq('id_cama',camaId).is('fecha_checkout',null);
+            // ✅ huesped_confirmo ya viene en true desde doCheckin — solo actualizar estado Anglo
             await supabase.from('v2_camas').update({estado:'Ocupada'}).eq('id_cama',camaId);
             // Registro Anglo
             await supabase.from('v2_asignaciones_anglo').upsert({rut:item.rut,numero_hab:item.hab,color_llave:item.modo==='dia'?'verde':'rojo',fecha_asignacion:hoy,fecha_salida_prog:item.salida||null,llave_entregada:true,activa:true},{onConflict:'rut'});
@@ -556,8 +621,28 @@ async function _cargarTodos() {
     sessionStorage.removeItem('_angloCola'); // Limpiar cola guardada al completar
     _renderCola();
     if(btn){btn.disabled=false;btn.textContent='✅ Cargar todos';}
-    if(err.length) _msg(`⚠️ ${ok} cargados, ${err.length} errores: ${err.join(' | ')}`,false);
-    else _msg(`✅ ${ok} trabajadores cargados exitosamente`,true);
+
+    // Mostrar resultado claro
+    const msgEl = document.getElementById('a-msg');
+    if (err.length === 0) {
+        _msg(`✅ ${ok} trabajadores cargados exitosamente`, true);
+    } else {
+        // Panel de errores detallado (no ilegible)
+        msgEl.style.display = 'block';
+        msgEl.style.background = ok > 0 ? 'rgba(234,179,8,.12)' : 'rgba(239,68,68,.12)';
+        msgEl.style.color = '#1e293b';
+        msgEl.innerHTML = `
+            <div style="font-weight:800;font-size:13px;margin-bottom:8px">
+                ${ok > 0 ? `✅ ${ok} cargados` : ''}
+                ${err.length > 0 ? ` · ⚠️ ${err.length} con problemas` : ''}
+            </div>
+            <div style="max-height:180px;overflow-y:auto;display:flex;flex-direction:column;gap:4px">
+                ${err.map(e => `
+                    <div style="background:#fff;border-left:3px solid #ef4444;padding:6px 10px;border-radius:0 6px 6px 0;font-size:12px;color:#7f1d1d">
+                        ${e}
+                    </div>`).join('')}
+            </div>`;
+    }
     await _loadReg();
 }
 

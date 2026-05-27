@@ -1,0 +1,747 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Parte 1 — Solicitud Previa · PC Hotelería</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: #f8fafc;
+      color: #1a202c
+    }
+
+    .hero {
+      background: linear-gradient(135deg, #c0392b, #e74c3c);
+      color: #fff;
+      padding: 44px 20px 52px;
+      text-align: center;
+      position: relative;
+      overflow: hidden
+    }
+
+    .hero::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(circle at 20% 50%, rgba(255, 255, 255, .12) 0%, transparent 50%)
+    }
+
+    .hero-logos {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 20px;
+      margin-bottom: 24px;
+      position: relative
+    }
+
+    .hero-logos img {
+      height: 40px;
+      filter: brightness(0) invert(1)
+    }
+
+    .hero-logos span {
+      width: 1px;
+      height: 36px;
+      background: rgba(255, 255, 255, .3);
+      display: block
+    }
+
+    .hero h1 {
+      font-size: clamp(20px, 4vw, 32px);
+      font-weight: 900;
+      margin-bottom: 10px;
+      position: relative
+    }
+
+    .hero p {
+      font-size: 14px;
+      opacity: .82;
+      line-height: 1.6;
+      position: relative;
+      max-width: 600px;
+      margin: 0 auto
+    }
+
+    .badge {
+      display: inline-block;
+      background: rgba(255, 255, 255, .18);
+      border: 1px solid rgba(255, 255, 255, .3);
+      border-radius: 99px;
+      padding: 5px 14px;
+      font-size: 11px;
+      font-weight: 700;
+      margin-top: 14px;
+      position: relative
+    }
+
+    .nav-tabs {
+      display: flex;
+      gap: 8px;
+      justify-content: center;
+      padding: 16px 20px;
+      background: #fff;
+      border-bottom: 1px solid #e2e8f0;
+      flex-wrap: wrap
+    }
+
+    .tab {
+      padding: 9px 18px;
+      border-radius: 99px;
+      font-size: 13px;
+      font-weight: 700;
+      text-decoration: none;
+      border: 1.5px solid #e2e8f0;
+      color: #64748b;
+      transition: .2s
+    }
+
+    .tab.active,
+    .tab:hover {
+      background: #c0392b;
+      color: #fff;
+      border-color: #c0392b
+    }
+
+    .alert {
+      max-width: 720px;
+      margin: -22px auto 0;
+      padding: 0 20px;
+      position: relative;
+      z-index: 5
+    }
+
+    .alert-inner {
+      background: #fff;
+      border-left: 5px solid #f59e0b;
+      border-radius: 12px;
+      box-shadow: 0 6px 24px rgba(0, 0, 0, .1);
+      padding: 18px 20px;
+      display: flex;
+      gap: 14px
+    }
+
+    .alert-inner h3 {
+      font-size: 13px;
+      font-weight: 800;
+      color: #92400e;
+      margin-bottom: 4px
+    }
+
+    .alert-inner p {
+      font-size: 12px;
+      color: #78350f;
+      line-height: 1.6
+    }
+
+    .main {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 36px 20px 60px
+    }
+
+    .section-title {
+      font-size: 13px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #c0392b;
+      margin-bottom: 20px;
+      padding-bottom: 8px;
+      border-bottom: 2px solid #fee2e2
+    }
+
+    .steps {
+      display: flex;
+      flex-direction: column;
+      gap: 22px
+    }
+
+    .card {
+      background: #fff;
+      border-radius: 18px;
+      border: 1px solid #e2e8f0;
+      box-shadow: 0 2px 16px rgba(0, 0, 0, .06);
+      overflow: hidden
+    }
+
+    .card-head {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 18px 20px;
+      border-bottom: 1px solid #f1f5f9
+    }
+
+    .num {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #c0392b, #e74c3c);
+      color: #fff;
+      font-size: 18px;
+      font-weight: 900;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      box-shadow: 0 4px 12px rgba(192, 57, 43, .35)
+    }
+
+    .card-head-text .tag {
+      font-size: 10px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: .8px;
+      border-radius: 99px;
+      padding: 2px 10px;
+      display: inline-block;
+      margin-bottom: 3px
+    }
+
+    .tag-red {
+      background: #fee2e2;
+      color: #c0392b
+    }
+
+    .tag-blue {
+      background: #dbeafe;
+      color: #1d4ed8
+    }
+
+    .tag-green {
+      background: #dcfce7;
+      color: #15803d
+    }
+
+    .tag-amber {
+      background: #fef9c3;
+      color: #92400e
+    }
+
+    .card-title {
+      font-size: 16px;
+      font-weight: 800;
+      color: #1a202c
+    }
+
+    .card-body {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .card-content {
+      padding: 18px 20px
+    }
+
+    .desc {
+      font-size: 13px;
+      color: #475569;
+      line-height: 1.75;
+      margin-bottom: 14px
+    }
+
+    .checklist {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 7px
+    }
+
+    .checklist li {
+      display: flex;
+      align-items: flex-start;
+      gap: 9px;
+      font-size: 12.5px;
+      color: #374151;
+      font-weight: 500;
+      line-height: 1.5
+    }
+
+    .checklist li::before {
+      content: '✓';
+      background: #dcfce7;
+      color: #15803d;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      font-weight: 900;
+      flex-shrink: 0;
+      margin-top: 1px
+    }
+
+    .warn {
+      margin-top: 12px;
+      background: #fff7ed;
+      border: 1px solid #fed7aa;
+      border-radius: 8px;
+      padding: 9px 12px;
+      font-size: 11.5px;
+      color: #92400e;
+      font-weight: 600;
+      line-height: 1.5
+    }
+
+    .tip {
+      margin-top: 12px;
+      background: #eff6ff;
+      border: 1px solid #bfdbfe;
+      border-radius: 8px;
+      padding: 9px 12px;
+      font-size: 11.5px;
+      color: #1e40af;
+      font-weight: 600;
+      line-height: 1.5
+    }
+
+    .url-box {
+      margin-top: 12px;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      padding: 10px 14px
+    }
+
+    .url-box .label {
+      font-size: 10px;
+      font-weight: 700;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: .5px;
+      margin-bottom: 4px
+    }
+
+    .url-box .url {
+      font-size: 14px;
+      font-weight: 800;
+      color: #c0392b;
+      font-family: monospace;
+      word-break: break-all
+    }
+
+    .email-box {
+      margin-top: 12px;
+      background: #fdf4ff;
+      border: 1px solid #e9d5ff;
+      border-radius: 10px;
+      padding: 10px 14px
+    }
+
+    .email-box .label {
+      font-size: 10px;
+      font-weight: 700;
+      color: #7e22ce;
+      text-transform: uppercase;
+      letter-spacing: .5px;
+      margin-bottom: 4px
+    }
+
+    .email-box .email {
+      font-size: 14px;
+      font-weight: 800;
+      color: #7e22ce;
+      font-family: monospace
+    }
+
+    .img-wrap {
+      border-top: 1px solid #f1f5f9;
+      background: #f8fafc;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px 20px;
+    }
+
+    .img-wrap img {
+      width: 100%;
+      max-width: 100%;
+      max-height: 360px;
+      border-radius: 12px;
+      object-fit: contain;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, .10);
+    }
+
+    .connector {
+      display: flex;
+      justify-content: center;
+      padding: 2px 0
+    }
+
+    .connector::before {
+      content: '';
+      width: 2px;
+      height: 22px;
+      background: linear-gradient(to bottom, #e2e8f0, #c0392b, #e2e8f0);
+      border-radius: 99px
+    }
+
+    .deadline-box {
+      background: linear-gradient(135deg, #7f1d1d, #c0392b);
+      border-radius: 16px;
+      padding: 24px;
+      color: #fff;
+      margin-top: 32px;
+      text-align: center
+    }
+
+    .deadline-box h3 {
+      font-size: 20px;
+      font-weight: 900;
+      margin-bottom: 8px
+    }
+
+    .deadline-box p {
+      font-size: 13px;
+      opacity: .85;
+      line-height: 1.6
+    }
+
+    .deadline-num {
+      font-size: 56px;
+      font-weight: 900;
+      line-height: 1;
+      margin: 12px 0
+    }
+
+    .contact-row {
+      display: flex;
+      gap: 14px;
+      margin-top: 24px;
+      flex-wrap: wrap
+    }
+
+    .contact-card {
+      flex: 1;
+      min-width: 140px;
+      background: #fff;
+      border-radius: 12px;
+      border: 1px solid #e2e8f0;
+      padding: 14px;
+      text-align: center
+    }
+
+    .contact-card .icon {
+      font-size: 22px;
+      margin-bottom: 6px
+    }
+
+    .contact-card .label {
+      font-size: 10px;
+      font-weight: 700;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: .5px;
+      margin-bottom: 4px
+    }
+
+    .contact-card .val {
+      font-size: 13px;
+      font-weight: 800;
+      color: #c0392b
+    }
+
+    footer {
+      text-align: center;
+      padding: 20px;
+      font-size: 11px;
+      color: #94a3b8;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .5px;
+      border-top: 1px solid #e2e8f0;
+      margin-top: 12px
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="hero">
+    <div class="hero-logos">
+      <img src="aramark.png" alt="Aramark">
+      <span></span>
+      <img src="angloamerican.png" alt="Anglo American" onerror="this.style.display='none'">
+    </div>
+    <h1>📋 PARTE 1 — Solicitud Previa de Alojamiento</h1>
+    <p>Proceso obligatorio que cada empresa debe completar <strong>con 72 horas de anticipación</strong> antes del
+      ingreso de sus trabajadores al campamento.</p>
+    <div class="badge">⏱️ Plazo mínimo: 72 horas antes del ingreso</div>
+  </div>
+
+  <div class="alert">
+    <div class="alert-inner">
+      <div style="font-size:26px;flex-shrink:0">⚠️</div>
+      <div>
+        <h3>IMPORTANTE — Sin solicitud previa no hay asignación de habitación</h3>
+        <p>Ningún trabajador podrá realizar el check-in si su empresa no ha enviado previamente la nómina completa a
+          través del portal y vía correo electrónico. Este proceso debe completarse <strong>mínimo 72 horas
+            antes</strong> del día de ingreso.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="section-title">📌 Pasos para la Solicitud de Alojamiento</div>
+
+    <div class="steps">
+
+      <!-- PASO 1 -->
+      <div class="card">
+        <div class="card-head">
+          <div class="num">1</div>
+          <div class="card-head-text">
+            <div class="tag tag-red">Encargado de Empresa</div>
+            <div class="card-title">🌐 Ingresar al Portal de Solicitudes</div>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="card-content">
+            <p class="desc">El encargado o supervisor de la empresa debe acceder al <strong>Portal de Solicitudes PC
+                Hotelería</strong> desde su computador o teléfono.</p>
+            <ul class="checklist">
+              <li>Abrir el navegador (Chrome, Safari o Firefox)</li>
+              <li>Escribir la dirección del portal o usar el enlace oficial</li>
+              <li>Verificar que la página cargue correctamente</li>
+            </ul>
+            <div class="url-box">
+              <div class="label">Dirección del Portal</div>
+              <div class="url">pchoteleria.netlify.app/solicitud-empresa.html</div>
+            </div>
+          </div>
+          <div class="img-wrap">
+            <img src="assets/guia/p1_1.png" alt="Paso 1 - Portal de Solicitudes">
+          </div>
+        </div>
+      </div>
+
+      <div class="connector"></div>
+
+      <!-- PASO 2 -->
+      <div class="card">
+        <div class="card-head">
+          <div class="num">2</div>
+          <div class="card-head-text">
+            <div class="tag tag-blue">Portal · Descarga</div>
+            <div class="card-title">📥 Descargar la Plantilla Excel</div>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="card-content">
+            <p class="desc">Dentro del portal, encontrará el botón para <strong>descargar la Plantilla Excel
+                oficial</strong>. Este archivo contiene todos los campos requeridos para registrar a los trabajadores.
+            </p>
+            <ul class="checklist">
+              <li>Hacer clic en el botón "Descargar Plantilla Excel"</li>
+              <li>Los datos que se solicitan deben todo en mayuscula</li>
+              <li>Dos nombres y dos apellidos por trabajador</li>
+              <li>El RUT debe ser RUT chileno, con dígito verificador (Ej: 12345678-9)</li>
+              <li>Se debe indicar sexo del trabajador (Femenino o Masculino)</li>
+              <li>la fecha debe estar en formato dd/mm/yyyy</li>
+              <li>El archivo se descargará en su carpeta de Descargas</li>
+              <li>Abrir el archivo en Microsoft Excel o Google Sheets</li>
+              <li>No modificar la estructura del archivo (columnas y encabezados)</li>
+            </ul>
+            <div class="tip">💡 El portal ofrece dos plantillas según el turno (día/noche). Asegúrese de descargar la
+              correcta para su grupo de trabajadores.</div>
+          </div>
+          <div class="img-wrap">
+            <img src="assets/guia/p1_2.png" alt="Paso 2 - Descargar Excel">
+          </div>
+        </div>
+      </div>
+
+      <div class="connector"></div>
+
+      <!-- PASO 3 -->
+      <div class="card">
+        <div class="card-head">
+          <div class="num">3</div>
+          <div class="card-head-text">
+            <div class="tag tag-amber">Encargado · Datos</div>
+            <div class="card-title">✍️ Completar la Información en el Excel</div>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="card-content">
+            <p class="desc">Completar <strong>todos los campos requeridos</strong> para cada trabajador que ingresará al
+              campamento. La información debe ser exacta para que el sistema pueda asignar habitaciones correctamente.
+            </p>
+            <ul class="checklist">
+              <li>Nombre completo del trabajador (sin abreviaturas)</li>
+              <li>RUT con dígito verificador (Ej: 12345678-9)</li>
+              <li>Empresa y número de contrato</li>
+              <li>Gerencia / área de trabajo</li>
+              <li>Fecha de ingreso y fecha de salida</li>
+              <li>Tipo de turno (día o noche)</li>
+            </ul>
+            <div class="warn">⚠️ Los datos incompletos o incorrectos retrasarán la asignación. Verificar que todos los
+              RUTs sean correctos antes de enviar.</div>
+          </div>
+          <div class="img-wrap">
+            <img src="assets/guia/p1_3.png" alt="Paso 3 - Completar Excel">
+          </div>
+        </div>
+      </div>
+
+      <div class="connector"></div>
+
+      <!-- PASO 4 -->
+      <div class="card">
+        <div class="card-head">
+          <div class="num">4</div>
+          <div class="card-head-text">
+            <div class="tag tag-blue">Portal · Carga</div>
+            <div class="card-title">⬆️ Cargar el Excel en la Plataforma</div>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="card-content">
+            <p class="desc">Con el Excel completado, volver al portal y <strong>cargar el archivo</strong> utilizando la
+              sección de carga de nómina. El sistema procesará automáticamente los datos.</p>
+            <ul class="checklist">
+              <li>Volver a la página del portal de solicitudes</li>
+              <li>Completar el formulario con los datos de la empresa</li>
+              <li>Hacer clic en el área de carga de archivo</li>
+              <li>Seleccionar el Excel con la nómina completada</li>
+              <li>Presionar "Enviar Solicitud"</li>
+              <li>Esperar la confirmación de recepción en pantalla</li>
+            </ul>
+            <div class="tip">💡 Guarde una copia del Excel enviado. Lo necesitará para el correo de confirmación del
+              siguiente paso.</div>
+          </div>
+          <div class="img-wrap">
+            <img src="assets/guia/p1_4.png" alt="Paso 4 - Cargar Excel">
+          </div>
+        </div>
+      </div>
+
+      <div class="connector"></div>
+
+      <!-- PASO 5 -->
+      <div class="card">
+        <div class="card-head">
+          <div class="num">5</div>
+          <div class="card-head-text">
+            <div class="tag tag-amber">Correo · Obligatorio</div>
+            <div class="card-title">📧 Enviar Correo de Confirmación</div>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="card-content">
+            <p class="desc">Además de cargar en el portal, debe enviar un <strong>correo electrónico de
+                confirmación</strong> con el mismo archivo Excel adjunto a la dirección oficial de PC Hotelería.</p>
+            <ul class="checklist">
+              <li>Abrir su correo (Outlook, Gmail, etc.)</li>
+              <li>Crear un nuevo correo al destinatario indicado</li>
+              <li>Asunto: "Nómina [Nombre Empresa] — Ingreso [Fecha]"</li>
+              <li>Los Datos del exel deben ser 2 nombres y 2 apellidos </li>
+              <li>Todos los datos deben ser en Mayuscula</li>
+              <li>Adjuntar el mismo Excel cargado en el portal</li>
+              <li>Indicar en el cuerpo del correo que la nómina fue enviada a través de la app</li>
+              <li>Presionar Enviar y guardar la confirmación de envío</li>
+            </ul>
+            <div class="email-box">
+              <div class="label">Correo de Destino</div>
+              <div class="email">hoteleriapc@aramark.cl</div>
+            </div>
+            <div class="warn">⚠️ Sin el correo de confirmación el proceso no se considera completo. Ambos pasos (portal
+              + correo) son obligatorios.</div>
+          </div>
+          <div class="img-wrap">
+            <img src="assets/guia/correo.png" alt="Correo">
+          </div>
+        </div>
+      </div>
+
+      <div class="connector"></div>
+
+      <!-- PASO 6 -->
+      <div class="card">
+        <div class="card-head">
+          <div class="num">6</div>
+          <div class="card-head-text">
+            <div class="tag tag-green">Respuesta · Sistema</div>
+            <div class="card-title">✅ Confirmación de Carga al Sistema</div>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="card-content">
+            <p class="desc">El equipo de PC Hotelería revisará la nómina y <strong>responderá por correo</strong> una
+              vez que los trabajadores hayan sido cargados exitosamente al sistema y sus habitaciones asignadas.</p>
+            <ul class="checklist">
+              <li>Mandar cargas con anticipación (minimo 72 hrs antes de la llegada a turno)</li>
+              <li>El correo de respuesta confirmará que los datos fueron cargados</li>
+              <li>Si hay errores, se indicará cuáles datos corregir</li>
+              <li>Informar a sus trabajadores que ya pueden realizar el check-in</li>
+            </ul>
+            <div class="tip">💡 Cualquier cambio posterior (bajas, incorporaciones, cambio de fechas) debe informarse
+              con anticipación al mismo correo para mantener el orden del sistema.</div>
+            <div class="warn">⚠️ Cambios de último minuto sin aviso previo pueden generar problemas de asignación para
+              sus propios trabajadores.</div>
+          </div>
+          <div class="img-wrap">
+            <img src="assets/guia/paso2.png" alt="Confirmación">
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /steps -->
+
+    <!-- Plazo -->
+    <div class="deadline-box">
+      <h3>⏱️ Plazo Mínimo de Solicitud</h3>
+      <div class="deadline-num">72 hrs</div>
+      <p>Toda solicitud debe ingresarse con mínimo <strong>72 horas de anticipación</strong> antes del día de ingreso de
+        los trabajadores. Solicitudes fuera de plazo no garantizan asignación de habitación.</p>
+    </div>
+
+    <!-- Contacto -->
+    <div class="contact-row">
+      <div class="contact-card">
+        <div class="icon">📧</div>
+        <div class="label">Correo</div>
+        <div class="val">hoteleriapc@aramark.cl</div>
+      </div>
+      <div class="contact-card">
+        <div class="icon">📞</div>
+        <div class="label">Administración</div>
+        <div class="val">+56 9 9433 0979</div>
+      </div>
+      <div class="contact-card">
+        <div class="icon">🌐</div>
+        <div class="label">Portal</div>
+        <div class="val" style="font-size:11px">pchoteleria.netlify.app</div>
+      </div>
+    </div>
+
+    <!-- Nav -->
+    <div style="display:flex;gap:12px;justify-content:center;margin-top:32px;flex-wrap:wrap">
+      <a href="guia-checkin.html"
+        style="padding:14px 28px;background:linear-gradient(135deg,#c0392b,#e74c3c);color:#fff;border-radius:12px;font-weight:800;font-size:14px;text-decoration:none;box-shadow:0 6px 20px rgba(192,57,43,.35)">
+        ➡️ Continuar: Parte 2 — Check-In
+      </a>
+      <a href="guia-checkout.html"
+        style="padding:14px 28px;background:#1a202c;color:#fff;border-radius:12px;font-weight:800;font-size:14px;text-decoration:none">
+        Parte 3 — Check-Out →
+      </a>
+    </div>
+
+  </div>
+
+  <footer>PC Hotelería · Aramark · AngloAmerican · Sistema de Gestión de Campamento · v2026</footer>
+</body>
+
+</html>

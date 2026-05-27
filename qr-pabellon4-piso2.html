@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>QR Pabellón 4 — Piso 2 | Aramark</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Arial', sans-serif;
+      background: #f0f0f0;
+      padding: 20px;
+    }
+
+    /* ── Barra de control (no se imprime) ── */
+    .controls {
+      background: #c8102e;
+      color: white;
+      padding: 16px 24px;
+      border-radius: 12px;
+      margin-bottom: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .controls h1 { font-size: 18px; font-weight: 800; }
+    .controls p  { font-size: 13px; opacity: .85; margin-top: 2px; }
+    .btn-print {
+      background: white;
+      color: #c8102e;
+      border: none;
+      border-radius: 8px;
+      padding: 10px 22px;
+      font-size: 14px;
+      font-weight: 800;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .btn-print:hover { background: #f0f0f0; }
+
+    /* ── Grid de QR ── */
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 14px;
+    }
+
+    /* ── Tarjeta QR ── */
+    .qr-card {
+      background: white;
+      border: 2px solid #e2e2e2;
+      border-radius: 12px;
+      padding: 12px 10px 10px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      page-break-inside: avoid;
+    }
+    .qr-card .logo-top {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 2px;
+    }
+    .qr-card .logo-top .logo-icon {
+      width: 22px;
+      height: 22px;
+      background: #c8102e;
+      border-radius: 5px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      color: white;
+      font-weight: 900;
+    }
+    .qr-card .logo-top span {
+      font-size: 10px;
+      font-weight: 800;
+      color: #c8102e;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+    .qr-canvas {
+      width: 140px;
+      height: 140px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .qr-canvas canvas, .qr-canvas img {
+      width: 140px !important;
+      height: 140px !important;
+    }
+    .hab-num {
+      font-size: 28px;
+      font-weight: 900;
+      color: #1a1a1a;
+      letter-spacing: 1px;
+      line-height: 1;
+    }
+    .hab-sub {
+      font-size: 9px;
+      color: #888;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .5px;
+    }
+    .hab-pab {
+      font-size: 10px;
+      color: #c8102e;
+      font-weight: 700;
+      background: #fff0f3;
+      border: 1px solid #fecdd3;
+      border-radius: 5px;
+      padding: 2px 8px;
+    }
+    .scan-hint {
+      font-size: 9px;
+      color: #aaa;
+      text-align: center;
+      line-height: 1.4;
+    }
+
+    /* ── Impresión ── */
+    @media print {
+      body { background: white; padding: 8px; }
+      .controls { display: none !important; }
+      .grid {
+        grid-template-columns: repeat(5, 1fr);
+        gap: 8px;
+      }
+      .qr-card {
+        border: 1.5px solid #ccc;
+        border-radius: 8px;
+        padding: 8px 6px;
+        break-inside: avoid;
+      }
+      .qr-canvas canvas, .qr-canvas img {
+        width: 120px !important;
+        height: 120px !important;
+      }
+      .hab-num { font-size: 24px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- Barra de control (solo pantalla) -->
+<div class="controls">
+  <div>
+    <h1>🏨 QR Pabellón 4 — Piso 2</h1>
+    <p>25 habitaciones · 4201 al 4225 · Escanear para confirmar llegada</p>
+  </div>
+  <button class="btn-print" onclick="window.print()">🖨️ Imprimir / Guardar PDF</button>
+</div>
+
+<!-- Grid de tarjetas QR -->
+<div class="grid" id="qr-grid"></div>
+
+<script>
+  // ── Habitaciones P-4 Piso 2 ──────────────────────────────────────────────
+  const habitaciones = [
+    { num: '4201', id: 'COPC000446' },
+    { num: '4202', id: 'COPC000447' },
+    { num: '4203', id: 'COPC000448' },
+    { num: '4204', id: 'COPC000449' },
+    { num: '4205', id: 'COPC000450' },
+    { num: '4206', id: 'COPC000451' },
+    { num: '4207', id: 'COPC000452' },
+    { num: '4208', id: 'COPC000453' },
+    { num: '4209', id: 'COPC000454' },
+    { num: '4210', id: 'COPC000455' },
+    { num: '4211', id: 'COPC000456' },
+    { num: '4212', id: 'COPC000457' },
+    { num: '4213', id: 'COPC000458' },
+    { num: '4214', id: 'COPC000459' },
+    { num: '4215', id: 'COPC000460' },
+    { num: '4216', id: 'COPC000461' },
+    { num: '4217', id: 'COPC000462' },
+    { num: '4218', id: 'COPC000463' },
+    { num: '4219', id: 'COPC000464' },
+    { num: '4220', id: 'COPC000465' },
+    { num: '4221', id: 'COPC000466' },
+    { num: '4222', id: 'COPC000467' },
+    { num: '4223', id: 'COPC000468' },
+    { num: '4224', id: 'COPC000469' },
+    { num: '4225', id: 'COPC000470' },
+  ];
+
+  // URL base — apunta a la página de confirmación de llegada
+  // Cuando construyas confirmar.html, actualiza esta URL al dominio real
+  const BASE_URL = window.location.origin + '/confirmar.html';
+
+  const grid = document.getElementById('qr-grid');
+
+  habitaciones.forEach(h => {
+    const url = `${BASE_URL}?hab=${h.num}`;
+
+    // Crear tarjeta
+    const card = document.createElement('div');
+    card.className = 'qr-card';
+    card.innerHTML = `
+      <div class="logo-top">
+        <div class="logo-icon">A</div>
+        <span>Aramark</span>
+      </div>
+      <div class="qr-canvas" id="qr-${h.num}"></div>
+      <div class="hab-num">${h.num}</div>
+      <div class="hab-pab">P-4 · Piso 2</div>
+      <div class="scan-hint">Escanea para confirmar<br>tu llegada a esta habitación</div>
+    `;
+    grid.appendChild(card);
+
+    // Generar QR
+    new QRCode(document.getElementById(`qr-${h.num}`), {
+      text: url,
+      width: 140,
+      height: 140,
+      colorDark: '#1a1a1a',
+      colorLight: '#ffffff',
+      correctLevel: QRCode.CorrectLevel.M,
+    });
+  });
+</script>
+</body>
+</html>

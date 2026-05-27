@@ -481,6 +481,32 @@ function detectarIntencion(pregunta) {
 
 
     const intenciones = [
+        // ── GUARDAR FAVORITO — debe ir primero para tener máxima prioridad ─────
+        { id: 'GUARDAR_FAVORITO', palabras: [
+            'guarda esta consulta', 'guardar esta consulta', 'crea un boton', 'crea boton',
+            'agrega a favoritos', 'agregar a favoritos', 'recuerda esta pregunta',
+            'guarda esto', 'guardar esto', 'añade a favoritos', 'añadir favorito',
+            'guardar consulta', 'guardar pregunta', 'hacer favorito'
+        ]},
+        // ── SALIDAS PRÓXIMAS ────────────────────────────────────────────────────
+        { id: 'SALIDAS_PROXIMAS', palabras: [
+            'quien sale', 'quienes salen', 'salidas proximas', 'salidas esta semana',
+            'sale esta semana', 'sale hoy', 'sale manana', 'proximas salidas',
+            'quien se va', 'trabajadores que salen', 'proximos a salir', 'salidas programadas'
+        ]},
+        // ── SIN CONFIRMAR LLEGADA ───────────────────────────────────────────────
+        { id: 'SIN_CONFIRMAR', palabras: [
+            'sin confirmar', 'no han confirmado', 'pendiente de confirmar',
+            'quien no confirmo', 'quienes no confirmaron', 'falta confirmar',
+            'sin check-in', 'sin checkin', 'no confirmaron llegada', 'pendiente checkin',
+            'no han hecho checkin', 'falta check'
+        ]},
+        // ── LLEGADAS PRÓXIMAS ────────────────────────────────────────────────────
+        { id: 'LLEGADAS_PROXIMAS', palabras: [
+            'quien llega', 'quienes llegan', 'proximas llegadas', 'llegadas esta semana',
+            'llega manana', 'llega hoy', 'llegadas programadas', 'nuevos ingresando',
+            'proximos a llegar', 'llegadas proximas', 'esperados'
+        ]},
         { id: 'RESUMEN_GENERAL',      palabras: ['resumen', 'general', 'overview', 'todo', 'completo', 'informe', 'estado actual', 'situacion', 'como esta el campa', 'reporte'] },
         { id: 'CAMAS_PERDIDAS',       palabras: ['camas perdidas', 'cama perdida', 'perdida', 'perdidas', 'desperdicio', 'desperdiciada', 'sola', 'solo en la habitacion', 'habitacion con uno', 'media habitacion', 'medio llena', 'subutilizada', 'subutilizado', 'inefici'] },
         // ← CUPOS_GERENCIA antes de HABITACIONES_LIBRES para que 'cupo' no pierda ante 'disponible'
@@ -2203,13 +2229,234 @@ export async function procesarConsulta(pregunta) {
         case 'ALERTAS':
             cuerpo = generarResumenGeneral(datos);
             break;
+        // ── Nuevos intents de aprendizaje ──────────────────────────────────────
+        case 'GUARDAR_FAVORITO':
+            cuerpo = generarGuardarFavorito();
+            break;
+        case 'SALIDAS_PROXIMAS':
+            cuerpo = await generarSalidasProximas(datos, pregunta);
+            break;
+        case 'SIN_CONFIRMAR':
+            cuerpo = await generarSinConfirmar(datos);
+            break;
+        case 'LLEGADAS_PROXIMAS':
+            cuerpo = await generarLlegadasProximas(datos, pregunta);
+            break;
         default:
             cuerpo = generarResumenGeneral(datos);
     }
 
-
-
     return headerHTML + cuerpo;
+}
+
+// ── GUARDAR FAVORITO — señal al HTML para que active el guardado ───────────
+function generarGuardarFavorito() {
+    // El HTML detecta esta señal vía data-action en el contenido
+    return `
+    <div style="text-align:center;padding:30px 20px">
+        <div style="font-size:48px;margin-bottom:12px">⭐</div>
+        <div style="font-size:18px;font-weight:800;color:#1e293b;margin-bottom:8px">¿Guardar como favorito?</div>
+        <div style="font-size:14px;color:#64748b;margin-bottom:20px">Crearé un botón rápido con tu última consulta en la barra lateral.</div>
+        <button onclick="window._constanzaGuardarFav()" data-action="guardar-fav"
+            style="background:linear-gradient(135deg,#f59e0b,#d97706);color:#fff;border:none;
+                   border-radius:12px;padding:12px 28px;font-size:15px;font-weight:800;
+                   cursor:pointer;box-shadow:0 4px 15px rgba(245,158,11,0.4)">
+            ⭐ Sí, guardar
+        </button>
+        <div style="font-size:12px;color:#94a3b8;margin-top:12px">El botón aparecerá en la barra lateral izquierda</div>
+    </div>`;
+}
+
+// ── SALIDAS PRÓXIMAS ────────────────────────────────────────────────────────
+async function generarSalidasProximas(datos, pregunta) {
+    const q = normalizar(pregunta);
+    const hoy   = new Date(); hoy.setHours(0,0,0,0);
+    const diasMax = q.includes('hoy') ? 0 : q.includes('manana') ? 1 : 7;
+    const limite = new Date(hoy); limite.setDate(hoy.getDate() + diasMax);
+
+    const sb = await getSupabase();
+    let salidas = [];
+    try {
+        const { data } = await sb.from('v2_asignaciones')
+            .select('nombre_huesped, rut_huesped, id_cama, fecha_salida_programada, v2_empresas(nombre), v2_camas(v2_habitaciones(numero_hab))')
+            .is('fecha_checkout', null)
+            .lte('fecha_salida_programada', limite.toISOString().split('T')[0])
+            .gte('fecha_salida_programada', hoy.toISOString().split('T')[0])
+            .order('fecha_salida_programada');
+        salidas = data || [];
+    } catch(e) { console.warn('[Constanza] Salidas:', e.message); }
+
+    const label = diasMax === 0 ? 'hoy' : diasMax === 1 ? 'mañana' : 'los próximos 7 días';
+    if (!salidas.length) return `
+        <div style="text-align:center;padding:40px;color:#94a3b8">
+            <div style="font-size:40px;margin-bottom:10px">✅</div>
+            <div style="font-weight:700">No hay salidas programadas para ${label}.</div>
+        </div>`;
+
+    const filas = salidas.map(a => {
+        const fecha = a.fecha_salida_programada
+            ? new Date(a.fecha_salida_programada + 'T12:00:00').toLocaleDateString('es-CL')
+            : '—';
+        const esHoy = a.fecha_salida_programada === hoy.toISOString().split('T')[0];
+        return `<tr style="border-bottom:1px solid #f1f5f9;${esHoy ? 'background:#fff7ed;' : ''}">
+            <td style="padding:9px 12px;font-weight:700">${a.nombre_huesped || '—'}</td>
+            <td style="padding:9px 12px;font-family:monospace;color:#64748b;font-size:11px">${a.rut_huesped || '—'}</td>
+            <td style="padding:9px 12px;font-weight:700;color:#6366f1">${a.v2_camas?.v2_habitaciones?.numero_hab || '—'}</td>
+            <td style="padding:9px 12px;color:#64748b">${a.v2_empresas?.nombre || '—'}</td>
+            <td style="padding:9px 12px;text-align:center">
+                <span style="background:${esHoy ? '#fee2e2' : '#fef3c7'};color:${esHoy ? '#c0392b' : '#b45309'};
+                      padding:2px 10px;border-radius:99px;font-size:11px;font-weight:700">
+                    ${esHoy ? '🔴 HOY' : fecha}
+                </span>
+            </td>
+        </tr>`;
+    }).join('');
+
+    return `
+    <div style="font-size:15px;font-weight:800;color:#1e293b;margin-bottom:12px">📅 Salidas para ${label} — ${salidas.length} trabajador${salidas.length !== 1 ? 'es' : ''}</div>
+    <div style="overflow-x:auto;border-radius:12px;border:1px solid #e2e8f0">
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead><tr style="background:#f8fafc">
+                <th style="padding:10px 12px;text-align:left;font-size:10px;text-transform:uppercase;color:#64748b;font-weight:700">Nombre</th>
+                <th style="padding:10px 12px;text-align:left;font-size:10px;text-transform:uppercase;color:#64748b;font-weight:700">RUT</th>
+                <th style="padding:10px 12px;text-align:left;font-size:10px;text-transform:uppercase;color:#64748b;font-weight:700">Hab.</th>
+                <th style="padding:10px 12px;text-align:left;font-size:10px;text-transform:uppercase;color:#64748b;font-weight:700">Empresa</th>
+                <th style="padding:10px 12px;text-align:center;font-size:10px;text-transform:uppercase;color:#64748b;font-weight:700">Fecha Salida</th>
+            </tr></thead>
+            <tbody>${filas}</tbody>
+        </table>
+    </div>`;
+}
+
+// ── SIN CONFIRMAR CHECK-IN ──────────────────────────────────────────────────
+async function generarSinConfirmar(datos) {
+    const sb = await getSupabase();
+    let pendientes = [];
+    try {
+        const PAGE = 1000; let all = [], pg = 0;
+        while (true) {
+            const { data, error } = await sb.from('v2_asignaciones')
+                .select('nombre_huesped, rut_huesped, id_cama, fecha_checkin, v2_empresas(nombre,turno), v2_camas(v2_habitaciones(numero_hab))')
+                .is('fecha_checkout', null)
+                .eq('huesped_confirmo', false)
+                .order('v2_empresas(nombre)')
+                .range(pg * PAGE, pg * PAGE + PAGE - 1);
+            if (error) throw error;
+            if (data?.length) all = all.concat(data);
+            if (!data || data.length < PAGE) break;
+            pg++; if (pg > 10) break;
+        }
+        pendientes = all;
+    } catch(e) { console.warn('[Constanza] SinConfirmar:', e.message); }
+
+    if (!pendientes.length) return `
+        <div style="text-align:center;padding:40px;color:#94a3b8">
+            <div style="font-size:40px;margin-bottom:10px">🎉</div>
+            <div style="font-weight:700">¡Todos han confirmado su llegada!</div>
+        </div>`;
+
+    // Agrupar por empresa
+    const porEmp = {};
+    pendientes.forEach(a => {
+        const emp = a.v2_empresas?.nombre || '— Sin empresa —';
+        if (!porEmp[emp]) porEmp[emp] = [];
+        porEmp[emp].push(a);
+    });
+
+    const empresasHTML = Object.entries(porEmp)
+        .sort((a, b) => b[1].length - a[1].length)
+        .map(([emp, workers]) => {
+            const filas = workers.map(a => `
+                <tr style="border-bottom:1px solid #fef3c7">
+                    <td style="padding:8px 12px;font-weight:700">${a.nombre_huesped || '—'}</td>
+                    <td style="padding:8px 12px;font-family:monospace;font-size:11px;color:#64748b">${a.rut_huesped || '—'}</td>
+                    <td style="padding:8px 12px;font-weight:700;color:#6366f1">${a.v2_camas?.v2_habitaciones?.numero_hab || '—'}</td>
+                    <td style="padding:8px 12px;color:#64748b">${a.fecha_checkin ? new Date(a.fecha_checkin + 'T12:00:00').toLocaleDateString('es-CL') : '—'}</td>
+                </tr>`).join('');
+            return collapsiblePanel(
+                `⏳ ${emp}`,
+                `<table style="width:100%;border-collapse:collapse;font-size:12px">
+                    <thead><tr style="background:#fffbeb">
+                        <th style="padding:8px 12px;text-align:left;font-size:10px;color:#64748b;text-transform:uppercase">Nombre</th>
+                        <th style="padding:8px 12px;text-align:left;font-size:10px;color:#64748b;text-transform:uppercase">RUT</th>
+                        <th style="padding:8px 12px;text-align:left;font-size:10px;color:#64748b;text-transform:uppercase">Hab.</th>
+                        <th style="padding:8px 12px;text-align:left;font-size:10px;color:#64748b;text-transform:uppercase">Llegada</th>
+                    </tr></thead>
+                    <tbody>${filas}</tbody>
+                </table>`,
+                `${workers.length} pendiente${workers.length !== 1 ? 's' : ''}`,
+                '#f59e0b',
+                false
+            );
+        }).join('');
+
+    return `
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+        <div style="background:#fef3c7;border:1px solid #fde68a;border-radius:12px;padding:12px 20px">
+            <div style="font-size:28px;font-weight:900;color:#b45309">${pendientes.length}</div>
+            <div style="font-size:11px;color:#92400e;font-weight:700">SIN CONFIRMAR</div>
+        </div>
+        <div style="font-size:14px;color:#64748b">
+            Trabajadores activos que aún <strong>no han confirmado su llegada</strong>.<br>
+            Puedes confirmarlos desde <em>Control de Asistencia</em>.
+        </div>
+    </div>
+    ${empresasHTML}`;
+}
+
+// ── LLEGADAS PRÓXIMAS ────────────────────────────────────────────────────────
+async function generarLlegadasProximas(datos, pregunta) {
+    const q = normalizar(pregunta);
+    const hoy   = new Date(); hoy.setHours(0,0,0,0);
+    const diasMax = q.includes('hoy') ? 0 : q.includes('manana') ? 1 : 7;
+    const limite = new Date(hoy); limite.setDate(hoy.getDate() + diasMax);
+
+    const llegadas = (datos.requests || []).filter(r => {
+        if (!r.fechaLlegada || r.fechaLlegada === '—') return false;
+        const d = new Date(r.fechaLlegada + 'T12:00:00');
+        return d >= hoy && d <= limite;
+    }).sort((a, b) => a.fechaLlegada.localeCompare(b.fechaLlegada));
+
+    const label = diasMax === 0 ? 'hoy' : diasMax === 1 ? 'mañana' : 'los próximos 7 días';
+    if (!llegadas.length) return `
+        <div style="text-align:center;padding:40px;color:#94a3b8">
+            <div style="font-size:40px;margin-bottom:10px">📭</div>
+            <div style="font-weight:700">No hay llegadas registradas para ${label}.</div>
+        </div>`;
+
+    const filas = llegadas.map(r => {
+        const esHoy = r.fechaLlegada === hoy.toISOString().split('T')[0];
+        const badge = r.status === 'aceptada' ? '<span style="background:#dcfce7;color:#166534;padding:2px 8px;border-radius:99px;font-size:10px;font-weight:700">✅ Aceptada</span>'
+            : r.status === 'pendiente' ? '<span style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:99px;font-size:10px;font-weight:700">⏳ Pendiente</span>'
+            : `<span style="background:#f1f5f9;color:#64748b;padding:2px 8px;border-radius:99px;font-size:10px;font-weight:700">${r.status}</span>`;
+        return `<tr style="border-bottom:1px solid #f1f5f9;${esHoy ? 'background:#f0fdf4;' : ''}">
+            <td style="padding:9px 12px;font-weight:700">${r.nombre || '—'}</td>
+            <td style="padding:9px 12px;font-family:monospace;font-size:11px;color:#64748b">${r.rut || '—'}</td>
+            <td style="padding:9px 12px;color:#64748b">${r.empresa || '—'}</td>
+            <td style="padding:9px 12px;text-align:center">${badge}</td>
+            <td style="padding:9px 12px;text-align:center">
+                <span style="background:${esHoy ? '#dcfce7' : '#f1f5f9'};color:${esHoy ? '#166534' : '#475569'};
+                      padding:2px 10px;border-radius:99px;font-size:11px;font-weight:700">
+                    ${esHoy ? '🟢 HOY' : new Date(r.fechaLlegada + 'T12:00:00').toLocaleDateString('es-CL')}
+                </span>
+            </td>
+        </tr>`;
+    }).join('');
+
+    return `
+    <div style="font-size:15px;font-weight:800;color:#1e293b;margin-bottom:12px">🛬 Llegadas para ${label} — ${llegadas.length} persona${llegadas.length !== 1 ? 's' : ''}</div>
+    <div style="overflow-x:auto;border-radius:12px;border:1px solid #e2e8f0">
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead><tr style="background:#f8fafc">
+                <th style="padding:10px 12px;text-align:left;font-size:10px;text-transform:uppercase;color:#64748b;font-weight:700">Nombre</th>
+                <th style="padding:10px 12px;text-align:left;font-size:10px;text-transform:uppercase;color:#64748b;font-weight:700">RUT</th>
+                <th style="padding:10px 12px;text-align:left;font-size:10px;text-transform:uppercase;color:#64748b;font-weight:700">Empresa</th>
+                <th style="padding:10px 12px;text-align:center;font-size:10px;text-transform:uppercase;color:#64748b;font-weight:700">Estado</th>
+                <th style="padding:10px 12px;text-align:center;font-size:10px;text-transform:uppercase;color:#64748b;font-weight:700">Llegada</th>
+            </tr></thead>
+            <tbody>${filas}</tbody>
+        </table>
+    </div>`;
 }
 
 // ── Gerencias con desglose por empresa (accordion) ──────────────────────────

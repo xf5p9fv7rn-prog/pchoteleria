@@ -7,12 +7,12 @@ import { MASTER_ROOMS } from './roomsConfig.js';
 import { supabase } from './supabaseClient.js';
 
 const DB_NAME = 'campmanager_db';
-const DB_VERSION = 4; 
+const DB_VERSION = 4;
 
 let _db = null;
-const _isSyncing = {}; 
-const _brokenTables = {}; 
-let _isProcessingQueue = false; 
+const _isSyncing = {};
+const _brokenTables = {};
+let _isProcessingQueue = false;
 
 // 🚀 CACHÉ EN MEMORIA: Evita leer IndexedDB en cada operación — respuesta instantánea
 const _memCache = {};
@@ -28,8 +28,8 @@ const RT_IGNORE_WINDOW_MS = 6000; // 6s de gracia
 // • Se LIMPIA al confirmar upsert exitoso en Supabase  
 // • Expira automáticamente después de 30s — suficiente para evitar eco Realtime propio
 // • Permite edición multi-dispositivo: otros dispositivos ven cambios en ∼1s (Realtime)
-const _PROTECT_MS  = 30 * 1000; // 30 segundos (antes: 24h) — multi-device friendly
-const _LM_LS_KEY   = 'campmanager_lm_v2';  // localStorage key
+const _PROTECT_MS = 30 * 1000; // 30 segundos (antes: 24h) — multi-device friendly
+const _LM_LS_KEY = 'campmanager_lm_v2';  // localStorage key
 const _locallyModified = {}; // { storeName: Map<id, timestamp> } (en memoria)
 
 function _loadLocallyModifiedFromLS() {
@@ -45,7 +45,7 @@ function _loadLocallyModifiedFromLS() {
             });
             if (map.size > 0) _locallyModified[store] = map;
         });
-    } catch(e) {}
+    } catch (e) { }
 }
 
 function _saveLocallyModifiedToLS() {
@@ -57,7 +57,7 @@ function _saveLocallyModifiedToLS() {
             }
         });
         localStorage.setItem(_LM_LS_KEY, JSON.stringify(toSave));
-    } catch(e) {}
+    } catch (e) { }
 }
 
 function _markLocallyModified(storeName, id) {
@@ -100,7 +100,7 @@ function _loadLocallyDeleted() {
                 _locallyDeleted[store] = new Set(ids);
             });
         }
-    } catch(e) {}
+    } catch (e) { }
 }
 
 function _saveLocallyDeleted() {
@@ -110,7 +110,7 @@ function _saveLocallyDeleted() {
             if (set.size > 0) toSave[store] = [...set];
         });
         localStorage.setItem(_LS_DEL_KEY, JSON.stringify(toSave));
-    } catch(e) {}
+    } catch (e) { }
 }
 
 _loadLocallyDeleted(); // cargar al arrancar el módulo
@@ -155,7 +155,7 @@ export async function getAll(storeName) {
     // por v2-service.js — db.js no las toca para evitar duplicación.
     // rooms, buildings, census, gerencia_quotas ya no existen → NO descargar.
     if (navigator.onLine && false) { // DESACTIVADO: tablas legacy eliminadas
-        descargarDesdeNubeSilencioso(storeName, db); 
+        descargarDesdeNubeSilencioso(storeName, db);
     }
     return localData;
 }
@@ -171,7 +171,7 @@ export async function getById(storeName, id) {
 
 async function descargarDesdeNubeSilencioso(storeName, db) {
     if (_isSyncing[storeName] || _brokenTables[storeName]) return;
-    _isSyncing[storeName] = true; 
+    _isSyncing[storeName] = true;
     try {
         let allData = [];
         let isFetching = true;
@@ -195,11 +195,11 @@ async function descargarDesdeNubeSilencioso(storeName, db) {
                 const tx = db.transaction(storeName, 'readwrite');
                 const store = tx.objectStore(storeName);
                 allData.forEach(item => {
-                // 🔒 Merge seguro: NO sobreescribir registros modificados localmente
-                // que aún no confirmaron su push a Supabase (protección temporal de 5 min)
-                if (_isLocallyModified(storeName, item.id)) return;
-                if (localDelSet.has(String(item.id))) return;
-                store.put(item);
+                    // 🔒 Merge seguro: NO sobreescribir registros modificados localmente
+                    // que aún no confirmaron su push a Supabase (protección temporal de 5 min)
+                    if (_isLocallyModified(storeName, item.id)) return;
+                    if (localDelSet.has(String(item.id))) return;
+                    store.put(item);
                 });
                 tx.oncomplete = () => resolve();
                 tx.onerror = (e) => reject(e.target.error);
@@ -246,7 +246,7 @@ export async function put(storeName, data) {
     // Las tablas V2 se gestionan directamente en v2-service.js con llamadas directas.
     const LEGACY_SYNC_TABLES = ['users']; // solo 'users' queda en IndexedDB local
     if (LEGACY_SYNC_TABLES.includes(storeName)) {
-        const cols = { users: ['username','role','name','password','empresa','createdAt'] }[storeName];
+        const cols = { users: ['username', 'role', 'name', 'password', 'empresa', 'createdAt'] }[storeName];
         if (data.id !== undefined) _markLocallyModified(storeName, data.id);
         // users solo se manejan localmente — no push a Supabase
     }
@@ -269,12 +269,12 @@ export function initRealtimeSync() {
     // ── V2 TABLES: las que emiten eventos relevantes para la UI ──────────────
     const V2_EVENTS = [
         { table: 'v2_asignaciones', event: 'checkin-updated' },
-        { table: 'v2_camas',        event: 'camas-updated'   },
+        { table: 'v2_camas', event: 'camas-updated' },
     ];
 
     V2_EVENTS.forEach(({ table, event }) => {
         supabase
-            .channel(`rt_v2_${table}_${Math.random().toString(36).slice(2,7)}`)
+            .channel(`rt_v2_${table}_${Math.random().toString(36).slice(2, 7)}`)
             .on('postgres_changes',
                 { event: '*', schema: 'public', table },
                 (payload) => {
@@ -303,6 +303,86 @@ export function initRealtimeSync() {
 // cambiado en otros dispositivos (complementa a Realtime que puede fallar).
 // ─────────────────────────────────────────────────────────────────────────────
 // ─────────────────────────────────────────────────────────────────────────────
+// ⏰ TRANSICIÓN AUTOMÁTICA DIARIA: Check-in y Check-out
+// Se ejecuta en cada ciclo del auto-refresh (cada 90s) y al arrancar la app.
+// Reglas:
+//   • PreAsignada → Ocupada   cuando fecha_checkin   <= HOY  (llegó el día)
+//   • Ocupada     → Disponible cuando fecha_salida_programada < HOY  (ya se fueron)
+// ─────────────────────────────────────────────────────────────────────────────
+let _ultimaTransicion = '';  // evita correr más de 1 vez por día
+let _ultimoCheckout22 = '';  // evita correr checkout 22:00 más de 1 vez por día
+
+
+export async function fn_transicionDiaria() {
+    const hoy = new Date().toISOString().split('T')[0];
+    try {
+
+        // ── CHECK-IN: PreAsignada → Ocupada cuando fecha_checkin <= HOY ─────
+        if (_ultimaTransicion !== hoy) {
+            console.log('[Transición] 🔄 Verificando check-ins para', hoy);
+            const { data: camasCheckIn } = await supabase
+                .from('v2_asignaciones')
+                .select('id_cama')
+                .lte('fecha_checkin', hoy);
+
+            if (camasCheckIn?.length) {
+                const ids = [...new Set(camasCheckIn.map(a => a.id_cama))];
+                const { count: ci } = await supabase
+                    .from('v2_camas')
+                    .update({ estado: 'Ocupada' })
+                    .in('id_cama', ids)
+                    .eq('estado', 'PreAsignada');
+                if (ci) console.log(`[Transición] ✅ Check-in: ${ci} cama(s) PreAsignada → Ocupada`);
+            }
+            _ultimaTransicion = hoy;
+        }
+
+        // ── CHECKOUT AUTOMÁTICO A LAS 22:00 (una vez por día) ──────────────
+        const hora = new Date().getHours();
+        if (hora >= 22 && _ultimoCheckout22 !== hoy) {
+            console.log('[Transición] 🕙 Checkout automático 22:00 para', hoy);
+
+            const { data: paraCheckout } = await supabase
+                .from('v2_asignaciones')
+                .select('id, id_cama')
+                .eq('fecha_salida_programada', hoy)
+                .is('fecha_checkout', null);
+
+            if (paraCheckout?.length) {
+                const ids = paraCheckout.map(a => a.id);
+                const camaIds = [...new Set(paraCheckout.map(a => a.id_cama))];
+
+                await supabase
+                    .from('v2_asignaciones')
+                    .update({ fecha_checkout: hoy })
+                    .in('id', ids);
+
+                for (const camaId of camaIds) {
+                    const { data: nuevaAsig } = await supabase
+                        .from('v2_asignaciones')
+                        .select('id')
+                        .eq('id_cama', camaId)
+                        .is('fecha_checkout', null)
+                        .limit(1);
+                    if (!nuevaAsig?.length) {
+                        await supabase.from('v2_camas')
+                            .update({ estado: 'Disponible' })
+                            .eq('id_cama', camaId);
+                    }
+                }
+
+                console.log(`[Transición] 🏁 Checkout 22:00: ${ids.length} persona(s) → Historial`);
+                window.dispatchEvent(new CustomEvent('v2:refresh'));
+            }
+            _ultimoCheckout22 = hoy;
+        }
+
+    } catch (e) {
+        console.warn('[Transición] Error en transición diaria:', e.message);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 🔄 AUTO-REFRESH PERIÓDICO V2
 // Ya no refresca tablas legacy (rooms, buildings, etc.).
 // Solo emite el evento para que los módulos V2 relean desde Supabase directamente.
@@ -315,12 +395,14 @@ export function startPeriodicCloudRefresh() {
 
     const doRefresh = async () => {
         if (!navigator.onLine) return;
+        // Transición automática de estados (check-in / check-out)
+        await fn_transicionDiaria();
         // Los módulos V2 consultan Supabase directamente — solo necesitamos disparar el evento
         window.dispatchEvent(new CustomEvent('v2:refresh'));
         console.log('[AutoRefresh V2] ✅ Evento v2:refresh emitido');
     };
 
-    // Primera actualización a los 15 segundos
+    // Primera actualización a los 15 segundos (incluye transición diaria)
     setTimeout(doRefresh, 15_000);
     // Luego cada 90 segundos
     setInterval(doRefresh, 90_000);
@@ -345,7 +427,7 @@ export async function purgeSyncQueue() {
             };
             tx.onerror = (e) => reject(e.target.error);
         });
-    } catch(e) {
+    } catch (e) {
         console.warn('[SyncQueue] No se pudo purgar la cola:', e.message);
     }
 }
@@ -381,7 +463,7 @@ export async function remove(storeName, id) {
                     _locallyDeleted[storeName]?.delete(String(id));
                     _saveLocallyDeleted();
                 }
-            }).catch(() => {});
+            }).catch(() => { });
         }
         await addToSyncQueue({ id: Date.now() + Math.random(), storeName, action: 'DELETE', payload: { id } });
         procesarColaDeSincronizacion();
@@ -395,8 +477,8 @@ export async function addToSyncQueue(data) {
 }
 
 export async function procesarColaDeSincronizacion() {
-    if (!navigator.onLine || _isProcessingQueue) return; 
-    _isProcessingQueue = true; 
+    if (!navigator.onLine || _isProcessingQueue) return;
+    _isProcessingQueue = true;
     const db = await openDB();
     while (true) {
         const tx = db.transaction('sync_queue', 'readonly');
@@ -406,7 +488,7 @@ export async function procesarColaDeSincronizacion() {
         });
         if (!next) break;
         try {
-            const { error } = next.action === 'UPSERT' 
+            const { error } = next.action === 'UPSERT'
                 ? await supabase.from(next.storeName).upsert(next.payload)
                 : await supabase.from(next.storeName).delete().eq('id', next.payload.id);
             if (!error) {
@@ -415,7 +497,7 @@ export async function procesarColaDeSincronizacion() {
             } else break;
         } catch (err) { break; }
     }
-    _isProcessingQueue = false; 
+    _isProcessingQueue = false;
 }
 
 /**
@@ -475,15 +557,15 @@ export async function confirmCheckout(roomId, bedKey) {
     if (next && next.arrivalDate && next.arrivalDate <= todayStr) {
         // Promover next → current
         r.beds[bedKey] = {
-            occupant:       next.occupant,
-            company:        next.company    || '',
-            shift:          next.shift      || '',
-            rut:            next.rut        || '',
-            contact:        next.contact    || '',
-            gender:         next.gender     || r.gender || null,
-            arrivalDate:    next.arrivalDate,
-            departureDate:  next.departureDate || '',
-            management:     next.management || '',
+            occupant: next.occupant,
+            company: next.company || '',
+            shift: next.shift || '',
+            rut: next.rut || '',
+            contact: next.contact || '',
+            gender: next.gender || r.gender || null,
+            arrivalDate: next.arrivalDate,
+            departureDate: next.departureDate || '',
+            management: next.management || '',
             contractNumber: next.contractNumber || ''
         };
         r.status = 'occupied';
@@ -518,7 +600,7 @@ export async function autoPromoteNextOccupants() {
     for (const r of rooms) {
         let changed = false;
         for (const slot of ['day', 'night', 'extra']) {
-            const bed  = r.beds?.[slot];
+            const bed = r.beds?.[slot];
             if (!bed) continue;
             const next = bed.nextOccupant;
             if (!next) continue;
@@ -530,19 +612,19 @@ export async function autoPromoteNextOccupants() {
 
             if (currentLeft && nextArrived) {
                 r.beds[slot] = {
-                    occupant:       next.occupant,
-                    company:        next.company    || '',
-                    shift:          next.shift      || '',
-                    rut:            next.rut        || '',
-                    contact:        next.contact    || '',
-                    gender:         next.gender     || r.gender || null,
-                    arrivalDate:    next.arrivalDate,
-                    departureDate:  next.departureDate || '',
-                    management:     next.management || '',
+                    occupant: next.occupant,
+                    company: next.company || '',
+                    shift: next.shift || '',
+                    rut: next.rut || '',
+                    contact: next.contact || '',
+                    gender: next.gender || r.gender || null,
+                    arrivalDate: next.arrivalDate,
+                    departureDate: next.departureDate || '',
+                    management: next.management || '',
                     contractNumber: next.contractNumber || ''
                 };
                 r.status = 'occupied';
-                r.gender  = next.gender || r.gender || null;
+                r.gender = next.gender || r.gender || null;
                 changed = true;
                 promovidos++;
                 console.log(`[Rotativo] ✅ Auto-promovido ${next.occupant} → Hab. ${r.number} Cama ${slot}`);
@@ -590,11 +672,11 @@ export async function seedDemoData() {
         { id: 8, name: 'Pabellón 7', code: 'P-7', type: 'pavilion', floor: 6, capacity: 0, shifts: [], notes: '', floorConfigs: {} },
         { id: 9, name: 'Pabellón 8', code: 'P-8', type: 'pavilion', floor: 6, capacity: 0, shifts: [], notes: '', floorConfigs: {} },
     ];
-    
-    await supabase.from('buildings').upsert(buildingDefs); 
+
+    await supabase.from('buildings').upsert(buildingDefs);
     const db = await openDB();
     const tx = db.transaction('buildings', 'readwrite');
-    buildingDefs.forEach(b => tx.objectStore('buildings').put(b)); 
+    buildingDefs.forEach(b => tx.objectStore('buildings').put(b));
 
     await put('users', { username: 'juan-1154@hotmail.es', password: '2417', name: 'Juan G.', role: 'superadmin' });
     await put('users', { username: 'Administracion', password: 'viosimcam', name: 'Administración', role: 'admin' });
@@ -669,9 +751,9 @@ export async function resetInfrastructure() {
     const rooms = await getAll('rooms');
     console.log("[Mantenimiento] Reseteando ocupación...");
     for (const r of rooms) {
-        r.beds = { 
-            day: { occupant: null, company: null }, 
-            night: r.bedCount === 2 ? { occupant: null, company: null } : null 
+        r.beds = {
+            day: { occupant: null, company: null },
+            night: r.bedCount === 2 ? { occupant: null, company: null } : null
         };
         r.status = 'free'; r.gender = null; r.reservedCompany = ''; r.reservedShift = '';
         await put('rooms', r);
@@ -709,10 +791,10 @@ export async function freeAllRoomRestrictions() {
 // Usar cuando el Dashboard no muestra datos reales (beds vacíos en Supabase).
 // ============================================================================
 export async function forzarSyncNube(onProgress) {
-    const ROOMS_COLS = ['id','buildingId','number','floor','bedCount','status','gender',
-                        'reservedCompany','reservedShift','beds','lostBedReason',
-                        'blockReason','blockedAt','blockedBed'];
-    const BUILDINGS_COLS = ['id','name','code','type','floor','capacity','shifts','notes','floorConfigs','mainShift'];
+    const ROOMS_COLS = ['id', 'buildingId', 'number', 'floor', 'bedCount', 'status', 'gender',
+        'reservedCompany', 'reservedShift', 'beds', 'lostBedReason',
+        'blockReason', 'blockedAt', 'blockedBed'];
+    const BUILDINGS_COLS = ['id', 'name', 'code', 'type', 'floor', 'capacity', 'shifts', 'notes', 'floorConfigs', 'mainShift'];
 
     const filterCols = (obj, cols) =>
         Object.fromEntries(Object.entries(obj).filter(([k]) => cols.includes(k)));
@@ -762,7 +844,7 @@ export async function forzarSyncNube(onProgress) {
 // ============================================================================
 
 function normalizeGender(g) {
-    if (!g) return 'M'; 
+    if (!g) return 'M';
     const str = String(g).trim().toUpperCase();
     if (str.startsWith('F') || str === 'MUJER' || str === 'FEMENINO') return 'F';
     return 'M';

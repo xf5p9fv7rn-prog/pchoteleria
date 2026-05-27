@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Parte 3 — Check-Out · PC Hotelería</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: #f8fafc;
+      color: #1a202c
+    }
+
+    .hero {
+      background: linear-gradient(135deg, #d97706, #f59e0b);
+      color: #fff;
+      padding: 44px 20px 52px;
+      text-align: center;
+      position: relative;
+      overflow: hidden
+    }
+
+    .hero::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(circle at 20% 50%, rgba(255, 255, 255, .12) 0%, transparent 50%)
+    }
+
+    .hero-logos {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 20px;
+      margin-bottom: 24px;
+      position: relative
+    }
+
+    .hero-logos img {
+      height: 40px;
+      filter: brightness(0) invert(1)
+    }
+
+    .hero-logos span {
+      width: 1px;
+      height: 36px;
+      background: rgba(255, 255, 255, .3);
+      display: block
+    }
+
+    .hero h1 {
+      font-size: clamp(20px, 4vw, 32px);
+      font-weight: 900;
+      margin-bottom: 10px;
+      position: relative
+    }
+
+    .hero p {
+      font-size: 14px;
+      opacity: .85;
+      line-height: 1.6;
+      position: relative;
+      max-width: 600px;
+      margin: 0 auto
+    }
+
+    .badge {
+      display: inline-block;
+      background: rgba(255, 255, 255, .2);
+      border: 1px solid rgba(255, 255, 255, .35);
+      border-radius: 99px;
+      padding: 5px 14px;
+      font-size: 11px;
+      font-weight: 700;
+      margin-top: 14px;
+      position: relative
+    }
+
+    .alert {
+      max-width: 720px;
+      margin: -22px auto 0;
+      padding: 0 20px;
+      position: relative;
+      z-index: 5
+    }
+
+    .alert-inner {
+      background: #fff;
+      border-left: 5px solid #c0392b;
+      border-radius: 12px;
+      box-shadow: 0 6px 24px rgba(0, 0, 0, .1);
+      padding: 18px 20px;
+      display: flex;
+      gap: 14px
+    }
+
+    .alert-inner h3 {
+      font-size: 13px;
+      font-weight: 800;
+      color: #7f1d1d;
+      margin-bottom: 4px
+    }
+
+    .alert-inner p {
+      font-size: 12px;
+      color: #991b1b;
+      line-height: 1.6
+    }
+
+    .main {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 36px 20px 60px
+    }
+
+    .section-title {
+      font-size: 13px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #d97706;
+      margin-bottom: 20px;
+      padding-bottom: 8px;
+      border-bottom: 2px solid #fef9c3
+    }
+
+    .steps {
+      display: flex;
+      flex-direction: column;
+      gap: 22px
+    }
+
+    .card {
+      background: #fff;
+      border-radius: 18px;
+      border: 1px solid #e2e8f0;
+      box-shadow: 0 2px 16px rgba(0, 0, 0, .06);
+      overflow: hidden
+    }
+
+    .card-head {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 18px 20px;
+      border-bottom: 1px solid #f1f5f9
+    }
+
+    .num {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      color: #fff;
+      font-size: 18px;
+      font-weight: 900;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0
+    }
+
+    .num-amber {
+      background: linear-gradient(135deg, #d97706, #f59e0b);
+      box-shadow: 0 4px 12px rgba(217, 119, 6, .35)
+    }
+
+    .num-red {
+      background: linear-gradient(135deg, #c0392b, #e74c3c);
+      box-shadow: 0 4px 12px rgba(192, 57, 43, .35)
+    }
+
+    .num-green {
+      background: linear-gradient(135deg, #059669, #10b981);
+      box-shadow: 0 4px 12px rgba(5, 150, 105, .35)
+    }
+
+    .tag {
+      font-size: 10px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: .8px;
+      border-radius: 99px;
+      padding: 2px 10px;
+      display: inline-block;
+      margin-bottom: 3px
+    }
+
+    .tag-amber {
+      background: #fef9c3;
+      color: #92400e
+    }
+
+    .tag-red {
+      background: #fee2e2;
+      color: #c0392b
+    }
+
+    .tag-green {
+      background: #dcfce7;
+      color: #15803d
+    }
+
+    .tag-purple {
+      background: #ede9fe;
+      color: #6d28d9
+    }
+
+    .card-title {
+      font-size: 16px;
+      font-weight: 800;
+      color: #1a202c
+    }
+
+    .card-body {
+      display: flex;
+      flex-direction: column
+    }
+
+    .img-wrap {
+      border-top: 1px solid #f1f5f9;
+      background: #f8fafc;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px 20px
+    }
+
+    .img-wrap img {
+      width: 100%;
+      max-width: 100%;
+      max-height: 380px;
+      border-radius: 12px;
+      object-fit: contain;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, .10)
+    }
+
+    .desc {
+      font-size: 13px;
+      color: #475569;
+      line-height: 1.75;
+      margin-bottom: 14px
+    }
+
+    .checklist {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 7px
+    }
+
+    .checklist li {
+      display: flex;
+      align-items: flex-start;
+      gap: 9px;
+      font-size: 12.5px;
+      color: #374151;
+      font-weight: 500;
+      line-height: 1.5
+    }
+
+    .checklist li::before {
+      content: '✓';
+      background: #dcfce7;
+      color: #15803d;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      font-weight: 900;
+      flex-shrink: 0;
+      margin-top: 1px
+    }
+
+    .warn {
+      margin-top: 12px;
+      background: #fff7ed;
+      border: 1px solid #fed7aa;
+      border-radius: 8px;
+      padding: 9px 12px;
+      font-size: 11.5px;
+      color: #92400e;
+      font-weight: 600;
+      line-height: 1.5
+    }
+
+    .tip {
+      margin-top: 12px;
+      background: #eff6ff;
+      border: 1px solid #bfdbfe;
+      border-radius: 8px;
+      padding: 9px 12px;
+      font-size: 11.5px;
+      color: #1e40af;
+      font-weight: 600;
+      line-height: 1.5
+    }
+
+    .img-wrap {
+      border-left: 1px solid #f1f5f9;
+      background: #f8fafc;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 14px
+    }
+
+    .img-wrap img {
+      width: 100%;
+      max-width: 160px;
+      border-radius: 10px;
+      object-fit: cover
+    }
+
+    .connector {
+      display: flex;
+      justify-content: center;
+      padding: 2px 0
+    }
+
+    .connector::before {
+      content: '';
+      width: 2px;
+      height: 22px;
+      background: linear-gradient(to bottom, #e2e8f0, #d97706, #e2e8f0);
+      border-radius: 99px
+    }
+
+    .resp-box {
+      background: linear-gradient(135deg, #1a1a2e, #16213e);
+      border-radius: 16px;
+      padding: 26px;
+      color: #fff;
+      margin-top: 32px
+    }
+
+    .resp-box h3 {
+      font-size: 17px;
+      font-weight: 900;
+      margin-bottom: 6px
+    }
+
+    .resp-box p {
+      font-size: 13px;
+      opacity: .7;
+      margin-bottom: 18px;
+      line-height: 1.6
+    }
+
+    .resp-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 12px
+    }
+
+    .resp-item {
+      background: rgba(255, 255, 255, .07);
+      border: 1px solid rgba(255, 255, 255, .12);
+      border-radius: 12px;
+      padding: 14px;
+      display: flex;
+      align-items: center;
+      gap: 10px
+    }
+
+    .resp-item-icon {
+      font-size: 20px
+    }
+
+    .resp-item-label {
+      font-size: 12px;
+      font-weight: 700;
+      color: rgba(255, 255, 255, .8)
+    }
+
+    .contact-row {
+      display: flex;
+      gap: 14px;
+      margin-top: 24px;
+      flex-wrap: wrap
+    }
+
+    .contact-card {
+      flex: 1;
+      min-width: 130px;
+      background: #fff;
+      border-radius: 12px;
+      border: 1px solid #e2e8f0;
+      padding: 14px;
+      text-align: center
+    }
+
+    .contact-card .icon {
+      font-size: 22px;
+      margin-bottom: 6px
+    }
+
+    .contact-card .clabel {
+      font-size: 10px;
+      font-weight: 700;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: .5px;
+      margin-bottom: 4px
+    }
+
+    .contact-card .val {
+      font-size: 12px;
+      font-weight: 800;
+      color: #d97706
+    }
+
+    .nav-bottom {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      margin-top: 32px;
+      flex-wrap: wrap
+    }
+
+    .nav-bottom a {
+      padding: 14px 24px;
+      border-radius: 12px;
+      font-weight: 800;
+      font-size: 13px;
+      text-decoration: none
+    }
+
+    footer {
+      text-align: center;
+      padding: 20px;
+      font-size: 11px;
+      color: #94a3b8;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .5px;
+      border-top: 1px solid #e2e8f0;
+      margin-top: 12px
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="hero">
+    <div class="hero-logos">
+      <img src="aramark.png" alt="Aramark">
+      <span></span>
+      <img src="angloamerican.png" alt="Anglo American" onerror="this.style.display='none'">
+    </div>
+    <h1>🚪 PARTE 3 — Proceso de Check-Out</h1>
+    <p>Responsabilidad del supervisor de empresa: asegurar que <strong>todos los trabajadores</strong> confirmen su
+      salida del campamento antes de partir.</p>
+    <div class="badge">📋 Obligatorio antes de abandonar el campamento</div>
+  </div>
+
+  <div class="alert">
+    <div class="alert-inner">
+      <div style="font-size:26px;flex-shrink:0">🔴</div>
+      <div>
+        <h3>IMPORTANTE — El Check-Out es tan obligatorio como el Check-In</h3>
+        <p>El no registrar la salida afecta directamente el censo de ocupación y la facturación. El supervisor de cada
+          empresa <strong>debe verificar que el 100% de su equipo haya realizado el check-out</strong> antes de
+          abandonar el campamento.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="section-title">📌 Pasos para el Check-Out</div>
+
+    <div class="steps">
+
+      <!-- PASO 1 -->
+      <div class="card">
+        <div class="card-head">
+          <div class="num num-amber">1</div>
+          <div>
+            <div class="tag tag-amber">Trabajador · El día de salida</div>
+            <div class="card-title">📅 Conocer la Fecha y Hora de Salida</div>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="card-content">
+            <p class="desc">Cada trabajador debe conocer con anticipación su <strong>fecha y hora de salida
+                oficial</strong> del campamento. Esta información fue registrada en la nómina al momento de la solicitud
+              previa.</p>
+            <ul class="checklist">
+              <li>Consultar la fecha de salida con el supervisor de su empresa</li>
+              <li>Verificar la hora de abandono del campamento</li>
+              <li>Preparar sus pertenencias con anticipación</li>
+              <li>Dejar la habitación ordenada y sin objetos olvidados</li>
+            </ul>
+            <div class="tip">💡 El check-out debe realizarse el mismo día de salida, idealmente antes de las 12:00 hrs o
+              en la hora acordada con Recepción.</div>
+          </div>
+          <div class="img-wrap">
+            <img src="assets/guia/p3_1.png" alt="Paso 1 - Fecha de Salida">
+
+          </div>
+        </div>
+      </div>
+
+      <div class="connector"></div>
+
+      <!-- PASO 2 -->
+      <div class="card">
+        <div class="card-head">
+          <div class="num num-amber">2</div>
+          <div>
+            <div class="tag tag-amber">Trabajador · Portal Digital</div>
+            <div class="card-title">📱 Acceder al Portal "Mi Habitación"</div>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="card-content">
+            <p class="desc">El día de salida, el trabajador debe abrir nuevamente el portal <strong>"Mi
+                Habitación"</strong> desde su teléfono e ingresar su RUT para ver la opción de check-out.</p>
+            <ul class="checklist">
+              <li>Abrir el navegador del teléfono</li>
+              <li>Acceder al portal o escanear el código QR de Recepción</li>
+              <li>Ingresar el RUT en el campo de búsqueda</li>
+              <li>Presionar "Buscar mi habitación"</li>
+            </ul>
+            <div class="url-box"
+              style="margin-top:12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px 14px">
+              <div
+                style="font-size:10px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">
+                Portal</div>
+              <div style="font-size:14px;font-weight:800;color:#d97706;font-family:monospace">
+                campamento.aramark.cl/mi-habitacion</div>
+            </div>
+          </div>
+          <div class="img-wrap">
+            <img src="assets/guia/paso3.png" alt="Portal teléfono">
+          </div>
+        </div>
+      </div>
+
+      <div class="connector"></div>
+
+      <!-- PASO 3 -->
+      <div class="card">
+        <div class="card-head">
+          <div class="num num-amber">3</div>
+          <div>
+            <div class="tag tag-amber">Trabajador · Acción Final</div>
+            <div class="card-title">🟠 Presionar "CONFIRMAR SALIDA"</div>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="card-content">
+            <p class="desc">El sistema mostrará el estado actual de la habitación. El trabajador debe presionar el botón
+              <strong>"CONFIRMAR SALIDA"</strong> para registrar oficialmente su check-out.
+            </p>
+            <ul class="checklist">
+              <li>Verificar que el nombre y habitación mostrados sean correctos</li>
+              <li>Presionar el botón naranja/amarillo "CONFIRMAR SALIDA"</li>
+              <li>El sistema registrará la hora exacta de salida</li>
+              <li>Aparecerá un mensaje de confirmación de check-out exitoso</li>
+            </ul>
+            <div class="warn">⚠️ Si el botón de salida no aparece, acercarse a Recepción para que registren la salida
+              manualmente.</div>
+          </div>
+          <div class="img-wrap">
+            <img src="assets/guia/p3_3.png" alt="Paso 3 - Confirmar Salida">
+
+          </div>
+        </div>
+      </div>
+
+      <div class="connector"></div>
+
+      <!-- PASO 4 -->
+      <div class="card">
+        <div class="card-head">
+          <div class="num num-red">4</div>
+          <div>
+            <div class="tag tag-red">Trabajador · Recepción</div>
+            <div class="card-title">🏨 Informar bajada en recepcion</div>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="card-content">
+            <p class="desc">Después de confirmar la salida en el portal, el trabajador debe pasar por
+              <strong>Recepción</strong>
+            </p>
+            <ul class="checklist">
+              <li>Informar al personal que ya realizó el check-out digital</li>
+              <li>Recepción verificará el registro en el sistema</li>
+              <li>El proceso de salida queda completado</li>
+            </ul>
+            <div class="tip">💡 El personal de Recepción puede confirmar la salida manualmente si el trabajador tuvo
+              problemas con el portal.</div>
+          </div>
+          <div class="img-wrap">
+            <img src="assets/guia/paso1.png" alt="Recepción">
+          </div>
+        </div>
+      </div>
+
+      <div class="connector"></div>
+
+      <!-- PASO 5 SUPERVISOR -->
+      <div class="card">
+        <div class="card-head">
+          <div class="num num-green">5</div>
+          <div>
+            <div class="tag tag-purple">Supervisor Empresa · Control</div>
+            <div class="card-title">📊 Verificar Check-Out de Todo el Equipo</div>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="card-content">
+            <p class="desc">El supervisor de empresa es responsable de verificar en el <strong>portal
+                administrativo</strong> que todos sus trabajadores hayan confirmado su salida antes de que el grupo
+              abandone el campamento.</p>
+            <ul class="checklist">
+              <li>Acceder al portal administrativo como supervisor</li>
+              <li>Ir a "Control de Asistencia" y filtrar por su empresa</li>
+              <li>Verificar que todos figuren como "🚪 SALIDA CONFIRMADA"</li>
+              <li>Contactar a los trabajadores con check-out pendiente</li>
+              <li>Reportar a Recepción cualquier caso de salida sin confirmación</li>
+              <li>Confirmar con Recepción el cierre total del grupo</li>
+            </ul>
+            <div class="warn">⚠️ El supervisor NO debe abandonar el campamento hasta verificar que todos sus
+              trabajadores hayan completado el check-out o hayan sido registrados por Recepción.</div>
+          </div>
+          <div class="img-wrap">
+            <img src="assets/guia/paso6.png" alt="Supervisor">
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /steps -->
+
+    <!-- Responsabilidades -->
+    <div class="resp-box">
+      <h3>📋 Responsabilidades del Supervisor al Cierre de Turno</h3>
+      <p>Lista de verificación obligatoria antes de que el grupo abandone el campamento</p>
+      <div class="resp-grid">
+        <div class="resp-item">
+          <div class="resp-item-icon">✅</div>
+          <div class="resp-item-label">100% Check-Out confirmados</div>
+        </div>
+        <div class="resp-item">
+          <div class="resp-item-icon">🧹</div>
+          <div class="resp-item-label">Habitaciones ordenadas</div>
+        </div>
+        <div class="resp-item">
+          <div class="resp-item-icon">🛏️</div>
+          <div class="resp-item-label">Habitaciones desocupadas</div>
+        </div>
+        <div class="resp-item">
+          <div class="resp-item-icon">📧</div>
+          <div class="resp-item-label">Cambios reportados por correo</div>
+        </div>
+        <div class="resp-item">
+          <div class="resp-item-icon">📋</div>
+          <div class="resp-item-label">Nómina de salida confirmada</div>
+        </div>
+        <div class="resp-item">
+          <div class="resp-item-icon">📞</div>
+          <div class="resp-item-label">Recepción notificada del cierre</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Contacto -->
+    <div class="contact-row">
+      <div class="contact-card">
+        <div class="icon">📧</div>
+        <div class="clabel">Correo</div>
+        <div class="val" style="color:#c0392b">hoteleriapc@aramark.cl</div>
+      </div>
+      <div class="contact-card">
+        <div class="icon">📞</div>
+        <div class="clabel">Administración</div>
+        <div class="val">+56 9 9433 0979</div>
+      </div>
+      <div class="contact-card">
+        <div class="icon">🏨</div>
+        <div class="clabel">Recepción</div>
+        <div class="val" style="font-size:11px">Campamento PC Hotelería</div>
+      </div>
+    </div>
+
+    <div class="nav-bottom">
+      <a href="guia-parte1.html" style="background:#e2e8f0;color:#475569">← Parte 1: Solicitud Previa</a>
+      <a href="guia-checkin.html" style="background:#e2e8f0;color:#475569">← Parte 2: Check-In</a>
+      <a href="guia-contingencia.html"
+        style="padding:14px 24px;background:linear-gradient(135deg,#1e3a5f,#1d4ed8);color:#fff;border-radius:12px;font-weight:800;font-size:13px;text-decoration:none">Parte
+        4: Contingencia 🛡️</a>
+    </div>
+
+  </div>
+
+  <footer>PC Hotelería · Aramark · Anglo American · Sistema de Gestión de Campamento · v2025</footer>
+</body>
+
+</html>

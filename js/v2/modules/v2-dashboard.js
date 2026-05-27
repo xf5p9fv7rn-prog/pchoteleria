@@ -451,7 +451,14 @@ export async function renderV2Dashboard(container) {
             </div>
           </details>
 
+          <!-- 📈 GRÁFICO DE TENDENCIA 14 DÍAS (cargado async) -->
+          <div id="trend-chart-panel"></div>
+
         </div>`;
+
+    // Cargar el gráfico de tendencia de forma asíncrona (no bloquea el render)
+    renderTrendChart(container).catch(e => console.warn('[trend-chart]', e));
+
     } catch(e) {
         console.error('[v2-dashboard]', e);
         container.innerHTML = `<div style="padding:40px;text-align:center">
@@ -461,6 +468,117 @@ export async function renderV2Dashboard(container) {
           <button onclick="window.navigate('v2dashboard')" style="margin-top:20px;background:#6366f1;color:white;border:none;border-radius:10px;padding:12px 24px;font-size:14px;font-weight:700;cursor:pointer">🔄 Reintentar</button>
         </div>`;
     }
+}
+
+// ── Gráfico de Tendencia de Ocupación (últimos 14 días) ──────────────────────
+async function renderTrendChart(container) {
+    const panel = document.getElementById('trend-chart-panel');
+    if (!panel) return;
+
+    // Obtener fechas de los últimos 14 días
+    const dias = 14;
+    const hoy  = new Date();
+    const fechas = Array.from({ length: dias }, (_, i) => {
+        const d = new Date(hoy);
+        d.setDate(hoy.getDate() - (dias - 1 - i));
+        return d.toLocaleDateString('en-CA'); // YYYY-MM-DD
+    });
+
+    // Query: contar camas ocupadas por fecha desde v2_asignaciones
+    const desde = fechas[0];
+    const hasta  = fechas[fechas.length - 1];
+    const { data: asigs, error } = await supabase
+        .from('v2_asignaciones')
+        .select('fecha_checkin, fecha_checkout')
+        .lte('fecha_checkin', hasta + 'T23:59:59')
+        .or(`fecha_checkout.gte.${desde},fecha_checkout.is.null`);
+
+    if (error || !asigs || asigs.length === 0) return;
+
+    // Contar camas activas (checkin <= fecha Y (checkout > fecha O sin checkout)) por día
+    const counts = fechas.map(f => {
+        return asigs.filter(a => {
+            const ci = (a.fecha_checkin || '').slice(0, 10);
+            const co = a.fecha_checkout ? a.fecha_checkout.slice(0, 10) : '9999-12-31';
+            return ci <= f && co > f;
+        }).length;
+    });
+
+    const maxVal = Math.max(...counts, 1);
+    const minVal = Math.min(...counts);
+
+    // Generar SVG inline
+    const W = 100, H = 50; // viewBox units
+    const padL = 6, padR = 2, padT = 5, padB = 12;
+    const gW   = W - padL - padR;
+    const gH   = H - padT - padB;
+
+    const px = (i)  => padL + (i / (fechas.length - 1)) * gW;
+    const py = (v)  => padT + gH - ((v - minVal) / Math.max(maxVal - minVal, 1)) * gH;
+
+    const pts  = counts.map((v, i) => `${px(i).toFixed(1)},${py(v).toFixed(1)}`).join(' ');
+    const area = `${px(0).toFixed(1)},${(padT + gH).toFixed(1)} ` + pts + ` ${px(counts.length - 1).toFixed(1)},${(padT + gH).toFixed(1)}`;
+
+    // Etiquetas de eje (cada 7 días)
+    const labels = fechas.filter((_, i) => i === 0 || i === dias - 1 || i === Math.floor(dias / 2));
+    const labelsSvg = labels.map(f => {
+        const idx = fechas.indexOf(f);
+        const x   = px(idx).toFixed(1);
+        const short = new Date(f + 'T12:00').toLocaleDateString('es-CL', { day: 'numeric', month: 'short' });
+        return `<text x="${x}" y="${H - 1}" text-anchor="middle" font-size="3.5" fill="var(--text-muted)">${short}</text>`;
+    }).join('');
+
+    // Líneas guía
+    const guides = [0, 0.5, 1].map(t => {
+        const y = (padT + gH - t * gH).toFixed(1);
+        const v = Math.round(minVal + t * (maxVal - minVal));
+        return `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="var(--border)" stroke-width="0.3"/>
+                <text x="${padL - 1}" y="${y}" text-anchor="end" font-size="3" fill="var(--text-muted)" dominant-baseline="middle">${v}</text>`;
+    }).join('');
+
+    // Punto de hoy resaltado
+    const todayIdx   = counts.length - 1;
+    const todayX     = px(todayIdx).toFixed(1);
+    const todayY     = py(counts[todayIdx]).toFixed(1);
+    const todayCount = counts[todayIdx];
+    const tendencia  = counts[todayIdx] - counts[Math.max(0, todayIdx - 6)];
+    const tArrow     = tendencia > 0 ? '↑' : tendencia < 0 ? '↓' : '→';
+    const tColor     = tendencia > 0 ? '#ef4444' : tendencia < 0 ? '#10b981' : '#6366f1';
+
+    panel.innerHTML = `
+    <details style="background:var(--bg-card);border:1px solid var(--border);border-radius:14px;overflow:hidden;box-shadow:0 2px 8px rgba(99,102,241,.07);margin-bottom:12px">
+      <summary style="cursor:pointer;list-style:none;padding:13px 16px;user-select:none">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <div style="display:flex;align-items:center;gap:10px">
+            <div style="background:linear-gradient(135deg,#6366f1,#8b5cf6);border-radius:8px;width:30px;height:30px;display:flex;align-items:center;justify-content:center;font-size:14px">📈</div>
+            <div>
+              <div style="font-weight:800;font-size:13px;color:var(--text-primary)">Tendencia — ${dias} días</div>
+              <div style="font-size:11px;color:var(--text-muted)">Camas activas · Hoy: <strong>${todayCount}</strong> · 7d: <span style="color:${tColor};font-weight:700">${tArrow} ${Math.abs(tendencia)}</span></div>
+            </div>
+          </div>
+          <span style="color:var(--text-muted)">⌄</span>
+        </div>
+      </summary>
+      <div style="border-top:1px solid var(--border);padding:14px 16px">
+        <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;overflow:visible">
+          <defs>
+            <linearGradient id="trendGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%"   stop-color="#6366f1" stop-opacity="0.18"/>
+              <stop offset="100%" stop-color="#6366f1" stop-opacity="0.01"/>
+            </linearGradient>
+          </defs>
+          ${guides}
+          <polygon points="${area}" fill="url(#trendGrad)"/>
+          <polyline points="${pts}" fill="none" stroke="#6366f1" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round"/>
+          ${labelsSvg}
+          <circle cx="${todayX}" cy="${todayY}" r="2" fill="#6366f1" stroke="white" stroke-width="0.8"/>
+          <text x="${todayX}" y="${parseFloat(todayY) - 3.5}" text-anchor="middle" font-size="3.5" font-weight="700" fill="#6366f1">${todayCount}</text>
+        </svg>
+        <p style="font-size:11px;color:var(--text-muted);margin:8px 0 0;text-align:center">
+          Camas activas = asignaciones con check-in antes del día y sin checkout o checkout posterior
+        </p>
+      </div>
+    </details>`;
 }
 
 function kpi(icon, label, value, color, key=null) {

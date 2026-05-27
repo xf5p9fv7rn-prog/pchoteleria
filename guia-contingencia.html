@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Parte 4 — Plan de Contingencia · PC Hotelería</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',sans-serif;background:#f8fafc;color:#1a202c}
+.hero{background:linear-gradient(135deg,#1e3a5f,#1d4ed8);color:#fff;padding:44px 20px 52px;text-align:center;position:relative;overflow:hidden}
+.hero::before{content:'';position:absolute;inset:0;background:radial-gradient(circle at 20% 50%,rgba(255,255,255,.1) 0%,transparent 50%),radial-gradient(circle at 80% 80%,rgba(255,255,255,.06) 0%,transparent 40%)}
+.hero-logos{display:flex;align-items:center;justify-content:center;gap:20px;margin-bottom:24px;position:relative}
+.hero-logos img{height:40px;filter:brightness(0) invert(1)}
+.hero-logos span{width:1px;height:36px;background:rgba(255,255,255,.3);display:block}
+.hero h1{font-size:clamp(20px,4vw,32px);font-weight:900;margin-bottom:10px;position:relative}
+.hero p{font-size:14px;opacity:.85;line-height:1.6;position:relative;max-width:620px;margin:0 auto}
+.badge{display:inline-block;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);border-radius:99px;padding:5px 14px;font-size:11px;font-weight:700;margin-top:14px;position:relative}
+.intro-banner{max-width:720px;margin:-22px auto 0;padding:0 20px;position:relative;z-index:5}
+.intro-inner{background:#fff;border-left:5px solid #1d4ed8;border-radius:12px;box-shadow:0 6px 24px rgba(0,0,0,.1);padding:18px 20px;display:flex;gap:14px}
+.intro-inner h3{font-size:13px;font-weight:800;color:#1e3a5f;margin-bottom:4px}
+.intro-inner p{font-size:12px;color:#1e40af;line-height:1.6}
+.main{max-width:720px;margin:0 auto;padding:36px 20px 60px}
+.section-title{font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:#1d4ed8;margin-bottom:24px;padding-bottom:8px;border-bottom:2px solid #dbeafe}
+/* CONTINGENCY CARDS */
+.cont-grid{display:flex;flex-direction:column;gap:28px}
+.cont-card{background:#fff;border-radius:20px;border:1px solid #e2e8f0;box-shadow:0 4px 20px rgba(0,0,0,.07);overflow:hidden;transition:transform .2s,box-shadow .2s}
+.cont-card:hover{transform:translateY(-3px);box-shadow:0 12px 40px rgba(0,0,0,.11)}
+.cont-head{display:flex;align-items:center;gap:0;position:relative}
+.cont-color-bar{width:6px;flex-shrink:0;align-self:stretch}
+.cont-head-inner{display:flex;align-items:center;gap:14px;padding:20px;flex:1}
+.cont-icon-box{width:52px;height:52px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:26px;flex-shrink:0}
+.cont-head-text .tag{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.8px;border-radius:99px;padding:2px 10px;display:inline-block;margin-bottom:3px}
+.cont-title{font-size:17px;font-weight:800;color:#1a202c}
+.cont-body{display:grid;grid-template-columns:1fr 190px;border-top:1px solid #f1f5f9}
+@media(max-width:520px){.cont-body{grid-template-columns:1fr}.cont-img{border-left:none;border-top:1px solid #f1f5f9}}
+.cont-content{padding:20px}
+.scenario-label{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.8px;margin-bottom:6px}
+.scenario-box{border-radius:10px;padding:10px 14px;margin-bottom:14px;font-size:12.5px;font-weight:600;line-height:1.6}
+.desc{font-size:13px;color:#475569;line-height:1.75;margin-bottom:14px}
+.checklist{list-style:none;display:flex;flex-direction:column;gap:7px}
+.checklist li{display:flex;align-items:flex-start;gap:9px;font-size:12.5px;color:#374151;font-weight:500;line-height:1.5}
+.check-icon{width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:900;flex-shrink:0;margin-top:1px}
+.result-box{margin-top:14px;border-radius:10px;padding:10px 14px;font-size:12px;font-weight:700;line-height:1.5;display:flex;gap:8px;align-items:flex-start}
+.cont-img{border-left:1px solid #f1f5f9;background:#f8fafc;display:flex;align-items:center;justify-content:center;padding:16px}
+.cont-img img{width:100%;max-width:170px;border-radius:12px;object-fit:cover}
+/* COLOR THEMES */
+.theme-yellow .cont-color-bar{background:linear-gradient(to bottom,#f59e0b,#d97706)}
+.theme-yellow .cont-icon-box{background:#fef9c3}
+.theme-yellow .tag{background:#fef9c3;color:#92400e}
+.theme-yellow .scenario-label{color:#92400e}
+.theme-yellow .scenario-box{background:#fffbeb;border:1px solid #fde68a;color:#78350f}
+.theme-yellow .check-icon{background:#fef9c3;color:#92400e}
+.theme-yellow .result-box{background:#dcfce7;border:1px solid #bbf7d0;color:#14532d}
+.theme-red .cont-color-bar{background:linear-gradient(to bottom,#c0392b,#e74c3c)}
+.theme-red .cont-icon-box{background:#fee2e2}
+.theme-red .tag{background:#fee2e2;color:#c0392b}
+.theme-red .scenario-label{color:#c0392b}
+.theme-red .scenario-box{background:#fff5f5;border:1px solid #fecaca;color:#7f1d1d}
+.theme-red .check-icon{background:#fee2e2;color:#c0392b}
+.theme-red .result-box{background:#dcfce7;border:1px solid #bbf7d0;color:#14532d}
+.theme-purple .cont-color-bar{background:linear-gradient(to bottom,#7c3aed,#6d28d9)}
+.theme-purple .cont-icon-box{background:#ede9fe}
+.theme-purple .tag{background:#ede9fe;color:#6d28d9}
+.theme-purple .scenario-label{color:#6d28d9}
+.theme-purple .scenario-box{background:#faf5ff;border:1px solid #ddd6fe;color:#4c1d95}
+.theme-purple .check-icon{background:#ede9fe;color:#6d28d9}
+.theme-purple .result-box{background:#dcfce7;border:1px solid #bbf7d0;color:#14532d}
+.theme-blue .cont-color-bar{background:linear-gradient(to bottom,#1d4ed8,#2563eb)}
+.theme-blue .cont-icon-box{background:#dbeafe}
+.theme-blue .tag{background:#dbeafe;color:#1d4ed8}
+.theme-blue .scenario-label{color:#1d4ed8}
+.theme-blue .scenario-box{background:#eff6ff;border:1px solid #bfdbfe;color:#1e3a5f}
+.theme-blue .check-icon{background:#dbeafe;color:#1d4ed8}
+.theme-blue .result-box{background:#dcfce7;border:1px solid #bbf7d0;color:#14532d}
+/* SUMMARY */
+.summary{background:linear-gradient(135deg,#1e3a5f,#1d4ed8);border-radius:20px;padding:28px;color:#fff;margin-top:40px}
+.summary h3{font-size:18px;font-weight:900;margin-bottom:6px}
+.summary p{font-size:13px;opacity:.7;margin-bottom:20px;line-height:1.6}
+.summary-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.s-item{background:rgba(255,255,255,.09);border:1px solid rgba(255,255,255,.15);border-radius:12px;padding:14px;text-align:center}
+.s-item .s-icon{font-size:26px;margin-bottom:8px}
+.s-item .s-label{font-size:11.5px;font-weight:700;color:rgba(255,255,255,.85);line-height:1.4}
+.s-item .s-status{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-top:6px;color:#4ade80}
+.contact-row{display:flex;gap:14px;margin-top:24px;flex-wrap:wrap}
+.contact-card{flex:1;min-width:130px;background:#fff;border-radius:12px;border:1px solid #e2e8f0;padding:14px;text-align:center}
+.contact-card .icon{font-size:22px;margin-bottom:6px}
+.contact-card .clabel{font-size:10px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
+.contact-card .val{font-size:12px;font-weight:800;color:#1d4ed8}
+footer{text-align:center;padding:20px;font-size:11px;color:#94a3b8;font-weight:600;text-transform:uppercase;letter-spacing:.5px;border-top:1px solid #e2e8f0;margin-top:12px}
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="hero-logos">
+    <img src="aramark.png" alt="Aramark">
+    <span></span>
+    <img src="angloamerican.png" alt="Anglo American" onerror="this.style.display='none'">
+  </div>
+  <h1>🛡️ PARTE 4 — Plan de Contingencia</h1>
+  <p>Protocolo oficial ante situaciones de emergencia o falla técnica en el campamento. El sistema PC Hotelería está preparado para operar bajo cualquier condición.</p>
+  <div class="badge">⚙️ Protocolos de Continuidad Operacional · Siempre hay un Plan B</div>
+</div>
+
+<div class="intro-banner">
+  <div class="intro-inner">
+    <div style="font-size:26px;flex-shrink:0">🔵</div>
+    <div>
+      <h3>El Sistema Está Diseñado para No Detenerse</h3>
+      <p>Para cada tipo de incidente existe un protocolo de respaldo definido. El equipo de PC Hotelería conoce estos procedimientos y los activará automáticamente en caso de ser necesario. Las empresas y trabajadores no deben preocuparse — siempre habrá continuidad operacional.</p>
+    </div>
+  </div>
+</div>
+
+<div class="main">
+  <div class="section-title">⚠️ Escenarios de Contingencia y Planes de Acción</div>
+
+  <div class="cont-grid">
+
+    <!-- CONTINGENCIA 1: LUZ -->
+    <div class="cont-card theme-yellow">
+      <div class="cont-head">
+        <div class="cont-color-bar"></div>
+        <div class="cont-head-inner">
+          <div class="cont-icon-box">⚡</div>
+          <div class="cont-head-text">
+            <div class="tag">Contingencia 1 · Infraestructura</div>
+            <div class="cont-title">Corte de Luz en el Campamento</div>
+          </div>
+        </div>
+      </div>
+      <div class="cont-body">
+        <div class="cont-content">
+          <div class="scenario-label">🚨 Situación</div>
+          <div class="scenario-box">Se produce un corte de suministro eléctrico en las instalaciones del campamento, afectando los computadores de escritorio y el sistema de iluminación.</div>
+          <p class="desc"><strong>No hay interrupción en las operaciones.</strong> El sistema PC Hotelería funciona desde <strong>notebooks con batería</strong>, los cuales se activan inmediatamente. Toda la información está en la nube y se puede acceder sin depender de la red eléctrica local.</p>
+          <ul class="checklist">
+            <li><span class="check-icon">💻</span>Se activan los notebooks de respaldo del equipo de Recepción</li>
+            <li><span class="check-icon">🔋</span>Los notebooks operan entre 4 a 8 horas con batería completa</li>
+            <li><span class="check-icon">☁️</span>Los datos de la plataforma siguen disponibles (están en la nube)</li>
+            <li><span class="check-icon">📱</span>Los trabajadores pueden continuar usando el portal desde sus teléfonos</li>
+            <li><span class="check-icon">🔦</span>Se activarán linternas y luz de emergencia en Recepción</li>
+          </ul>
+          <div class="result-box">✅ <span><strong>Resultado:</strong> Las operaciones continúan sin interrupción. El check-in y check-out se realizan con normalidad desde los notebooks o directamente desde los teléfonos de los trabajadores.</span></div>
+        </div>
+        <div class="cont-img">
+          <img src="assets/guia/cont_luz.png" alt="Corte de luz - Notebook de respaldo">
+        </div>
+      </div>
+    </div>
+
+    <!-- CONTINGENCIA 2: INTERNET -->
+    <div class="cont-card theme-red">
+      <div class="cont-head">
+        <div class="cont-color-bar"></div>
+        <div class="cont-head-inner">
+          <div class="cont-icon-box">📡</div>
+          <div class="cont-head-text">
+            <div class="tag">Contingencia 2 · Conectividad</div>
+            <div class="cont-title">Caída del Servicio de Internet</div>
+          </div>
+        </div>
+      </div>
+      <div class="cont-body">
+        <div class="cont-content">
+          <div class="scenario-label">🚨 Situación</div>
+          <div class="scenario-box">El proveedor de internet del campamento presenta una falla, dejando sin conexión a los sistemas de la plataforma web y el portal "Mi Habitación".</div>
+          <p class="desc"><strong>Se activa inmediatamente el Plan B con los Excel de respaldo.</strong> Gracias al procedimiento de la Parte 1, todas las empresas ya enviaron su nómina de trabajadores en formato Excel — tanto al portal como al correo oficial. Estos archivos son el respaldo físico que permite operar sin internet.</p>
+          <ul class="checklist">
+            <li><span class="check-icon">📊</span>Se utilizan los Excel enviados previamente por cada empresa</li>
+            <li><span class="check-icon">📧</span>Se accede a los correos recibidos en hoteleriapc@aramark.cl (descargados)</li>
+            <li><span class="check-icon">✍️</span>El registro de check-in se realiza manualmente en el Excel local</li>
+            <li><span class="check-icon">📋</span>Al recuperar el internet, se actualiza la plataforma con los registros manuales</li>
+            <li><span class="check-icon">📞</span>Se informa a los supervisores de empresa que deben guiar a sus trabajadores</li>
+          </ul>
+          <div class="result-box">✅ <span><strong>Resultado:</strong> Gracias al doble envío (portal + correo), nunca se pierde información. El Excel actúa como registro físico de respaldo inmediato.</span></div>
+        </div>
+        <div class="cont-img">
+          <img src="assets/guia/cont_internet.png" alt="Sin internet - Plan Excel de respaldo">
+        </div>
+      </div>
+    </div>
+
+    <!-- CONTINGENCIA 3: CONGESTION -->
+    <div class="cont-card theme-purple">
+      <div class="cont-head">
+        <div class="cont-color-bar"></div>
+        <div class="cont-head-inner">
+          <div class="cont-icon-box">👥</div>
+          <div class="cont-head-text">
+            <div class="tag">Contingencia 3 · Operacional</div>
+            <div class="cont-title">Gran Acumulación de Personas en Recepción</div>
+          </div>
+        </div>
+      </div>
+      <div class="cont-body">
+        <div class="cont-content">
+          <div class="scenario-label">🚨 Situación</div>
+          <div class="scenario-box">Se produce una llegada masiva de trabajadores al mismo tiempo, generando largas filas en Recepción y dificultando el proceso normal de autorización uno a uno.</div>
+          <p class="desc"><strong>Se activa el modo "Check-In Libre".</strong> El sistema PC Hotelería permite liberar temporalmente el check-in digital para que los trabajadores puedan <strong>confirmar su llegada directamente desde su teléfono</strong>, sin necesitar la autorización previa de Recepción. Esto descongestion el área inmediatamente.</p>
+          <ul class="checklist">
+            <li><span class="check-icon">🔓</span>Recepción activa el "Modo Check-In Libre" en el sistema</li>
+            <li><span class="check-icon">📢</span>Se informa a los supervisores de empresa que sus trabajadores pueden confirmar solos</li>
+            <li><span class="check-icon">📱</span>Los trabajadores acceden al portal y confirman su llegada desde el teléfono</li>
+            <li><span class="check-icon">🏨</span>El sistema muestra automáticamente el número de habitación asignado</li>
+            <li><span class="check-icon">✅</span>Solo quedan en fila quienes tienen problemas específicos o no están en el sistema</li>
+            <li><span class="check-icon">📊</span>Recepción monitorea en tiempo real el avance del check-in</li>
+          </ul>
+          <div class="result-box">✅ <span><strong>Resultado:</strong> Se descongestiona Recepción en minutos. Los trabajadores se autoatienden desde sus teléfonos y el flujo vuelve a la normalidad rápidamente.</span></div>
+        </div>
+        <div class="cont-img">
+          <img src="assets/guia/cont_congestion.png" alt="Congestión - Check-in libre desde teléfono">
+        </div>
+      </div>
+    </div>
+
+    <!-- CONTINGENCIA 4: APP FALLA / BACKUP -->
+    <div class="cont-card theme-blue">
+      <div class="cont-head">
+        <div class="cont-color-bar"></div>
+        <div class="cont-head-inner">
+          <div class="cont-icon-box">💾</div>
+          <div class="cont-head-text">
+            <div class="tag">Contingencia 4 · Sistema</div>
+            <div class="cont-title">Problemas con la Aplicación · Respaldo Diario</div>
+          </div>
+        </div>
+      </div>
+      <div class="cont-body">
+        <div class="cont-content">
+          <div class="scenario-label">🚨 Situación</div>
+          <div class="scenario-box">La plataforma PC Hotelería presenta errores técnicos, pérdida de datos, o necesita mantenimiento urgente, poniendo en riesgo la información del turno activo.</div>
+          <p class="desc"><strong>El sistema realiza un respaldo automático completo cada día.</strong> Todos los datos operacionales — asignaciones, check-ins, check-outs, registros de empresa — se guardan en una copia de seguridad diaria. En caso de falla, se restaura desde el último respaldo sin pérdida significativa de información.</p>
+          <ul class="checklist">
+            <li><span class="check-icon">🕐</span>Todos los días se genera automáticamente un respaldo completo del sistema</li>
+            <li><span class="check-icon">☁️</span>El respaldo se guarda en la nube (Supabase) con redundancia geográfica</li>
+            <li><span class="check-icon">📁</span>Los datos incluyen: asignaciones, empresas, check-ins, check-outs y censo</li>
+            <li><span class="check-icon">⏱️</span>La restauración desde respaldo toma menos de 30 minutos</li>
+            <li><span class="check-icon">📧</span>Los Excel de las empresas sirven como segundo respaldo independiente</li>
+            <li><span class="check-icon">🔧</span>El equipo técnico es notificado automáticamente ante cualquier anomalía</li>
+          </ul>
+          <div class="result-box">✅ <span><strong>Resultado:</strong> Máxima pérdida posible: datos de las últimas horas del día. Gracias al respaldo diario y los Excel de las empresas, la operación se recupera completamente sin perder información crítica.</span></div>
+        </div>
+        <div class="cont-img">
+          <img src="assets/guia/cont_backup.png" alt="Respaldo diario automático">
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /cont-grid -->
+
+  <!-- RESUMEN -->
+  <div class="summary">
+    <h3>🛡️ Resumen del Plan de Contingencia</h3>
+    <p>4 protocolos activos que garantizan continuidad operacional en todo momento</p>
+    <div class="summary-grid">
+      <div class="s-item">
+        <div class="s-icon">⚡</div>
+        <div class="s-label">Corte de Luz → Notebook con Batería</div>
+        <div class="s-status">✓ ACTIVO</div>
+      </div>
+      <div class="s-item">
+        <div class="s-icon">📡</div>
+        <div class="s-label">Sin Internet → Excel de Respaldo</div>
+        <div class="s-status">✓ ACTIVO</div>
+      </div>
+      <div class="s-item">
+        <div class="s-icon">👥</div>
+        <div class="s-label">Congestión → Check-In Libre Móvil</div>
+        <div class="s-status">✓ ACTIVO</div>
+      </div>
+      <div class="s-item">
+        <div class="s-icon">💾</div>
+        <div class="s-label">Falla App → Respaldo Diario</div>
+        <div class="s-status">✓ ACTIVO</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Contacto -->
+  <div class="contact-row">
+    <div class="contact-card">
+      <div class="icon">📞</div>
+      <div class="clabel">Administración</div>
+      <div class="val">+56 9 9433 0979</div>
+    </div>
+    <div class="contact-card">
+      <div class="icon">📧</div>
+      <div class="clabel">Correo</div>
+      <div class="val" style="font-size:11px;color:#c0392b">hoteleriapc@aramark.cl</div>
+    </div>
+    <div class="contact-card">
+      <div class="icon">🌐</div>
+      <div class="clabel">Portal</div>
+      <div class="val" style="font-size:10px">pchoteleria.netlify.app</div>
+    </div>
+  </div>
+
+  <!-- Nav -->
+  <div style="display:flex;gap:12px;justify-content:center;margin-top:32px;flex-wrap:wrap">
+    <a href="guia-parte1.html" style="padding:13px 22px;background:#e2e8f0;color:#475569;border-radius:12px;font-weight:800;font-size:13px;text-decoration:none">← Parte 1: Solicitud</a>
+    <a href="guia-checkin.html" style="padding:13px 22px;background:#e2e8f0;color:#475569;border-radius:12px;font-weight:800;font-size:13px;text-decoration:none">← Parte 2: Check-In</a>
+    <a href="guia-checkout.html" style="padding:13px 22px;background:#e2e8f0;color:#475569;border-radius:12px;font-weight:800;font-size:13px;text-decoration:none">← Parte 3: Check-Out</a>
+  </div>
+
+</div>
+
+<footer>PC Hotelería · Aramark · Anglo American · Plan de Contingencia Operacional · v2026</footer>
+</body>
+</html>

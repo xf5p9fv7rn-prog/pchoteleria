@@ -98,283 +98,393 @@ export async function abrirPopover(card, idCama, estado, onSuccess) {
     setTimeout(() => pop.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 80);
 
     // ── Cargar contenido según estado ────────────────────────────────────────
-    if (estado === 'Ocupada') {
-        await renderCheckout(pop, idCama, onSuccess);
-    } else if (estado === 'Disponible') {
-        await renderCheckin(pop, idCama, onSuccess);
-    } else {
-        // Mantencion
+    // renderCheckout maneja PRE / ACTUAL / SALIENTES para cualquier estado de cama
+    if (estado === 'Mantencion') {
         renderMantencion(pop, idCama, onSuccess);
+    } else {
+        // Ocupada, Disponible: siempre mostrar las 3 secciones completas
+        await renderCheckout(pop, idCama, onSuccess);
     }
+
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-//  CHECKOUT VIEW
+//  CHECKOUT VIEW  — muestra ocupante actual + saliendo hoy + por llegar
 // ════════════════════════════════════════════════════════════════════════════
 async function renderCheckout(pop, idCama, onSuccess) {
     const body = document.getElementById(ID + '-body');
+    const hoy  = new Date().toISOString().split('T')[0];
 
-    // Fetch asignación activa desde v2_asignaciones
-    const { data: asig, error } = await supabase
+    // ── 1. Traer TODAS las asignaciones activas de esta cama ────────────────
+    //    ⚠️ NO usar .maybeSingle() — si hay 2+ filas falla silenciosamente
+    const { data: todasAsig = [], error } = await supabase
         .from('v2_asignaciones')
-        .select('id, rut_huesped, nombre_huesped, fecha_checkin, fecha_salida_programada, numero_contrato, telefono, empresa_id, huesped_confirmo, v2_empresas(nombre, turno, v2_gerencias(nombre))')
+        .select('id, rut_huesped, nombre_huesped, fecha_checkin, fecha_salida_programada, numero_contrato, telefono, empresa_id, huesped_confirmo, estado_asignacion, v2_empresas(nombre, turno, v2_gerencias(nombre))')
         .eq('id_cama', idCama)
         .is('fecha_checkout', null)
-        .maybeSingle();
+        .order('fecha_checkin');
 
-    if (error || !asig) {
-        body.innerHTML = '<p style="color:#6b7280;text-align:center">Sin asignación activa.</p>';
-        return;
+    // ── 2. Categorizar ───────────────────────────────────────────────────
+    // 'actuales' = quienes ESTÁN o ESTABAN en la cama (activa o pre_asignado que ya llegó)
+    // 'preAsig'  = quienes LLEGARÁN (pre_asignado con fecha_checkin futura)
+    const actuales = todasAsig.filter(a => {
+        if (a.fecha_checkout) return false; // ya hizo checkout
+        if (a.estado_asignacion === 'pre_asignado' && a.fecha_checkin > hoy) return false; // futuro
+        return true;
+    });
+    const preAsig  = todasAsig.filter(a => !a.fecha_checkout && a.estado_asignacion === 'pre_asignado' && a.fecha_checkin > hoy);
+    const saliendo = todasAsig.filter(a => a.fecha_salida_programada === hoy && !a.fecha_checkout);
+
+    // ── 3. Solicitudes B2B pendientes (pre-asig que aún no son asignaciones) ─
+    let solicPreAsig = [];
+    try {
+        const { data: camaRow } = await supabase
+            .from('v2_camas').select('habitacion_id').eq('id_cama', idCama).maybeSingle();
+        if (camaRow?.habitacion_id) {
+            const { data: habRow } = await supabase
+                .from('v2_habitaciones').select('numero_hab').eq('id_custom', camaRow.habitacion_id).maybeSingle();
+            if (habRow?.numero_hab) {
+                const { data: solics } = await supabase
+                    .from('v2_solicitudes_b2b')
+                    .select('id, nombre_trabajador, rut_trabajador, empresa, fecha_llegada, fecha_salida')
+                    .eq('hab_solicitada', String(habRow.numero_hab))
+                    .in('status', ['aceptada', 'pendiente'])
+                    .gt('fecha_llegada', hoy)
+                    .order('fecha_llegada');
+                solicPreAsig = solics || [];
+            }
+        }
+    } catch(_) {}
+
+    // ── 4. Deduplicar solicPreAsig ───────────────────────────────────────────
+    const preAsigRuts  = new Set(preAsig.map(a => (a.rut_huesped||'').toLowerCase()).filter(Boolean));
+    const preAsigNames = new Set(preAsig.map(a => (a.nombre_huesped||'').toLowerCase()).filter(Boolean));
+    const solicFiltrada = solicPreAsig.filter(s =>
+        !preAsigRuts.has((s.rut_trabajador||'').toLowerCase()) &&
+        !preAsigNames.has((s.nombre_trabajador||'').toLowerCase())
+    );
+
+    // ── 5. Helper de formato fecha DD/MM ────────────────────────────────────
+    const dd = f => f ? f.substring(8,10)+'/'+f.substring(5,7) : '—';
+
+    // ── 6. Construir HTML — orden: PRE → ACTUALES → SALIENTES ───────────────
+    let html = '';
+
+    // ══ SECCIÓN PRE-ASIGNADOS (ARRIBA) ══════════════════════════════════════
+    const todosPre = [
+        ...preAsig.map(a => ({ tipo:'asig', nombre: a.nombre_huesped, rut: a.rut_huesped,
+            empresa: a.v2_empresas?.nombre, turno: a.v2_empresas?.turno,
+            gerencia: a.v2_empresas?.v2_gerencias?.nombre, contrato: a.numero_contrato,
+            llegada: a.fecha_checkin, salida: a.fecha_salida_programada })),
+        ...solicFiltrada.map(s => ({ tipo:'solic', nombre: s.nombre_trabajador, rut: s.rut_trabajador,
+            empresa: s.empresa, llegada: s.fecha_llegada, salida: s.fecha_salida }))
+    ];
+
+    if (todosPre.length > 0) {
+        html += `
+        <div style="background:linear-gradient(135deg,#f5f3ff,#ede9fe);border:1.5px solid #c4b5fd;border-radius:14px;padding:14px;margin-bottom:10px">
+          <div style="display:flex;align-items:center;gap:7px;margin-bottom:10px">
+            <span style="background:#7c3aed;color:#fff;border-radius:8px;padding:3px 10px;font-size:10px;font-weight:900;letter-spacing:.6px">PRE-ASIGNADOS</span>
+            <span style="font-size:10px;color:#7c3aed;font-weight:700">📅 Por llegar · ${todosPre.length} persona(s)</span>
+          </div>
+          ${todosPre.map(p => `
+          <div style="background:#fff;border:1px solid #ddd6fe;border-radius:10px;padding:11px;margin-bottom:8px">
+            <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:6px">
+              <div style="font-size:14px;font-weight:800;color:#4c1d95">${p.nombre || '—'}</div>
+              ${p.tipo==='solic' ? `<span style="font-size:9px;background:#ede9fe;color:#6d28d9;border-radius:5px;padding:1px 6px;font-weight:700">B2B</span>` : ''}
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;font-size:11px">
+              ${field('RUT', `<span style="font-family:monospace">${p.rut||'—'}</span>`)}
+              ${field('Empresa', p.empresa||'—')}
+              ${p.turno ? field('Turno', p.turno) : ''}
+              ${p.gerencia ? field('Gerencia', p.gerencia) : ''}
+              ${p.contrato ? field('Contrato', p.contrato) : ''}
+              ${field('Llega', dd(p.llegada))}
+              ${field('Sale', dd(p.salida))}
+            </div>
+          </div>`).join('')}
+        </div>`;
     }
 
-    body.innerHTML = `
-      <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:12px;padding:16px;margin-bottom:16px">
-        <div style="font-size:15px;font-weight:800;color:#111827;margin-bottom:10px">${asig.nombre_huesped}</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px">
-          ${field('RUT', `<span style="font-family:monospace">${asig.rut_huesped}</span>`)}
-          ${field('Tel\u00e9fono', asig.telefono || '\u2014')}
-          ${field('Empresa', asig.v2_empresas?.nombre || '\u2014')}
-          ${field('Turno', asig.v2_empresas?.turno || '\u2014')}
-          ${field('Gerencia', asig.v2_empresas?.v2_gerencias?.nombre || '\u2014')}
-          ${field('Contrato', asig.numero_contrato || '\u2014')}
-          ${field('Check-in', asig.fecha_checkin)}
-          ${field('Salida prog.', asig.fecha_salida_programada || '\u2014')}
-        </div>
-      </div>
-      <div id="${ID}-msg" style="min-height:16px;font-size:12px;font-weight:600;margin-bottom:8px"></div>
+    // ══ SECCIÓN ACTUALES (MEDIO) ═════════════════════════════════════════════
+    // Solo registros activa (no pre_asignado)
+    const actualesActivos = actuales.filter(a => a.estado_asignacion !== 'pre_asignado');
+    if (actualesActivos.length > 0) {
+        html += `
+        <div style="background:linear-gradient(135deg,#fef2f2,#fee2e2);border:1.5px solid #fca5a5;border-radius:14px;padding:14px;margin-bottom:10px">
+          <div style="display:flex;align-items:center;gap:7px;margin-bottom:10px">
+            <span style="background:#dc2626;color:#fff;border-radius:8px;padding:3px 10px;font-size:10px;font-weight:900;letter-spacing:.6px">ACTUALES</span>
+            <span style="font-size:10px;color:#b91c1c;font-weight:700">👤 En cama ahora · ${actualesActivos.length} persona(s)</span>
+          </div>
+          ${actualesActivos.map(a => `
+          <div style="background:#fff;border:1px solid #fecaca;border-radius:10px;padding:11px;margin-bottom:8px">
+            <div style="display:flex;align-items:center;gap:7px;margin-bottom:6px">
+              <div style="font-size:14px;font-weight:800;color:#991b1b;flex:1">${a.nombre_huesped || '—'}</div>
+              ${a.huesped_confirmo ? `<span style="background:#dcfce7;color:#15803d;border-radius:6px;padding:2px 7px;font-size:10px;font-weight:800">✅ Confirmado</span>` : `<span style="background:#fef9c3;color:#92400e;border-radius:6px;padding:2px 7px;font-size:10px;font-weight:700">Sin confirmar</span>`}
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;font-size:11px">
+              ${field('RUT', `<span style="font-family:monospace">${a.rut_huesped||'—'}</span>`)}
+              ${field('Empresa', a.v2_empresas?.nombre||'—')}
+              ${field('Turno', a.v2_empresas?.turno||'—')}
+              ${field('Gerencia', a.v2_empresas?.v2_gerencias?.nombre||'—')}
+              ${field('Contrato', a.numero_contrato||'—')}
+              ${field('Ingresó', dd(a.fecha_checkin))}
+              ${field('Sale', dd(a.fecha_salida_programada))}
+            </div>
+          </div>`).join('')}
+        </div>`;
+    } else {
+        html += `<div style="background:#f8fafc;border:1px dashed #cbd5e1;border-radius:12px;padding:12px;margin-bottom:10px;text-align:center;color:#94a3b8;font-size:12px">Sin ocupante activo en este momento</div>`;
+    }
 
-      <!-- Botones de acción -->
-      <div style="display:grid;grid-template-columns:${['supervisor','superadmin'].includes(window._currentUser?.role) ? '1fr 1fr' : '1fr'};gap:8px;margin-bottom:8px">
-        <button id="${ID}-btn-transferir"
-          style="background:linear-gradient(135deg,#6366f1,#4f46e5);color:white;border:none;border-radius:12px;padding:12px;font-size:13px;font-weight:700;cursor:pointer">
-          🔄 Transferir cama
-        </button>
-        ${['supervisor','superadmin'].includes(window._currentUser?.role) ? `
-        <button id="${ID}-btn-eliminar"
-          style="background:linear-gradient(135deg,#f59e0b,#d97706);color:white;border:none;border-radius:12px;padding:12px;font-size:13px;font-weight:700;cursor:pointer">
-          🗑️ Eliminar asig.
-        </button>` : ''}
-      </div>
-      <button id="${ID}-btn-checkout"
-        style="width:100%;background:linear-gradient(135deg,#ef4444,#dc2626);color:white;border:none;border-radius:12px;padding:13px;font-size:14px;font-weight:700;cursor:pointer">
-        🚩 Registrar Check-out
+    // ══ SECCIÓN SALIENTES (ABAJO) ════════════════════════════════════════════
+    if (saliendo.length > 0) {
+        html += `
+        <div style="background:linear-gradient(135deg,#fffbeb,#fef3c7);border:1.5px solid #fcd34d;border-radius:14px;padding:14px;margin-bottom:10px">
+          <div style="display:flex;align-items:center;gap:7px;margin-bottom:10px">
+            <span style="background:#d97706;color:#fff;border-radius:8px;padding:3px 10px;font-size:10px;font-weight:900;letter-spacing:.6px">SALIENTES</span>
+            <span style="font-size:10px;color:#92400e;font-weight:700">🧳 Sale hoy · ${saliendo.length} persona(s)</span>
+          </div>
+          ${saliendo.map(s => `
+          <div style="background:#fff;border:1px solid #fde68a;border-radius:10px;padding:11px;margin-bottom:8px">
+            <div style="font-size:14px;font-weight:800;color:#78350f;margin-bottom:6px">${s.nombre_huesped || '—'}</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;font-size:11px">
+              ${field('RUT', `<span style="font-family:monospace">${s.rut_huesped||'—'}</span>`)}
+              ${field('Empresa', s.v2_empresas?.nombre||'—')}
+              ${field('Turno', s.v2_empresas?.turno||'—')}
+              ${field('Contrato', s.numero_contrato||'—')}
+              ${field('Ingresó', dd(s.fecha_checkin))}
+              ${field('Sale', dd(s.fecha_salida_programada))}
+            </div>
+            <div style="margin-top:8px;background:#fef9c3;border-radius:7px;padding:6px 9px;font-size:11px;font-weight:800;color:#92400e">
+              🕐 Check-out automático a las 22:00
+            </div>
+          </div>`).join('')}
+        </div>`;
+    }
+
+    // ── ACCIONES ─────────────────────────────────────────────────────────────
+    // El "main" para acciones es el primer activo real (no pre_asignado)
+    const main    = actualesActivos[0] || actuales[0];
+    const mainPre = !actualesActivos.length && main?.estado_asignacion === 'pre_asignado';
+    html += `<div id="${ID}-msg" style="min-height:16px;font-size:12px;font-weight:600;margin:8px 0"></div>`;
+
+    if (main) {
+        html += `
+          <div style="display:grid;grid-template-columns:${['supervisor','superadmin'].includes(window._currentUser?.role) ? '1fr 1fr' : '1fr'};gap:8px;margin-bottom:8px">
+            <button id="${ID}-btn-transferir" style="background:linear-gradient(135deg,#6366f1,#4f46e5);color:white;border:none;border-radius:12px;padding:11px;font-size:13px;font-weight:700;cursor:pointer">🔄 Transferir</button>
+            ${['supervisor','superadmin'].includes(window._currentUser?.role) ? `
+            <button id="${ID}-btn-eliminar" style="background:linear-gradient(135deg,#f59e0b,#d97706);color:white;border:none;border-radius:12px;padding:11px;font-size:13px;font-weight:700;cursor:pointer">🗑️ Eliminar</button>` : ''}
+          </div>
+          ${mainPre ? `
+          <button id="${ID}-btn-confirmar-checkin" style="width:100%;background:linear-gradient(135deg,#10b981,#059669);color:white;border:none;border-radius:12px;padding:14px;font-size:15px;font-weight:700;cursor:pointer;box-shadow:0 4px 14px rgba(16,185,129,0.35)">
+            ✅ Confirmar Llegada → Activar Asignación
+          </button>` : `
+          <button id="${ID}-btn-checkout" style="width:100%;background:linear-gradient(135deg,#ef4444,#dc2626);color:white;border:none;border-radius:12px;padding:12px;font-size:14px;font-weight:700;cursor:pointer">🚩 Registrar Check-out</button>
+          <button id="${ID}-btn-extender" style="width:100%;background:transparent;border:1.5px solid #6366f1;color:#6366f1;border-radius:12px;padding:10px;font-size:13px;font-weight:700;cursor:pointer;margin-top:8px">📅 Extender estadía</button>
+          <div id="${ID}-extender-panel" style="display:none;margin-top:8px;background:#f5f3ff;border:1.5px solid #c4b5fd;border-radius:12px;padding:14px">
+            <div style="font-size:12px;font-weight:700;color:#4c1d95;margin-bottom:8px">Nueva fecha de salida programada</div>
+            <div style="display:flex;gap:8px;align-items:center">
+              <input type="date" id="${ID}-ext-fecha" value="${main.fecha_salida_programada || ''}"
+                style="flex:1;padding:9px 12px;border-radius:9px;border:1.5px solid #a78bfa;font-size:14px;outline:none;color:#1e293b">
+              <button id="${ID}-btn-ext-confirmar" style="padding:9px 18px;border:none;border-radius:9px;background:#6366f1;color:#fff;font-weight:800;font-size:13px;cursor:pointer;white-space:nowrap">✓ Guardar</button>
+            </div>
+            <div id="${ID}-ext-msg" style="min-height:14px;font-size:12px;font-weight:700;margin-top:6px;color:#4c1d95"></div>
+          </div>
+          ${!main.huesped_confirmo ? `
+          <button id="${ID}-btn-confirmar-llegada" style="width:100%;background:linear-gradient(135deg,#10b981,#059669);color:white;border:none;border-radius:12px;padding:12px;font-size:14px;font-weight:700;cursor:pointer;margin-top:8px">✅ Confirmar Llegada</button>` : ''}
+          ${ (main.v2_empresas?.nombre || '').toLowerCase().includes('anglo') ? `
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
+            <button id="${ID}-btn-sinllave" style="background:linear-gradient(135deg,#dc2626,#b91c1c);color:white;border:none;border-radius:12px;padding:10px;font-size:12px;font-weight:700;cursor:pointer">🔑 No entregó llave</button>
+            <button id="${ID}-btn-baja" style="background:linear-gradient(135deg,#d97706,#b45309);color:white;border:none;border-radius:12px;padding:10px;font-size:12px;font-weight:700;cursor:pointer">🏃 Bajada anticipada</button>
+          </div>` : ''}`}
+          <!-- Panel de transferencia -->
+          <div id="${ID}-transfer-panel" style="display:none;margin-top:12px;border-top:1px solid #e5e7eb;padding-top:12px">
+            <div style="font-size:13px;font-weight:700;color:#374151;margin-bottom:10px">📦 Seleccionar cama destino</div>
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <div style="position:relative">
+                <input id="${ID}-tr-numhab" type="text" placeholder="Ej: 4501, 7606…" autocomplete="off"
+                  style="width:100%;padding:10px 14px;border-radius:10px;border:1.5px solid #6366f1;font-size:14px;outline:none;color:#111827;box-sizing:border-box;font-weight:600"
+                  oninput="window._trBuscarHab(this.value)">
+                <span style="position:absolute;right:12px;top:50%;transform:translateY(-50%);color:#94a3b8;font-size:14px">🔍</span>
+              </div>
+              <div id="${ID}-tr-resultado" style="font-size:12px;color:#6b7280;min-height:18px;font-style:italic"></div>
+              <select id="${ID}-tr-cama" style="padding:9px 12px;border:1.5px solid #e2e8f0;border-radius:10px;font-size:13px;outline:none;display:none">
+                <option value="">— Cama libre —</option>
+              </select>
+              <button id="${ID}-btn-confirmar-transfer" style="width:100%;background:#6366f1;color:white;border:none;border-radius:10px;padding:12px;font-size:13px;font-weight:700;cursor:pointer;opacity:.5" disabled>✅ Confirmar transferencia</button>
+            </div>
+          </div>
+          <!-- Panel eliminar -->
+          <div id="${ID}-delete-panel" style="display:none;margin-top:12px;border-top:1px solid #e5e7eb;padding-top:12px">
+            <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:12px;font-size:13px;color:#92400e;margin-bottom:10px">
+              ⚠️ ¿Eliminar la asignación de <strong>${main.nombre_huesped}</strong>?<br>
+              <span style="font-size:11px">La cama quedará disponible. Esta acción no registra check-out.</span>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+              <button id="${ID}-btn-cancelar-delete" style="padding:10px;border:1.5px solid #e2e8f0;border-radius:10px;background:#f9fafb;font-weight:700;font-size:13px;cursor:pointer">Cancelar</button>
+              <button id="${ID}-btn-confirmar-delete" style="padding:10px;border:none;border-radius:10px;background:#ef4444;color:white;font-weight:700;font-size:13px;cursor:pointer">Sí, eliminar</button>
+            </div>
+          </div>`;
+    }
+
+    // ── FOOTER: acciones secundarias siempre visibles ─────────────────────────
+    html += `
+    <div style="border-top:1px solid #f1f5f9;margin-top:12px;padding-top:12px;display:flex;flex-direction:column;gap:7px">
+      <button id="${ID}-btn-ir-checkin"
+        style="width:100%;background:linear-gradient(135deg,#10b981,#059669);color:white;border:none;border-radius:11px;padding:11px;font-size:13px;font-weight:700;cursor:pointer">
+        ➕ Check-in manual
       </button>
+      <button id="${ID}-btn-mant-footer"
+        style="width:100%;background:transparent;border:1.5px solid #64748b;color:#64748b;border-radius:11px;padding:10px;font-size:12px;font-weight:600;cursor:pointer">
+        🔧 Poner en Mantención
+      </button>
+    </div>`;
 
-      ${!asig.huesped_confirmo ? `
-      <button id="${ID}-btn-confirmar-llegada"
-        style="width:100%;background:linear-gradient(135deg,#10b981,#059669);color:white;border:none;border-radius:12px;padding:13px;font-size:14px;font-weight:700;cursor:pointer;margin-top:8px;display:flex;align-items:center;justify-content:center;gap:8px">
-        ✅ Confirmar Llegada
-      </button>` : `
-      <div style="display:flex;align-items:center;gap:8px;justify-content:center;padding:10px;background:#dcfce7;border-radius:12px;margin-top:8px">
-        <span style="font-size:18px">✅</span>
-        <span style="color:#15803d;font-weight:700;font-size:13px">Llegada confirmada</span>
-      </div>`}
+    body.innerHTML = html;
 
-      ${ (asig.v2_empresas?.nombre || '').toLowerCase().includes('anglo') ? `
-      <!-- Botones Anglo -->
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
-        <button id="${ID}-btn-sinllave"
-          style="background:linear-gradient(135deg,#dc2626,#b91c1c);color:white;border:none;border-radius:12px;padding:11px;font-size:12px;font-weight:700;cursor:pointer">
-          🔑 No entregó llave
-        </button>
-        <button id="${ID}-btn-baja"
-          style="background:linear-gradient(135deg,#d97706,#b45309);color:white;border:none;border-radius:12px;padding:11px;font-size:12px;font-weight:700;cursor:pointer">
-          🏃 Bajada anticipada
-        </button>
-      </div>` : ''}
-
-      <!-- Panel de transferencia (oculto) -->
-      <div id="${ID}-transfer-panel" style="display:none;margin-top:12px;border-top:1px solid #e5e7eb;padding-top:12px">
-        <div style="font-size:13px;font-weight:700;color:#374151;margin-bottom:10px">📦 Seleccionar cama destino</div>
-        <div style="display:flex;flex-direction:column;gap:8px">
-          <select id="${ID}-tr-edif" style="padding:9px 12px;border:1.5px solid #e2e8f0;border-radius:10px;font-size:13px;outline:none">
-            <option value="">\u2014 Edificio \u2014</option>
-          </select>
-          <select id="${ID}-tr-pab" style="padding:9px 12px;border:1.5px solid #e2e8f0;border-radius:10px;font-size:13px;outline:none" disabled>
-            <option value="">\u2014 Pabell\u00f3n \u2014</option>
-          </select>
-          <select id="${ID}-tr-hab" style="padding:9px 12px;border:1.5px solid #e2e8f0;border-radius:10px;font-size:13px;outline:none" disabled>
-            <option value="">\u2014 Habitaci\u00f3n \u2014</option>
-          </select>
-          <select id="${ID}-tr-cama" style="padding:9px 12px;border:1.5px solid #e2e8f0;border-radius:10px;font-size:13px;outline:none" disabled>
-            <option value="">\u2014 Cama libre \u2014</option>
-          </select>
-          <button id="${ID}-btn-confirmar-transfer"
-            style="width:100%;background:#6366f1;color:white;border:none;border-radius:10px;padding:12px;font-size:13px;font-weight:700;cursor:pointer;opacity:.5"
-            disabled>✅ Confirmar transferencia</button>
-        </div>
-      </div>
-
-      <!-- Panel confirmación de eliminar (oculto) -->
-      <div id="${ID}-delete-panel" style="display:none;margin-top:12px;border-top:1px solid #e5e7eb;padding-top:12px">
-        <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:12px;font-size:13px;color:#92400e;margin-bottom:10px">
-          ⚠️ ¿Eliminar definitivamente la asignación de <strong>${asig.nombre_huesped}</strong>?<br>
-          <span style="font-size:11px">La cama quedará disponible. Esta acción no registra check-out.</span>
-        </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-          <button id="${ID}-btn-cancelar-delete"
-            style="padding:10px;border:1.5px solid #e2e8f0;border-radius:10px;background:#f9fafb;font-weight:700;font-size:13px;cursor:pointer">
-            Cancelar
-          </button>
-          <button id="${ID}-btn-confirmar-delete"
-            style="padding:10px;border:none;border-radius:10px;background:#ef4444;color:white;font-weight:700;font-size:13px;cursor:pointer">
-            Sí, eliminar
-          </button>
-        </div>
-      </div>`;
-
-    // ── Check-out ───────────────────────────────────────────────────────────
-    document.getElementById(ID + '-btn-checkout').addEventListener('click', async () => {
-        setMsg('Procesando…', '#6b7280');
-        const { error: err } = await supabase.from('v2_asignaciones')
-            .update({ fecha_checkout: new Date().toISOString().split('T')[0] })
-            .eq('id', asig.id);
-        if (err) { setMsg('❌ ' + err.message, '#ef4444'); return; }
-        setMsg('✅ Check-out registrado', '#10b981');
-        setTimeout(() => { cerrarPopover(); onSuccess?.('checkout', idCama); }, 1000);
+    // Botón check-in manual → cambiar a renderCheckin
+    document.getElementById(ID + '-btn-ir-checkin')?.addEventListener('click', () => {
+        renderCheckin(pop, idCama, onSuccess);
     });
 
-    // ── Confirmar Llegada ────────────────────────────────────────────────────
-    const btnConfLlegada = document.getElementById(ID + '-btn-confirmar-llegada');
-    if (btnConfLlegada) {
-        btnConfLlegada.addEventListener('click', async () => {
-            btnConfLlegada.disabled = true;
-            btnConfLlegada.textContent = '⏳ Confirmando…';
-            const { error: errConf } = await supabase.from('v2_asignaciones')
-                .update({ huesped_confirmo: true })
-                .eq('id', asig.id);
-            if (errConf) {
-                setMsg('❌ ' + errConf.message, '#ef4444');
-                btnConfLlegada.disabled = false;
-                btnConfLlegada.textContent = '✅ Confirmar Llegada';
-                return;
-            }
-            setMsg('✅ Llegada confirmada — cama en verde', '#10b981');
-            setTimeout(() => { cerrarPopover(); onSuccess?.('confirmar', idCama); }, 900);
-        });
-    }
+    // Botón Poner en Mantención (siempre disponible)
+    document.getElementById(ID + '-btn-mant-footer')?.addEventListener('click', async () => {
+        if (!confirm(`¿Poner la cama ${idCama} en Mantención?`)) return;
+        const { error } = await supabase.from('v2_camas')
+            .update({ estado: 'Mantencion' }).eq('id_cama', idCama);
+        if (error) { setMsg('❌ ' + error.message, '#ef4444'); return; }
+        setMsg('🔧 Cama en mantención', '#64748b');
+        setTimeout(() => { cerrarPopover(); onSuccess?.('mantencion', idCama); }, 800);
+    });
 
-    // ── Botones Anglo ────────────────────────────────────────────────────────
-    const btnSinLlave = document.getElementById(ID + '-btn-sinllave');
-    const btnBaja     = document.getElementById(ID + '-btn-baja');
-    if (btnSinLlave) {
-        btnSinLlave.addEventListener('click', async () => {
-            if (!confirm(`¿Registrar que ${asig.nombre_huesped} NO entregó la llave?`)) return;
-            await supabase.from('v2_incidencias_anglo').insert({
-                rut: asig.rut_huesped,
-                tipo: 'sin_llave',
-                fecha: new Date().toISOString().split('T')[0],
-                observacion: `Desde modal habitación cama ${idCama}`
-            });
-            setMsg('🔑 Incidencia "Sin llave" registrada', '#dc2626');
-        });
-    }
-    if (btnBaja) {
-        btnBaja.addEventListener('click', async () => {
-            if (!confirm(`¿Registrar bajada anticipada de ${asig.nombre_huesped}?`)) return;
-            await supabase.from('v2_incidencias_anglo').insert({
-                rut: asig.rut_huesped,
-                tipo: 'bajo_anticipado',
-                fecha: new Date().toISOString().split('T')[0],
-                observacion: `Desde modal habitación cama ${idCama}`
-            });
-            setMsg('🏃 Incidencia "Bajada anticipada" registrada', '#d97706');
-        });
-    }
+    if (!main) return; // Sin ocupante activo → resto de event listeners no aplica
 
-    // ── Eliminar (solo supervisores) ─────────────────────────────────────────
-    if (['supervisor','superadmin'].includes(window._currentUser?.role)) {
-        document.getElementById(ID + '-btn-eliminar').addEventListener('click', () => {
-            document.getElementById(ID + '-transfer-panel').style.display = 'none';
-            document.getElementById(ID + '-delete-panel').style.display = 'block';
-        });
-        document.getElementById(ID + '-btn-cancelar-delete').addEventListener('click', () => {
-            document.getElementById(ID + '-delete-panel').style.display = 'none';
-        });
-        document.getElementById(ID + '-btn-confirmar-delete').addEventListener('click', async () => {
-            setMsg('Eliminando…', '#6b7280');
-            const { error: errDel } = await supabase.from('v2_asignaciones').delete().eq('id', asig.id);
-            if (errDel) { setMsg('❌ ' + errDel.message, '#ef4444'); return; }
-            await supabase.from('v2_camas').update({ estado: 'Disponible' }).eq('id_cama', idCama);
-            setMsg('✅ Asignación eliminada', '#10b981');
-            setTimeout(() => { cerrarPopover(); onSuccess?.('delete', idCama); }, 1000);
-        });
-    }
+    document.getElementById(ID + '-btn-confirmar-checkin')?.addEventListener('click', async () => {
+        setMsg('Activando asignación…', '#6b7280');
+        const { error } = await supabase.from('v2_asignaciones')
+            .update({ estado_asignacion: 'activa', huesped_confirmo: true, fecha_checkin: hoy }).eq('id', main.id);
+        if (error) { setMsg('❌ ' + error.message, '#ef4444'); return; }
+        await supabase.from('v2_camas').update({ estado: 'Ocupada' }).eq('id_cama', idCama);
+        setMsg('✅ Asignación activada — huésped en cama', '#10b981');
+        setTimeout(() => { cerrarPopover(); onSuccess?.('checkin', idCama); }, 900);
+    });
 
-    // ── Transferir ─────────────────────────────────────────────────────────
+    document.getElementById(ID + '-btn-confirmar-llegada')?.addEventListener('click', async () => {
+        setMsg('Confirmando llegada…', '#6b7280');
+        const { error } = await supabase.from('v2_asignaciones')
+            .update({ huesped_confirmo: true }).eq('id', main.id);
+        if (error) { setMsg('❌ ' + error.message, '#ef4444'); return; }
+        setMsg('✅ Llegada confirmada', '#10b981');
+        setTimeout(() => { cerrarPopover(); onSuccess?.('confirmar', idCama); }, 800);
+    });
+
+
+    // ── Checkout (solo para activos, no pre-asignados)
+    document.getElementById(ID + '-btn-checkout')?.addEventListener('click', async () => {
+        setMsg('Registrando check-out…', '#6b7280');
+        const { error } = await supabase.from('v2_asignaciones')
+            .update({ fecha_checkout: hoy }).eq('id', main.id);
+        if (error) { setMsg('❌ ' + error.message, '#ef4444'); return; }
+        await supabase.from('v2_camas').update({ estado: 'Disponible' }).eq('id_cama', idCama);
+        setMsg('✅ Check-out registrado', '#10b981');
+        setTimeout(() => { cerrarPopover(); onSuccess?.('checkout', idCama); }, 900);
+    });
+
+    document.getElementById(ID + '-btn-extender')?.addEventListener('click', () => {
+        const panel = document.getElementById(ID + '-extender-panel');
+        if (panel) panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+    });
+    document.getElementById(ID + '-btn-ext-confirmar')?.addEventListener('click', async () => {
+        const nuevaFecha = document.getElementById(ID + '-ext-fecha')?.value;
+        const extMsg = document.getElementById(ID + '-ext-msg');
+        if (!nuevaFecha) { if (extMsg) { extMsg.textContent = '⚠️ Ingresa una fecha'; extMsg.style.color = '#d97706'; } return; }
+        const { error } = await supabase.from('v2_asignaciones')
+            .update({ fecha_salida_programada: nuevaFecha }).eq('id', main.id);
+        if (error) { if (extMsg) { extMsg.textContent = '❌ ' + error.message; extMsg.style.color = '#ef4444'; } return; }
+        if (extMsg) { extMsg.textContent = '✅ Estadía extendida al ' + nuevaFecha; extMsg.style.color = '#10b981'; }
+        setTimeout(() => { cerrarPopover(); onSuccess?.('extender', idCama); }, 900);
+    });
+
+    document.getElementById(ID + '-btn-eliminar')?.addEventListener('click', () => {
+        document.getElementById(ID + '-transfer-panel').style.display = 'none';
+        const panel = document.getElementById(ID + '-delete-panel');
+        if (panel) panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+    });
+    document.getElementById(ID + '-btn-cancelar-delete')?.addEventListener('click', () => {
+        const panel = document.getElementById(ID + '-delete-panel');
+        if (panel) panel.style.display = 'none';
+    });
+    document.getElementById(ID + '-btn-confirmar-delete')?.addEventListener('click', async () => {
+        setMsg('Eliminando asignación…', '#6b7280');
+        const { error } = await supabase.from('v2_asignaciones').delete().eq('id', main.id);
+        if (error) { setMsg('❌ ' + error.message, '#ef4444'); return; }
+        await supabase.from('v2_camas').update({ estado: 'Disponible' }).eq('id_cama', idCama);
+        setMsg('🗑️ Asignación eliminada', '#10b981');
+        setTimeout(() => { cerrarPopover(); onSuccess?.('eliminar', idCama); }, 800);
+    });
+
     document.getElementById(ID + '-btn-transferir').addEventListener('click', async () => {
         document.getElementById(ID + '-delete-panel').style.display = 'none';
         const panel = document.getElementById(ID + '-transfer-panel');
         panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+        if (panel.style.display === 'block') {
+            setTimeout(() => document.getElementById(ID + '-tr-numhab')?.focus(), 100);
+        }
+        window._trBuscarHab = async (val) => {
+            const num = val.trim();
+            const res  = document.getElementById(ID + '-tr-resultado');
+            const sel  = document.getElementById(ID + '-tr-cama');
+            const btn  = document.getElementById(ID + '-btn-confirmar-transfer');
+            sel.style.display = 'none';
+            sel.innerHTML = '<option value="">— Cama libre —</option>';
+            btn.disabled = true; btn.style.opacity = '.5';
+            if (num.length < 2) { res.textContent = 'Escribe el número de habitación…'; return; }
+            res.textContent = '🔍 Buscando…';
 
-        // Cargar edificios
-        const { data: edifs } = await supabase.from('v2_edificios').select('id,nombre').order('nombre');
-        const selEdif = document.getElementById(ID + '-tr-edif');
-        selEdif.innerHTML = '<option value="">\u2014 Edificio \u2014</option>' +
-            (edifs || []).map(e => `<option value="${e.id}">${e.nombre}</option>`).join('');
+            // Fase 1: coincidencia EXACTA → prioriza R-220 ("420") sobre COPC ("2420","3420"…)
+            let { data: habs } = await supabase.from('v2_habitaciones')
+                .select('id_custom,numero_hab').eq('numero_hab', num).limit(5);
 
-        selEdif.onchange = async () => {
-            const eid = selEdif.value;
-            const selPab = document.getElementById(ID + '-tr-pab');
-            selPab.innerHTML = '<option value="">\u2014 Pabell\u00f3n \u2014</option>';
-            selPab.disabled = !eid;
-            document.getElementById(ID + '-tr-hab').disabled = true;
-            document.getElementById(ID + '-tr-cama').disabled = true;
-            if (!eid) return;
-            const { data: pabs } = await supabase.from('v2_pabellones').select('id,nombre').eq('edificio_id', eid).order('nombre');
-            selPab.innerHTML = '<option value="">\u2014 Pabell\u00f3n \u2014</option>' +
-                (pabs || []).map(p => `<option value="${p.id}">${p.nombre}</option>`).join('');
-            selPab.disabled = false;
-        };
-
-        document.getElementById(ID + '-tr-pab').onchange = async () => {
-            const pid = document.getElementById(ID + '-tr-pab').value;
-            const selHab = document.getElementById(ID + '-tr-hab');
-            selHab.innerHTML = '<option value="">\u2014 Habitaci\u00f3n \u2014</option>';
-            selHab.disabled = !pid;
-            document.getElementById(ID + '-tr-cama').disabled = true;
-            if (!pid) return;
-            const { data: habs } = await supabase.from('v2_habitaciones').select('id_custom,numero_hab').eq('pabellon_id', pid).order('numero_hab');
-            selHab.innerHTML = '<option value="">\u2014 Habitaci\u00f3n \u2014</option>' +
-                (habs || []).map(h => `<option value="${h.id_custom}">${h.numero_hab}</option>`).join('');
-            selHab.disabled = false;
-        };
-
-        document.getElementById(ID + '-tr-hab').onchange = async () => {
-            const hid = document.getElementById(ID + '-tr-hab').value;
-            const selCama = document.getElementById(ID + '-tr-cama');
-            selCama.innerHTML = '<option value="">\u2014 Cama libre \u2014</option>';
-            selCama.disabled = !hid;
-            const btnConfirm = document.getElementById(ID + '-btn-confirmar-transfer');
-            btnConfirm.disabled = true; btnConfirm.style.opacity = '.5';
-            if (!hid) return;
-            const { data: camas } = await supabase.from('v2_camas')
-                .select('id_cama').eq('habitacion_id', hid).eq('estado', 'Disponible').order('id_cama');
-            if (!camas?.length) {
-                selCama.innerHTML = '<option value="">Sin camas libres en esta hab.</option>';
-                return;
+            // Fase 2: si no hay exacta, búsqueda parcial con límite generoso
+            if (!habs?.length) {
+                const { data: habsLike } = await supabase.from('v2_habitaciones')
+                    .select('id_custom,numero_hab').ilike('numero_hab', `%${num}%`).limit(20);
+                habs = habsLike;
             }
-            selCama.innerHTML = '<option value="">\u2014 Cama libre \u2014</option>' +
-                camas.map(c => `<option value="${c.id_cama}">${c.id_cama}</option>`).join('');
-            selCama.disabled = false;
-            selCama.onchange = () => {
-                const ok = !!selCama.value;
-                btnConfirm.disabled = !ok; btnConfirm.style.opacity = ok ? '1' : '.5';
-            };
-        };
 
+            if (!habs?.length) { res.textContent = `❌ No se encontró habitación "${num}"`; return; }
+            const habIds = habs.map(h => h.id_custom);
+            const { data: camas } = await supabase.from('v2_camas')
+                .select('id_cama,habitacion_id').in('habitacion_id', habIds)
+                .eq('estado', 'Disponible').neq('id_cama', idCama).order('id_cama');
+            if (!camas?.length) { res.textContent = `⚠️ Hab. ${num} encontrada pero sin camas libres`; return; }
+            const habNums = {};
+            for (const h of habs) habNums[h.id_custom] = h.numero_hab;
+            res.textContent = `✅ ${camas.length} cama(s) disponible(s) en hab. ${habs.map(h=>h.numero_hab).join(', ')}`;
+            sel.innerHTML = '<option value="">— Elige cama —</option>' +
+                camas.map(c => `<option value="${c.id_cama}">🛏 ${c.id_cama} · Hab.${habNums[c.habitacion_id]||''}</option>`).join('');
+            sel.style.display = 'block';
+            sel.onchange = () => { const ok = !!sel.value; btn.disabled = !ok; btn.style.opacity = ok ? '1' : '.5'; };
+        };
         document.getElementById(ID + '-btn-confirmar-transfer').addEventListener('click', async () => {
             const newCama = document.getElementById(ID + '-tr-cama').value;
             if (!newCama) return;
             setMsg('Transfiriendo…', '#6b7280');
-            // 1. Mover asignación a nueva cama
             const { error: errMove } = await supabase.from('v2_asignaciones')
-                .update({ id_cama: newCama }).eq('id', asig.id);
+                .update({ id_cama: newCama }).eq('id', main.id);
             if (errMove) { setMsg('❌ ' + errMove.message, '#ef4444'); return; }
-            // 2. Liberar cama origen
             await supabase.from('v2_camas').update({ estado: 'Disponible' }).eq('id_cama', idCama);
-            // 3. Marcar cama destino como ocupada
             await supabase.from('v2_camas').update({ estado: 'Ocupada' }).eq('id_cama', newCama);
+            // Limpiar pre_asignados duplicados del mismo RUT que quedaron de la asignación anterior
+            if (main.rut_huesped) {
+                await supabase.from('v2_asignaciones')
+                    .delete()
+                    .eq('rut_huesped', main.rut_huesped)
+                    .eq('estado_asignacion', 'pre_asignado')
+                    .is('fecha_checkout', null)
+                    .neq('id', main.id);
+            }
             setMsg('✅ Transferencia completada', '#10b981');
             setTimeout(() => { cerrarPopover(); onSuccess?.('transfer', idCama); }, 1000);
         });
@@ -602,25 +712,68 @@ async function renderCheckin(pop, idCama, onSuccess) {
 
         setMsg('Guardando en v2_asignaciones…', '#6b7280');
 
-        // INSERT obligatorio en v2_asignaciones
-        const { error: err } = await supabase
+        // ── Verificar si ya existe una asignación activa para esta cama ──────
+        // (puede haber sido creada por el SQL fix o el motor automático)
+        const { data: asigExistente } = await supabase
             .from('v2_asignaciones')
-            .insert([{
-                id_cama:                 idCama,
-                empresa_id:              empId,
-                rut_huesped:             rut,
-                nombre_huesped:          nombre,
-                fecha_checkin:           llegada,
-                fecha_checkout:          null,
-                fecha_salida_programada: salida   || null,
-                numero_contrato:         contrato || null,
-                telefono:                tel      || null,
-            }]);
+            .select('id, rut_huesped, estado_asignacion')
+            .eq('id_cama', idCama)
+            .is('fecha_checkout', null)
+            .limit(1)
+            .maybeSingle();
+
+        let err = null;
+
+        if (asigExistente) {
+            // ── Caso A: Ya existe asignación → UPDATE (confirmar check-in) ────
+            setMsg('Confirmando asignación existente…', '#6b7280');
+            const { error: errUpd } = await supabase
+                .from('v2_asignaciones')
+                .update({
+                    empresa_id:              empId,
+                    rut_huesped:             rut,
+                    nombre_huesped:          nombre,
+                    fecha_checkin:           llegada,
+                    fecha_salida_programada: salida   || null,
+                    numero_contrato:         contrato || null,
+                    telefono:                tel      || null,
+                    estado_asignacion:       'activa',
+                    huesped_confirmo:        true,
+                })
+                .eq('id', asigExistente.id);
+            err = errUpd;
+            // Asegurar cama como Ocupada
+            if (!errUpd) {
+                await supabase.from('v2_camas').update({ estado: 'Ocupada' }).eq('id_cama', idCama);
+            }
+        } else {
+            // ── Caso B: No existe asignación → INSERT normal ────────────────
+            const { error: errIns } = await supabase
+                .from('v2_asignaciones')
+                .insert([{
+                    id_cama:                 idCama,
+                    empresa_id:              empId,
+                    rut_huesped:             rut,
+                    nombre_huesped:          nombre,
+                    fecha_checkin:           llegada,
+                    fecha_checkout:          null,
+                    fecha_salida_programada: salida   || null,
+                    numero_contrato:         contrato || null,
+                    telefono:                tel      || null,
+                    estado_asignacion:       'activa',
+                    huesped_confirmo:        true,
+                }]);
+            err = errIns;
+            if (!errIns) {
+                await supabase.from('v2_camas').update({ estado: 'Ocupada' }).eq('id_cama', idCama);
+            }
+        }
 
         if (err) { setMsg('❌ ' + err.message, '#ef4444'); return; }
         setMsg('✅ Check-in registrado correctamente', '#10b981');
         setTimeout(() => { cerrarPopover(); onSuccess?.('checkin', idCama); }, 1200);
     });
+
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────

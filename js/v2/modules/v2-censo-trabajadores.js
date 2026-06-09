@@ -193,14 +193,33 @@ async function _ctCargar() {
         .lte('fecha_checkin', pFin)
         .or(`fecha_checkout.is.null,fecha_checkout.gte.${pIni}`);
 
+    // 4. Etiquetas de distribución para saber si es Noche o Anglo
+    const { data: distData } = await supabase.from('v2_distribucion_camas').select('id_cama, tipo, etiqueta').limit(10000);
+    const camaToDist = {};
+    (distData || []).forEach(d => { camaToDist[d.id_cama] = d; });
+
     _asigMap = {};
     (asigActivas || []).forEach(a => {
         const hid = a.v2_camas?.habitacion_id;
-        if (hid && !_asigMap[hid]) _asigMap[hid] = {
-            emp:  a.v2_empresas?.nombre || '—',
-            ger:  a.v2_empresas?.v2_gerencias?.nombre || '—',
-            cont: a.numero_contrato || '—'
-        };
+        const cid = a.id_cama;
+        if (hid) {
+            if (!_asigMap[hid]) {
+                _asigMap[hid] = {
+                    emp:  a.v2_empresas?.nombre || '—',
+                    ger:  a.v2_empresas?.v2_gerencias?.nombre || '—',
+                    cont: a.numero_contrato || '—',
+                    cargados: 0,
+                    esNoche: false,
+                    esAnglo: false
+                };
+            }
+            _asigMap[hid].cargados++;
+            const dist = camaToDist[cid];
+            if (dist) {
+                if (dist.tipo === 'noche' || dist.etiqueta?.toUpperCase() === 'NOCHE') _asigMap[hid].esNoche = true;
+                if (dist.tipo === 'anglo' || dist.etiqueta?.toUpperCase() === 'ANGLO') _asigMap[hid].esAnglo = true;
+            }
+        }
     });
 
     _ctRenderTab();
@@ -243,19 +262,34 @@ function ctRenderGrid() {
         const celdas = dias.map(d => {
             const iso  = fmtISO(d);
             const regs = regMap[String(h.numero_hab) + '|' + iso] || [];
-            const n    = regs.length;
+            const confs= regs.length; // numero de personas que confirmaron
             const esH  = iso === hoy;
 
             let bg, c, lbl, borde = '';
-            if (!n)      { bg = 'var(--bg)';  c = 'transparent'; lbl = ''; }
-            else if (n===1) { bg = '#d1fae5'; c = '#065f46';     lbl = '1'; }
-            else if (n===2) { bg = '#6ee7b7'; c = '#047857';     lbl = '2'; }
-            else            { bg = '#10b981'; c = '#fff';         lbl = String(n); }
+            if (!confs) { 
+                bg = 'var(--bg)';  c = 'transparent'; lbl = ''; 
+            } else {
+                // Logica de Etiqueta vs Confirmados
+                let txt = confs + ' DÍA';
+                if (ai.esAnglo) {
+                    if (confs >= 2) txt = '1 DÍA 1 NOCHE';
+                    else txt = '1 DÍA';
+                } else if (ai.esNoche) {
+                    txt = confs + ' NOCHE';
+                } else {
+                    txt = confs + ' DÍA';
+                }
+
+                if (confs === 1) { bg = '#d1fae5'; c = '#065f46'; }
+                else if (confs === 2) { bg = '#6ee7b7'; c = '#047857'; }
+                else { bg = '#10b981'; c = '#fff'; }
+                lbl = txt;
+            }
             if (esH) borde = ';outline:2px solid #10b981;outline-offset:-1px';
 
             const tip = regs.map(r => `${r.nombre_trabajador||r.rut_trabajador} (${r.hora_scan ? new Date(r.hora_scan).toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'}) : ''})`).join('\n');
             return `<td style="padding:2px;text-align:center">
-              <div title="${tip.replace(/"/g,"'")}" style="width:28px;height:22px;border-radius:4px;background:${bg};color:${c};font-size:9px;font-weight:800;display:flex;align-items:center;justify-content:center;margin:auto${borde}">${lbl}</div>
+              <div title="${tip.replace(/"/g,"'")}" style="min-width:32px;padding:2px 4px;border-radius:4px;background:${bg};color:${c};font-size:8px;font-weight:800;display:flex;align-items:center;justify-content:center;margin:auto${borde};white-space:nowrap">${lbl}</div>
             </td>`;
         }).join('');
 
@@ -277,7 +311,7 @@ function ctRenderGrid() {
         { bg:'#6ee7b7', c:'#047857', lbl:'2',  desc:'2 confirmaciones' },
         { bg:'#10b981', c:'#fff',    lbl:'3+', desc:'3+ confirmaciones' },
     ].map(l => `<span style="display:flex;align-items:center;gap:4px">
-      <span style="width:18px;height:14px;border-radius:3px;background:${l.bg};color:${l.c};font-size:9px;font-weight:800;display:inline-flex;align-items:center;justify-content:center">${l.lbl}</span>
+      <span style="min-width:18px;height:14px;padding:0 4px;border-radius:3px;background:${l.bg};color:${l.c};font-size:9px;font-weight:800;display:inline-flex;align-items:center;justify-content:center">${l.lbl}</span>
       <span style="color:var(--text-muted)">${l.desc}</span>
     </span>`).join('');
 

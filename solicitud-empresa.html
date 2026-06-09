@@ -691,19 +691,23 @@
 
             <div class="form-group mt-4">
                 <label class="form-label">Nombre de la Empresa <span class="req">*</span></label>
-                <input type="text" class="form-input" id="pub-company"
-                    placeholder="Ej: Aramark, Minería Norte, AngloAmerican…">
+                <select class="form-input" id="pub-company">
+                    <option value="">Seleccione una empresa...</option>
+                </select>
             </div>
 
             <div class="form-group mt-4">
                 <label class="form-label">Número de Contrato</label>
-                <input type="text" class="form-input" id="pub-contract-number" placeholder="Ej: C-2026-1234">
+                <select class="form-input" id="pub-contract-number">
+                    <option value="">Seleccione un contrato...</option>
+                </select>
             </div>
 
             <div class="form-group mt-4">
                 <label class="form-label">Gerencia</label>
-                <input type="text" class="form-input" id="pub-gerencia"
-                    placeholder="Ej: Gerencia Mina, OPEX, Geología…">
+                <select class="form-input" id="pub-gerencia">
+                    <option value="">Seleccione una gerencia...</option>
+                </select>
             </div>
 
             <div class="form-grid-2 mt-4">
@@ -1231,6 +1235,75 @@
     <!-- handleFileUpload y submitRequest -->
     <script type="module">
         import { supabase } from './js/supabaseClient.js';
+
+        // ─── CARGAR DATOS PARA LOS SELECTS ───────────────────────────────────
+        document.addEventListener('DOMContentLoaded', async () => {
+            try {
+                // 1. Cargar Empresas
+                const { data: empresas } = await supabase.from('v2_empresas').select('nombre').order('nombre');
+                const empSelect = document.getElementById('pub-company');
+                if (empresas && empSelect) {
+                    const unicas = [...new Set(empresas.map(e => e.nombre))];
+                    unicas.forEach(emp => {
+                        const opt = document.createElement('option');
+                        opt.value = emp;
+                        opt.textContent = emp;
+                        empSelect.appendChild(opt);
+                    });
+                }
+
+                // 2. Cargar Gerencias
+                const { data: gerencias } = await supabase.from('v2_gerencias').select('nombre').order('nombre');
+                const gerSelect = document.getElementById('pub-gerencia');
+                if (gerencias && gerSelect) {
+                    const unicasGer = [...new Set(gerencias.map(g => g.nombre))].filter(n => n !== 'Sin Gerencia');
+                    unicasGer.forEach(ger => {
+                        const opt = document.createElement('option');
+                        opt.value = ger;
+                        opt.textContent = ger;
+                        gerSelect.appendChild(opt);
+                    });
+                }
+
+                // 3. Contratos conocidos (predefinidos + dinámicos opcionales)
+                const ctrSelect = document.getElementById('pub-contract-number');
+                if (ctrSelect) {
+                    const defaultContracts = [
+                        "11902281", "12001331", "12002001", "12101351", "12101711", "12200081",
+                        "12200661", "12200681", "12200991", "12201971", "12300101", "12300251",
+                        "12300801", "12301071", "12301121", "12301181", "12301241", "12301561",
+                        "12301641", "12301901", "12400431", "12400521", "12400781", "12400851",
+                        "12400991", "12401021", "12500031", "12500191", "12500201", "12500611",
+                        "12500961", "12501261", "12501361", "42000021", "42200051", "42200151",
+                        "42300051", "C-2026-1234"
+                    ];
+                    defaultContracts.forEach(ctr => {
+                        const opt = document.createElement('option');
+                        opt.value = ctr;
+                        opt.textContent = ctr;
+                        ctrSelect.appendChild(opt);
+                    });
+                    
+                    // Extraer últimos contratos distintos de solicitudes
+                    const { data: b2bContratos } = await supabase.from('v2_solicitudes_b2b')
+                        .select('n_contrato').limit(500).order('created_at', { ascending: false });
+                    if (b2bContratos) {
+                        const recents = [...new Set(b2bContratos.map(c => c.n_contrato).filter(Boolean))];
+                        recents.forEach(ctr => {
+                            if (!defaultContracts.includes(ctr)) {
+                                const opt = document.createElement('option');
+                                opt.value = ctr;
+                                opt.textContent = ctr;
+                                ctrSelect.appendChild(opt);
+                            }
+                        });
+                    }
+                }
+            } catch (err) {
+                console.error("Error cargando opciones de autollenado:", err);
+            }
+        });
+        // ─────────────────────────────────────────────────────────────────────
 
         window.handleFileUpload = (e) => {
             const file = e.target.files[0];

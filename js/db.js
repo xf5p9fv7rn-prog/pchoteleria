@@ -367,7 +367,8 @@ export async function fn_transicionDiaria() {
                     if (!nuevaAsig?.length) {
                         await supabase.from('v2_camas')
                             .update({ estado: 'Disponible' })
-                            .eq('id_cama', camaId);
+                            .eq('id_cama', camaId)
+                            .neq('estado', 'Deshabilitada');
                     }
                 }
 

@@ -1,0 +1,2138 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PC Hotelería · Sistema de Gestión de Campamentos Aramark</title>
+  <meta name="description"
+    content="La plataforma digital más avanzada para gestionar campamentos mineros. Control total de habitaciones, check-in digital, informes ejecutivos en tiempo real.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Montserrat:wght@700;800;900&display=swap"
+    rel="stylesheet">
+  <style>
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0
+    }
+
+    :root {
+      --red: #e63946;
+      --navy: #0a1628;
+      --navy2: #0d1f3c;
+      --blue: #1d3557;
+      --accent: #457b9d;
+      --cyan: #06b6d4;
+      --green: #22c55e;
+      --gold: #f59e0b;
+      --white: #f8fafc;
+      --gray: #94a3b8;
+    }
+
+    html {
+      scroll-behavior: smooth
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--navy);
+      color: var(--white);
+      overflow-x: hidden;
+      cursor: none
+    }
+
+    /* ── CURSOR PERSONALIZADO ── */
+    #cursor {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: var(--cyan);
+      pointer-events: none;
+      position: fixed;
+      z-index: 99999;
+      top: 0;
+      left: 0;
+      transform: translate(-50%, -50%);
+      transition: transform 0.1s, width 0.3s, height 0.3s, background 0.3s, opacity 0.3s;
+      mix-blend-mode: screen;
+    }
+
+    #cursor-ring {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      border: 1.5px solid rgba(6, 182, 212, 0.5);
+      pointer-events: none;
+      position: fixed;
+      z-index: 99998;
+      top: 0;
+      left: 0;
+      transform: translate(-50%, -50%);
+      transition: transform 0.15s, width 0.4s, height 0.4s, opacity 0.3s;
+    }
+
+    body:hover #cursor {
+      opacity: 1
+    }
+
+    a:hover~#cursor,
+    button:hover~#cursor {
+      width: 28px;
+      height: 28px
+    }
+
+    /* ── SCROLL PROGRESS BAR ── */
+    #progress-bar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      height: 3px;
+      background: linear-gradient(90deg, var(--red), var(--cyan));
+      z-index: 99997;
+      width: 0%;
+      transition: width 0.1s linear;
+      box-shadow: 0 0 8px rgba(6, 182, 212, 0.6);
+    }
+
+    /* ── CANVAS PARTÍCULAS ── */
+    #particles {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      pointer-events: none;
+      opacity: 0.5;
+    }
+
+    /* ── NAV ── */
+    nav {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 9990;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 18px 48px;
+      background: rgba(10, 22, 40, 0.85);
+      backdrop-filter: blur(20px);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+      transition: all 0.3s;
+    }
+
+    .nav-logo {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      cursor: pointer
+    }
+
+    .nav-logo-icon {
+      width: 38px;
+      height: 38px;
+      background: linear-gradient(135deg, var(--red), #b91c1c);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+    }
+
+    .nav-brand {
+      font-size: 18px;
+      font-weight: 800;
+      letter-spacing: -0.3px
+    }
+
+    .nav-brand span {
+      color: var(--red)
+    }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 32px
+    }
+
+    .nav-links a {
+      font-size: 14px;
+      font-weight: 500;
+      color: rgba(255, 255, 255, 0.7);
+      text-decoration: none;
+      transition: color 0.2s;
+      position: relative;
+    }
+
+    .nav-links a::after {
+      content: '';
+      position: absolute;
+      left: 0;
+      bottom: -4px;
+      width: 0;
+      height: 2px;
+      background: var(--cyan);
+      transition: width 0.3s;
+      border-radius: 2px;
+    }
+
+    .nav-links a:hover::after {
+      width: 100%
+    }
+
+    .nav-links a:hover {
+      color: #fff
+    }
+
+    .nav-cta {
+      background: var(--red);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 10px 22px;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      text-decoration: none;
+      transition: all 0.2s;
+      box-shadow: 0 4px 14px rgba(230, 57, 70, 0.4);
+    }
+
+    .nav-cta:hover {
+      background: #b91c1c;
+      transform: translateY(-1px)
+    }
+
+    /* ── HERO ── */
+    .hero {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+      padding: 120px 24px 80px;
+      z-index: 1;
+    }
+
+    .hero-bg {
+      position: absolute;
+      inset: 0;
+      background:
+        radial-gradient(ellipse 80% 60% at 50% 0%, rgba(69, 123, 157, 0.25) 0%, transparent 60%),
+        radial-gradient(ellipse 40% 40% at 80% 80%, rgba(230, 57, 70, 0.15) 0%, transparent 50%),
+        linear-gradient(180deg, #0a1628 0%, #0d1f3c 100%);
+    }
+
+    .hero-grid {
+      position: absolute;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+      background-size: 60px 60px;
+      mask-image: radial-gradient(ellipse 80% 80% at 50% 50%, black 20%, transparent 80%);
+    }
+
+    .hero-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(230, 57, 70, 0.15);
+      border: 1px solid rgba(230, 57, 70, 0.3);
+      border-radius: 99px;
+      padding: 6px 16px;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--red);
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+      margin-bottom: 28px;
+      animation: fadeInUp 0.8s ease both;
+    }
+
+    .hero-title {
+      font-family: 'Montserrat', sans-serif;
+      font-size: clamp(42px, 7vw, 96px);
+      font-weight: 900;
+      line-height: 1.0;
+      letter-spacing: -2px;
+      margin-bottom: 24px;
+      animation: fadeInUp 0.9s 0.1s ease both;
+    }
+
+    .hero-title .gradient-text {
+      background: linear-gradient(135deg, var(--cyan), #a78bfa, var(--red));
+      background-size: 200%;
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      animation: gradientShift 4s ease infinite;
+    }
+
+    @keyframes gradientShift {
+
+      0%,
+      100% {
+        background-position: 0% 50%
+      }
+
+      50% {
+        background-position: 100% 50%
+      }
+    }
+
+    .hero-sub {
+      font-size: clamp(16px, 2vw, 20px);
+      font-weight: 400;
+      color: rgba(255, 255, 255, 0.6);
+      max-width: 600px;
+      line-height: 1.7;
+      margin-bottom: 44px;
+      animation: fadeInUp 1s 0.2s ease both;
+    }
+
+    .typewriter-cursor {
+      display: inline-block;
+      width: 3px;
+      background: var(--cyan);
+      animation: blink 0.8s infinite;
+    }
+
+    @keyframes blink {
+
+      0%,
+      100% {
+        opacity: 1
+      }
+
+      50% {
+        opacity: 0
+      }
+    }
+
+    .hero-btns {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      justify-content: center;
+      animation: fadeInUp 1s 0.3s ease both;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--red), #b91c1c);
+      color: #fff;
+      border: none;
+      border-radius: 12px;
+      padding: 16px 36px;
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+      text-decoration: none;
+      box-shadow: 0 8px 24px rgba(230, 57, 70, 0.4);
+      transition: all 0.25s;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .btn-primary::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(135deg, rgba(255, 255, 255, 0.15), transparent);
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 16px 40px rgba(230, 57, 70, 0.55)
+    }
+
+    .btn-primary:hover::after {
+      opacity: 1
+    }
+
+    .btn-outline {
+      background: transparent;
+      border: 1.5px solid rgba(255, 255, 255, 0.2);
+      color: #fff;
+      border-radius: 12px;
+      padding: 16px 36px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: none;
+      transition: all 0.25s;
+      backdrop-filter: blur(10px);
+    }
+
+    .btn-outline:hover {
+      border-color: rgba(255, 255, 255, 0.5);
+      background: rgba(255, 255, 255, 0.05);
+      transform: translateY(-3px)
+    }
+
+    .scroll-indicator {
+      position: absolute;
+      bottom: 40px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      animation: bounce 2s infinite;
+    }
+
+    .scroll-indicator span {
+      font-size: 11px;
+      color: rgba(255, 255, 255, 0.4);
+      letter-spacing: 1px;
+      text-transform: uppercase
+    }
+
+    .scroll-arrow {
+      width: 24px;
+      height: 24px;
+      border-right: 2px solid rgba(255, 255, 255, 0.3);
+      border-bottom: 2px solid rgba(255, 255, 255, 0.3);
+      transform: rotate(45deg)
+    }
+
+    /* ── STATS ── */
+    .stats-section {
+      background: var(--blue);
+      padding: 80px 48px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 48px;
+      text-align: center;
+      position: relative;
+      z-index: 1;
+    }
+
+    .stats-section::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(69, 123, 157, 0.5), transparent);
+    }
+
+    .stat-item {
+      position: relative;
+      cursor: default
+    }
+
+    .stat-item:hover .stat-number {
+      transform: scale(1.05)
+    }
+
+    .stat-number {
+      font-family: 'Montserrat', sans-serif;
+      font-size: clamp(40px, 5vw, 64px);
+      font-weight: 900;
+      background: linear-gradient(135deg, var(--white), var(--cyan));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      display: block;
+      line-height: 1;
+      margin-bottom: 8px;
+      transition: transform 0.3s;
+    }
+
+    .stat-label {
+      font-size: 13px;
+      color: rgba(255, 255, 255, 0.5);
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.8px
+    }
+
+    /* ── FEATURES ── */
+    .features-section {
+      background: var(--navy2);
+      z-index: 1;
+      position: relative
+    }
+
+    section {
+      padding: 100px 48px;
+      max-width: 1200px;
+      margin: 0 auto
+    }
+
+    .section-tag {
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: var(--cyan);
+      margin-bottom: 16px;
+      display: block
+    }
+
+    .section-title {
+      font-family: 'Montserrat', sans-serif;
+      font-size: clamp(32px, 4vw, 52px);
+      font-weight: 900;
+      line-height: 1.1;
+      letter-spacing: -1px;
+      margin-bottom: 20px
+    }
+
+    .section-desc {
+      font-size: 17px;
+      color: rgba(255, 255, 255, 0.55);
+      line-height: 1.75;
+      max-width: 580px
+    }
+
+    /* TABS */
+    .feature-tabs {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin: 40px 0 32px
+    }
+
+    .tab-btn {
+      padding: 10px 22px;
+      border-radius: 99px;
+      font-size: 13px;
+      font-weight: 700;
+      border: 1.5px solid rgba(255, 255, 255, 0.1);
+      background: transparent;
+      color: rgba(255, 255, 255, 0.5);
+      cursor: pointer;
+      transition: all 0.25s;
+    }
+
+    .tab-btn.active {
+      background: var(--cyan);
+      border-color: var(--cyan);
+      color: #000;
+      box-shadow: 0 4px 16px rgba(6, 182, 212, 0.4);
+    }
+
+    .tab-btn:hover:not(.active) {
+      border-color: rgba(255, 255, 255, 0.3);
+      color: #fff
+    }
+
+    .tab-pane {
+      display: none;
+      animation: fadeInUp 0.4s ease both
+    }
+
+    .tab-pane.active {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 24px
+    }
+
+    .feature-card {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 20px;
+      padding: 32px;
+      transition: all 0.35s;
+      position: relative;
+      overflow: hidden;
+      transform-style: preserve-3d;
+    }
+
+    .feature-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background: linear-gradient(90deg, var(--red), var(--cyan));
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+
+    .feature-card:hover {
+      border-color: rgba(255, 255, 255, 0.15);
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3)
+    }
+
+    .feature-card:hover::before {
+      opacity: 1
+    }
+
+    .feature-icon {
+      width: 56px;
+      height: 56px;
+      border-radius: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 26px;
+      margin-bottom: 20px
+    }
+
+    .feature-title {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 10px
+    }
+
+    .feature-desc {
+      font-size: 14px;
+      color: rgba(255, 255, 255, 0.5);
+      line-height: 1.7
+    }
+
+    /* SHOWCASE */
+    .showcase {
+      position: relative;
+      width: 100%;
+      min-height: 80vh;
+      display: flex;
+      align-items: center;
+      overflow: hidden;
+      padding: 80px 48px;
+      z-index: 1;
+    }
+
+    .showcase-bg {
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(135deg, #0a1628 0%, #1d3557 100%)
+    }
+
+    .showcase-glow {
+      position: absolute;
+      width: 600px;
+      height: 600px;
+      background: radial-gradient(circle, rgba(6, 182, 212, 0.15) 0%, transparent 70%);
+      border-radius: 50%;
+      pointer-events: none;
+      transition: left 0.5s ease, top 0.5s ease;
+    }
+
+    .showcase-content {
+      position: relative;
+      z-index: 2;
+      max-width: 1200px;
+      margin: 0 auto;
+      width: 100%;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 80px;
+      align-items: center;
+    }
+
+    .mock-dashboard {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 20px;
+      padding: 24px;
+      font-size: 13px;
+      animation: float 4s ease-in-out infinite;
+      box-shadow: 0 32px 80px rgba(0, 0, 0, 0.5);
+    }
+
+    .mock-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      margin-bottom: 20px
+    }
+
+    .mock-dots {
+      display: flex;
+      gap: 6px
+    }
+
+    .mock-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%
+    }
+
+    .mock-title-bar {
+      flex: 1;
+      height: 10px;
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 5px
+    }
+
+    .mock-kpis {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 16px
+    }
+
+    .mock-kpi {
+      background: rgba(255, 255, 255, 0.06);
+      border-radius: 12px;
+      padding: 14px
+    }
+
+    .mock-kpi-val {
+      font-size: 22px;
+      font-weight: 800;
+      margin-bottom: 3px
+    }
+
+    .mock-kpi-lbl {
+      font-size: 9px;
+      color: rgba(255, 255, 255, 0.4);
+      text-transform: uppercase;
+      letter-spacing: 0.5px
+    }
+
+    .mock-bar-row {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 8px;
+      align-items: center
+    }
+
+    .mock-bar-lbl {
+      font-size: 9px;
+      color: rgba(255, 255, 255, 0.4);
+      width: 60px;
+      flex-shrink: 0
+    }
+
+    .mock-bar {
+      height: 8px;
+      border-radius: 4px;
+      flex: 1;
+      position: relative;
+      background: rgba(255, 255, 255, 0.07)
+    }
+
+    .mock-bar-fill {
+      height: 100%;
+      border-radius: 4px;
+      position: absolute;
+      left: 0;
+      top: 0;
+      transition: width 1.5s ease
+    }
+
+    .mock-table {
+      margin-top: 16px
+    }
+
+    .mock-tr {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      padding: 8px 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      font-size: 10px
+    }
+
+    .mock-tr.header {
+      color: rgba(255, 255, 255, 0.3);
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 9px;
+      font-weight: 700
+    }
+
+    .badge-green {
+      background: rgba(34, 197, 94, 0.2);
+      color: #22c55e
+    }
+
+    .badge-red {
+      background: rgba(239, 68, 68, 0.2);
+      color: #ef4444
+    }
+
+    .badge-blue {
+      background: rgba(6, 182, 212, 0.2);
+      color: #06b6d4
+    }
+
+    .benefits-list {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      margin-top: 48px
+    }
+
+    .benefit-item {
+      display: flex;
+      gap: 20px;
+      align-items: flex-start;
+      padding: 20px 24px;
+      background: rgba(255, 255, 255, 0.04);
+      border-radius: 16px;
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      transition: all 0.3s;
+      cursor: default;
+    }
+
+    .benefit-item:hover {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: rgba(255, 255, 255, 0.15);
+      transform: translateX(6px)
+    }
+
+    .benefit-icon {
+      width: 48px;
+      height: 48px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 22px;
+      flex-shrink: 0
+    }
+
+    .benefit-content h4 {
+      font-size: 16px;
+      font-weight: 700;
+      margin-bottom: 6px
+    }
+
+    .benefit-content p {
+      font-size: 14px;
+      color: rgba(255, 255, 255, 0.5);
+      line-height: 1.6
+    }
+
+    /* HOW IT WORKS */
+    .how-section {
+      background: var(--navy);
+      padding: 100px 48px;
+      position: relative;
+      z-index: 1
+    }
+
+    .how-section::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(ellipse 60% 60% at 50% 50%, rgba(29, 53, 87, 0.5) 0%, transparent 70%)
+    }
+
+    .steps {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 0;
+      position: relative;
+      z-index: 2;
+      max-width: 1100px;
+      margin: 60px auto 0
+    }
+
+    .step {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      padding: 32px 24px;
+      position: relative;
+      cursor: default
+    }
+
+    .step:not(:last-child)::after {
+      content: '';
+      position: absolute;
+      top: 56px;
+      right: -1px;
+      width: 50%;
+      height: 2px;
+      background: linear-gradient(90deg, rgba(6, 182, 212, 0.4), rgba(6, 182, 212, 0.1))
+    }
+
+    .step-num {
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--red), #b91c1c);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'Montserrat', sans-serif;
+      font-size: 20px;
+      font-weight: 900;
+      margin-bottom: 20px;
+      box-shadow: 0 0 0 8px rgba(230, 57, 70, 0.1);
+      transition: all 0.3s;
+    }
+
+    .step:hover .step-num {
+      transform: scale(1.15);
+      box-shadow: 0 0 0 12px rgba(230, 57, 70, 0.15), 0 8px 24px rgba(230, 57, 70, 0.4)
+    }
+
+    .step-title {
+      font-size: 16px;
+      font-weight: 700;
+      margin-bottom: 8px
+    }
+
+    .step-desc {
+      font-size: 13px;
+      color: rgba(255, 255, 255, 0.45);
+      line-height: 1.6
+    }
+
+    /* COMPANIES */
+    .companies {
+      background: var(--navy2);
+      padding: 60px 48px;
+      text-align: center;
+      overflow: hidden;
+      position: relative;
+      z-index: 1
+    }
+
+    .companies-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: rgba(255, 255, 255, 0.35);
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      margin-bottom: 40px
+    }
+
+    .companies-track {
+      display: flex;
+      gap: 64px;
+      align-items: center;
+      animation: marquee 18s linear infinite;
+      width: max-content
+    }
+
+    .company-name {
+      font-size: 16px;
+      font-weight: 700;
+      color: rgba(255, 255, 255, 0.2);
+      white-space: nowrap;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      transition: color 0.3s;
+      cursor: default
+    }
+
+    .company-name:hover {
+      color: rgba(255, 255, 255, 0.6)
+    }
+
+    .companies-track:hover {
+      animation-play-state: paused
+    }
+
+    /* FAQ ACCORDION */
+    .faq-section {
+      background: var(--navy);
+      position: relative;
+      z-index: 1
+    }
+
+    .faq-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-top: 48px
+    }
+
+    .faq-item {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 16px;
+      overflow: hidden;
+      transition: border-color 0.3s;
+    }
+
+    .faq-item.open {
+      border-color: rgba(6, 182, 212, 0.3)
+    }
+
+    .faq-question {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 20px 24px;
+      cursor: pointer;
+      font-size: 15px;
+      font-weight: 600;
+      transition: color 0.3s;
+      user-select: none;
+    }
+
+    .faq-question:hover {
+      color: var(--cyan)
+    }
+
+    .faq-icon {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      border: 1.5px solid rgba(255, 255, 255, 0.2);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      flex-shrink: 0;
+      transition: all 0.3s;
+      font-weight: 700;
+    }
+
+    .faq-item.open .faq-icon {
+      transform: rotate(45deg);
+      border-color: var(--cyan);
+      color: var(--cyan);
+      background: rgba(6, 182, 212, 0.1)
+    }
+
+    .faq-answer {
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 0.4s ease, padding 0.3s;
+      font-size: 14px;
+      color: rgba(255, 255, 255, 0.5);
+      line-height: 1.7;
+      padding: 0 24px;
+    }
+
+    .faq-item.open .faq-answer {
+      max-height: 200px;
+      padding: 0 24px 20px
+    }
+
+    /* CONTACT SECTION */
+    .contact-section {
+      background: var(--navy2);
+      position: relative;
+      z-index: 1;
+      padding: 100px 48px;
+    }
+
+    .contact-section::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(ellipse 60% 80% at 50% 0%, rgba(6, 182, 212, 0.07) 0%, transparent 60%);
+    }
+
+    .contact-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 60px;
+      align-items: center;
+      max-width: 1100px;
+      margin: 60px auto 0;
+      position: relative;
+      z-index: 2;
+    }
+
+    .contact-card {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 24px;
+      padding: 48px;
+      transition: all 0.4s;
+    }
+
+    .contact-card:hover {
+      border-color: rgba(6, 182, 212, 0.3);
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.4)
+    }
+
+    .contact-info-item {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      padding: 20px;
+      background: rgba(255, 255, 255, 0.04);
+      border-radius: 16px;
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      margin-bottom: 16px;
+      transition: all 0.3s;
+      text-decoration: none;
+      color: inherit;
+    }
+
+    .contact-info-item:hover {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: rgba(6, 182, 212, 0.3);
+      transform: translateX(6px);
+    }
+
+    .contact-icon {
+      width: 52px;
+      height: 52px;
+      border-radius: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      flex-shrink: 0;
+    }
+
+    .contact-detail h4 {
+      font-size: 12px;
+      font-weight: 600;
+      color: rgba(255, 255, 255, 0.4);
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      margin-bottom: 4px
+    }
+
+    .contact-detail p {
+      font-size: 16px;
+      font-weight: 700
+    }
+
+    .contact-form {
+      display: flex;
+      flex-direction: column;
+      gap: 16px
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px
+    }
+
+    .form-label {
+      font-size: 12px;
+      font-weight: 700;
+      color: rgba(255, 255, 255, 0.5);
+      text-transform: uppercase;
+      letter-spacing: 0.5px
+    }
+
+    .form-input {
+      background: rgba(255, 255, 255, 0.06);
+      border: 1.5px solid rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
+      padding: 14px 18px;
+      font-size: 15px;
+      color: #fff;
+      font-family: 'Inter', sans-serif;
+      outline: none;
+      transition: all 0.3s;
+    }
+
+    .form-input:focus {
+      border-color: var(--cyan);
+      background: rgba(6, 182, 212, 0.05);
+      box-shadow: 0 0 0 4px rgba(6, 182, 212, 0.1)
+    }
+
+    .form-input::placeholder {
+      color: rgba(255, 255, 255, 0.3)
+    }
+
+    textarea.form-input {
+      resize: vertical;
+      min-height: 100px
+    }
+
+    .form-submit {
+      background: linear-gradient(135deg, var(--red), #b91c1c);
+      color: #fff;
+      border: none;
+      border-radius: 12px;
+      padding: 16px 32px;
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.25s;
+      box-shadow: 0 8px 24px rgba(230, 57, 70, 0.4);
+    }
+
+    .form-submit:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 14px 32px rgba(230, 57, 70, 0.5)
+    }
+
+    /* CTA */
+    .cta-section {
+      text-align: center;
+      padding: 140px 48px;
+      position: relative;
+      overflow: hidden;
+      z-index: 1
+    }
+
+    .cta-bg {
+      position: absolute;
+      inset: 0;
+      background:
+        radial-gradient(ellipse 70% 70% at 50% 50%, rgba(230, 57, 70, 0.18) 0%, transparent 60%),
+        linear-gradient(180deg, var(--navy2) 0%, var(--navy) 100%);
+    }
+
+    .cta-section h2 {
+      font-family: 'Montserrat', sans-serif;
+      font-size: clamp(36px, 5vw, 72px);
+      font-weight: 900;
+      line-height: 1.0;
+      letter-spacing: -2px;
+      margin-bottom: 20px;
+      position: relative;
+      z-index: 2
+    }
+
+    .cta-section p {
+      font-size: 18px;
+      color: rgba(255, 255, 255, 0.55);
+      max-width: 500px;
+      margin: 0 auto 48px;
+      position: relative;
+      z-index: 2;
+      line-height: 1.7
+    }
+
+    .cta-btns {
+      position: relative;
+      z-index: 2;
+      display: flex;
+      gap: 16px;
+      justify-content: center;
+      flex-wrap: wrap
+    }
+
+    /* FOOTER */
+    footer {
+      background: rgba(0, 0, 0, 0.5);
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+      padding: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 24px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .footer-brand {
+      font-size: 14px;
+      font-weight: 700
+    }
+
+    .footer-brand span {
+      color: var(--red)
+    }
+
+    .footer-links {
+      display: flex;
+      gap: 24px
+    }
+
+    .footer-links a {
+      font-size: 13px;
+      color: rgba(255, 255, 255, 0.35);
+      text-decoration: none;
+      transition: color 0.2s
+    }
+
+    .footer-links a:hover {
+      color: rgba(255, 255, 255, 0.7)
+    }
+
+    .footer-copy {
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.3);
+      text-align: right
+    }
+
+    /* ANIMATIONS */
+    @keyframes fadeInUp {
+      from {
+        opacity: 0;
+        transform: translateY(30px)
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0)
+      }
+    }
+
+    @keyframes bounce {
+
+      0%,
+      100% {
+        transform: translateX(-50%) translateY(0)
+      }
+
+      50% {
+        transform: translateX(-50%) translateY(-10px)
+      }
+    }
+
+    @keyframes marquee {
+      from {
+        transform: translateX(0)
+      }
+
+      to {
+        transform: translateX(-50%)
+      }
+    }
+
+    @keyframes pulse-ring {
+      0% {
+        box-shadow: 0 0 0 0 rgba(230, 57, 70, 0.4)
+      }
+
+      70% {
+        box-shadow: 0 0 0 16px rgba(230, 57, 70, 0)
+      }
+
+      100% {
+        box-shadow: 0 0 0 0 rgba(230, 57, 70, 0)
+      }
+    }
+
+    @keyframes float {
+
+      0%,
+      100% {
+        transform: translateY(0)
+      }
+
+      50% {
+        transform: translateY(-14px)
+      }
+    }
+
+    @keyframes spin {
+      from {
+        transform: rotate(0deg)
+      }
+
+      to {
+        transform: rotate(360deg)
+      }
+    }
+
+    .reveal {
+      opacity: 0;
+      transform: translateY(40px);
+      transition: all 0.7s cubic-bezier(0.25, 0.46, 0.45, 0.94)
+    }
+
+    .reveal.visible {
+      opacity: 1;
+      transform: translateY(0)
+    }
+
+    .reveal-delay-1 {
+      transition-delay: 0.1s
+    }
+
+    .reveal-delay-2 {
+      transition-delay: 0.2s
+    }
+
+    .reveal-delay-3 {
+      transition-delay: 0.3s
+    }
+
+    /* TOAST */
+    #toast {
+      position: fixed;
+      bottom: 32px;
+      right: 32px;
+      z-index: 99999;
+      background: rgba(34, 197, 94, 0.15);
+      border: 1px solid rgba(34, 197, 94, 0.4);
+      color: #22c55e;
+      padding: 14px 24px;
+      border-radius: 12px;
+      font-size: 14px;
+      font-weight: 600;
+      transform: translateY(100px);
+      opacity: 0;
+      transition: all 0.4s;
+      backdrop-filter: blur(16px);
+    }
+
+    #toast.show {
+      transform: translateY(0);
+      opacity: 1
+    }
+
+    @media(max-width:768px) {
+      body {
+        cursor: auto
+      }
+
+      #cursor,
+      #cursor-ring {
+        display: none
+      }
+
+      nav {
+        padding: 14px 20px
+      }
+
+      .nav-links {
+        display: none
+      }
+
+      section {
+        padding: 70px 20px
+      }
+
+      .how-section {
+        padding: 70px 20px
+      }
+
+      .contact-grid {
+        grid-template-columns: 1fr
+      }
+
+      .showcase-content {
+        grid-template-columns: 1fr;
+        gap: 40px
+      }
+
+      footer {
+        padding: 32px 20px;
+        flex-direction: column;
+        text-align: center
+      }
+
+      .footer-copy {
+        text-align: center
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- CURSOR -->
+  <div id="cursor"></div>
+  <div id="cursor-ring"></div>
+  <div id="progress-bar"></div>
+  <canvas id="particles"></canvas>
+  <div id="toast">✅ ¡Mensaje enviado! Te contactaremos pronto.</div>
+
+  <!-- NAV -->
+  <nav id="navbar">
+    <div class="nav-logo">
+      <div class="nav-logo-icon">🏕️</div>
+      <div class="nav-brand">PC <span>Hotelería</span></div>
+    </div>
+    <div class="nav-links">
+      <a href="#features">Funciones</a>
+      <a href="#how">Proceso</a>
+      <a href="#showcase">Dashboard</a>
+      <a href="#faq">FAQ</a>
+      <a href="#contact">Contacto</a>
+    </div>
+    <a href="#contact" class="nav-cta">📩 Solicitar Demo</a>
+  </nav>
+
+  <!-- HERO -->
+  <div class="hero">
+    <div class="hero-bg"></div>
+    <div class="hero-grid"></div>
+    <div style="position:relative;z-index:2;display:flex;flex-direction:column;align-items:center">
+      <div class="hero-tag"><span>🔴</span> Aramark · Plataforma Digital 2026</div>
+      <h1 class="hero-title">
+        Control total<br><span class="gradient-text" id="typewriter"></span><span class="typewriter-cursor"></span>
+      </h1>
+      <p class="hero-sub">La plataforma más avanzada para gestión de habitaciones, check-in digital, informes ejecutivos
+        y control B2B en tiempo real para campamentos mineros.</p>
+      <div class="hero-btns">
+        <a href="#features" class="btn-primary">🚀 Ver funciones</a>
+        <a href="#contact" class="btn-outline">📩 Contactar</a>
+      </div>
+    </div>
+    <div class="scroll-indicator"><span>Scroll</span>
+      <div class="scroll-arrow"></div>
+    </div>
+  </div>
+
+  <!-- STATS -->
+  <div class="stats-section" id="stats">
+    <div class="stat-item reveal">
+      <span class="stat-number" id="stat-camas" data-target="2884">0</span>
+      <span class="stat-label">Camas operativas</span>
+    </div>
+    <div class="stat-item reveal reveal-delay-1">
+      <span class="stat-number" id="stat-ocupadas" data-target="690">0</span>
+      <span class="stat-label">Ocupadas ahora</span>
+    </div>
+    <div class="stat-item reveal reveal-delay-2">
+      <span class="stat-number" id="stat-empresas" data-target="19">0</span>
+      <span class="stat-label">Empresas activas</span>
+    </div>
+    <div class="stat-item reveal reveal-delay-3">
+      <span class="stat-number" id="stat-ocupacion" data-target="24" data-suffix="%">0</span>
+      <span class="stat-label">Ocupación global</span>
+    </div>
+  </div>
+
+  <!-- FEATURES con TABS -->
+  <div class="features-section" id="features">
+    <section>
+      <span class="section-tag reveal">✦ Funcionalidades clave</span>
+      <h2 class="section-title reveal">Todo lo que necesitas<br>en un solo sistema</h2>
+      <p class="section-desc reveal">Diseñado para la operación real de campamentos mineros en Chile.</p>
+
+      <div class="feature-tabs reveal">
+        <button class="tab-btn active" onclick="switchTab('core',this)">🏠 Core</button>
+        <button class="tab-btn" onclick="switchTab('seguridad',this)">🔒 Seguridad</button>
+        <button class="tab-btn" onclick="switchTab('reportes',this)">📊 Reportes</button>
+        <button class="tab-btn" onclick="switchTab('integraciones',this)">⚡ Operaciones</button>
+      </div>
+
+      <div id="pane-core" class="tab-pane active">
+        <div class="feature-card" data-tilt>
+          <div class="feature-icon" style="background:rgba(34,197,94,0.15)">🛏️</div>
+          <div class="feature-title">Control de Habitaciones</div>
+          <div class="feature-desc">Vista completa por edificio, pabellón y habitación. Cada cama en tiempo real:
+            disponible, ocupada, mantención o pre-asignada.</div>
+        </div>
+        <div class="feature-card" data-tilt>
+          <div class="feature-icon" style="background:rgba(6,182,212,0.15)">✅</div>
+          <div class="feature-title">Check-in / Check-out Digital</div>
+          <div class="feature-desc">Registro de entradas y salidas en segundos. Auto-confirmación de llegada y rotación
+            automática sin intervención manual.</div>
+        </div>
+        <div class="feature-card" data-tilt>
+          <div class="feature-icon" style="background:rgba(168,85,247,0.15)">📅</div>
+          <div class="feature-title">Pre-asignaciones</div>
+          <div class="feature-desc">Reserva camas antes de que llegue el trabajador. Transfiere o cancela
+            pre-asignaciones con total flexibilidad.</div>
+        </div>
+      </div>
+
+      <div id="pane-seguridad" class="tab-pane">
+        <div class="feature-card" data-tilt>
+          <div class="feature-icon" style="background:rgba(239,68,68,0.15)">🚫</div>
+          <div class="feature-title">Sin RUT duplicados</div>
+          <div class="feature-desc">El sistema bloquea automáticamente la carga de un RUT que ya tiene asignación activa
+            en el campamento.</div>
+        </div>
+        <div class="feature-card" data-tilt>
+          <div class="feature-icon" style="background:rgba(245,158,11,0.15)">👥</div>
+          <div class="feature-title">Segregación automática</div>
+          <div class="feature-desc">Nunca mezcla géneros ni empresas diferentes en la misma habitación. Reglas
+            configurables por contrato.</div>
+        </div>
+        <div class="feature-card" data-tilt>
+          <div class="feature-icon" style="background:rgba(99,102,241,0.15)">🔐</div>
+          <div class="feature-title">Control de accesos</div>
+          <div class="feature-desc">Usuarios con roles diferenciados. Logs de auditoría completos con timestamp, usuario
+            y acción realizada.</div>
+        </div>
+      </div>
+
+      <div id="pane-reportes" class="tab-pane">
+        <div class="feature-card" data-tilt>
+          <div class="feature-icon" style="background:rgba(230,57,70,0.15)">📊</div>
+          <div class="feature-title">Informe Ejecutivo PDF</div>
+          <div class="feature-desc">KPIs de ocupación por empresa, gráficos interactivos y descarga PDF con un click.
+            Datos en tiempo real.</div>
+        </div>
+        <div class="feature-card" data-tilt>
+          <div class="feature-icon" style="background:rgba(16,185,129,0.15)">📈</div>
+          <div class="feature-title">Estadísticas en Vivo</div>
+          <div class="feature-desc">Porcentaje de ocupación, confirmados vs sin confirmar, camas libres vs ocupadas —
+            todo actualizado automáticamente.</div>
+        </div>
+        <div class="feature-card" data-tilt>
+          <div class="feature-icon" style="background:rgba(6,182,212,0.15)">📥</div>
+          <div class="feature-title">Exportación Excel</div>
+          <div class="feature-desc">Descarga los datos filtrados en Excel para análisis adicional. Compatible con carga
+            masiva bidireccional.</div>
+        </div>
+      </div>
+
+      <div id="pane-integraciones" class="tab-pane">
+        <div class="feature-card" data-tilt>
+          <div class="feature-icon" style="background:rgba(245,158,11,0.15)">🏢</div>
+          <div class="feature-title">Gestión B2B Multi-empresa</div>
+          <div class="feature-desc">Sistema de cupos por gerencia y contrato. Portal de solicitudes para empresas
+            externas con flujo de aprobación.</div>
+        </div>
+        <div class="feature-card" data-tilt>
+          <div class="feature-icon" style="background:rgba(34,197,94,0.15)">📱</div>
+          <div class="feature-title">PWA — Funciona Offline</div>
+          <div class="feature-desc">Aplicación web progresiva instalable en cualquier dispositivo. Sincroniza
+            automáticamente al reconectarse.</div>
+        </div>
+        <div class="feature-card" data-tilt>
+          <div class="feature-icon" style="background:rgba(168,85,247,0.15)">🔄</div>
+          <div class="feature-title">Rotación de Turnos</div>
+          <div class="feature-desc">Gestión de salientes y entrantes. Estado "Saliente" visible durante el día,
+            archivado al día siguiente automáticamente.</div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- SHOWCASE -->
+  <div class="showcase" id="showcase">
+    <div class="showcase-bg"></div>
+    <div class="showcase-glow" id="glow"></div>
+    <div class="showcase-content">
+      <div class="showcase-text reveal">
+        <span class="section-tag">📊 Dashboard ejecutivo</span>
+        <h2 class="section-title">Toda la operación<br>de un vistazo</h2>
+        <p class="section-desc" style="margin-bottom:32px">El informe ejecutivo muestra en tiempo real el estado de cada
+          empresa, habitación y cama. Descárgalo como PDF con un solo click.</p>
+        <div class="benefits-list">
+          <div class="benefit-item">
+            <div class="benefit-icon" style="background:rgba(34,197,94,0.15)">🟢</div>
+            <div class="benefit-content">
+              <h4>Verde = Confirmado</h4>
+              <p>El trabajador confirmó su llegada. Verde significa todo en orden.</p>
+            </div>
+          </div>
+          <div class="benefit-item">
+            <div class="benefit-icon" style="background:rgba(239,68,68,0.15)">🔴</div>
+            <div class="benefit-content">
+              <h4>Rojo = Sin confirmar</h4>
+              <p>Cama ocupada pero el huésped aún no ha confirmado su presencia.</p>
+            </div>
+          </div>
+          <div class="benefit-item">
+            <div class="benefit-icon" style="background:rgba(168,85,247,0.15)">🟣</div>
+            <div class="benefit-content">
+              <h4>Morado = Pre-asignado</h4>
+              <p>Trabajador asignado que llegará en los próximos días.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="reveal reveal-delay-2">
+        <div class="mock-dashboard">
+          <div class="mock-header">
+            <div class="mock-dots">
+              <div class="mock-dot" style="background:#ef4444"></div>
+              <div class="mock-dot" style="background:#f59e0b"></div>
+              <div class="mock-dot" style="background:#22c55e"></div>
+            </div>
+            <div class="mock-title-bar"></div>
+            <span style="font-size:10px;color:rgba(255,255,255,0.3);white-space:nowrap">PC Hotelería · En vivo</span>
+          </div>
+          <div class="mock-kpis">
+            <div class="mock-kpi">
+              <div class="mock-kpi-val" style="color:#06b6d4">2.854</div>
+              <div class="mock-kpi-lbl">Total camas</div>
+            </div>
+            <div class="mock-kpi">
+              <div class="mock-kpi-val" style="color:#ef4444">616</div>
+              <div class="mock-kpi-lbl">Ocupadas</div>
+            </div>
+            <div class="mock-kpi">
+              <div class="mock-kpi-val" style="color:#22c55e">2.238</div>
+              <div class="mock-kpi-lbl">Libres</div>
+            </div>
+          </div>
+          <div
+            style="font-size:10px;color:rgba(255,255,255,0.4);margin-bottom:8px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px">
+            Ocupación por empresa</div>
+          <div class="mock-bar-row"><span class="mock-bar-lbl">Besalco</span>
+            <div class="mock-bar">
+              <div class="mock-bar-fill" style="width:78%;background:linear-gradient(90deg,#e63946,#b91c1c)"></div>
+            </div><span style="font-size:9px;color:rgba(255,255,255,0.5);margin-left:6px">78%</span>
+          </div>
+          <div class="mock-bar-row"><span class="mock-bar-lbl">Geobarra</span>
+            <div class="mock-bar">
+              <div class="mock-bar-fill" style="width:54%;background:linear-gradient(90deg,#f59e0b,#d97706)"></div>
+            </div><span style="font-size:9px;color:rgba(255,255,255,0.5);margin-left:6px">54%</span>
+          </div>
+          <div class="mock-bar-row"><span class="mock-bar-lbl">Anglo</span>
+            <div class="mock-bar">
+              <div class="mock-bar-fill" style="width:91%;background:linear-gradient(90deg,#22c55e,#16a34a)"></div>
+            </div><span style="font-size:9px;color:rgba(255,255,255,0.5);margin-left:6px">91%</span>
+          </div>
+          <div class="mock-bar-row"><span class="mock-bar-lbl">Aramark</span>
+            <div class="mock-bar">
+              <div class="mock-bar-fill" style="width:42%;background:linear-gradient(90deg,#06b6d4,#0891b2)"></div>
+            </div><span style="font-size:9px;color:rgba(255,255,255,0.5);margin-left:6px">42%</span>
+          </div>
+          <div class="mock-table">
+            <div class="mock-tr header"><span>Habitación</span><span>Empresa</span><span>Estado</span></div>
+            <div class="mock-tr"><span>4508</span><span>Besalco</span><span><span class="badge badge-green">✓
+                  Conf.</span></span></div>
+            <div class="mock-tr"><span>4509</span><span>Anglo</span><span><span class="badge badge-red">Sin
+                  conf.</span></span></div>
+            <div class="mock-tr"><span>4511</span><span>Geobarra</span><span><span
+                  class="badge badge-blue">Pre-asig.</span></span></div>
+          </div>
+          <div style="margin-top:12px;text-align:right">
+            <span id="fake-pdf-btn"
+              style="background:var(--red);color:#fff;border-radius:6px;padding:6px 14px;font-size:10px;font-weight:700;cursor:pointer">⬇
+              Descargar PDF</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- HOW IT WORKS -->
+  <div class="how-section" id="how">
+    <div style="position:relative;z-index:2;max-width:1100px;margin:0 auto;text-align:center">
+      <span class="section-tag reveal">⚙️ Proceso</span>
+      <h2 class="section-title reveal">¿Cómo funciona?</h2>
+      <p class="section-desc reveal" style="margin:16px auto 0;text-align:center">De la solicitud al check-in en 4 pasos
+        simples</p>
+    </div>
+    <div class="steps">
+      <div class="step reveal">
+        <div class="step-num">1</div>
+        <div class="step-title">Empresa solicita</div>
+        <div class="step-desc">Sube su nómina con RUT, empresa, gerencia y fechas via carga masiva Excel.</div>
+      </div>
+      <div class="step reveal reveal-delay-1">
+        <div class="step-num">2</div>
+        <div class="step-title">Sistema valida</div>
+        <div class="step-desc">Verifica RUT duplicado, cupos y reglas de segregación automáticamente.</div>
+      </div>
+      <div class="step reveal reveal-delay-2">
+        <div class="step-num">3</div>
+        <div class="step-title">Pre-asignación</div>
+        <div class="step-desc">Asigna cama disponible respetando las reglas del contrato. El trabajador queda como "por
+          llegar".</div>
+      </div>
+      <div class="step reveal reveal-delay-3">
+        <div class="step-num">4</div>
+        <div class="step-title">Check-in digital</div>
+        <div class="step-desc">Al llegar, se activa la asignación con un click. Check-out al finalizar el turno.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- COMPANIES -->
+  <div class="companies" id="empresas">
+    <p class="companies-label">Empresas que confían en PC Hotelería</p>
+    <div style="overflow:hidden;mask-image:linear-gradient(90deg,transparent,black 10%,black 90%,transparent)">
+      <div class="companies-track">
+        <span class="company-name">Besalco</span><span class="company-name">Anglo American</span><span
+          class="company-name">Geobarra Exins</span><span class="company-name">Aramark</span><span
+          class="company-name">Codelco</span><span class="company-name">Salfa</span><span
+          class="company-name">Astraline</span><span class="company-name">Pacific</span><span
+          class="company-name">Hualpen</span>
+        <span class="company-name">Besalco</span><span class="company-name">Anglo American</span><span
+          class="company-name">Geobarra Exins</span><span class="company-name">Aramark</span><span
+          class="company-name">Codelco</span><span class="company-name">Salfa</span><span
+          class="company-name">Astraline</span><span class="company-name">Pacific</span><span
+          class="company-name">Hualpen</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- FAQ -->
+  <div class="faq-section" id="faq">
+    <section>
+      <span class="section-tag reveal">❓ Preguntas frecuentes</span>
+      <h2 class="section-title reveal">Todo lo que necesitas saber</h2>
+      <div class="faq-list reveal">
+        <div class="faq-item">
+          <div class="faq-question" onclick="toggleFaq(this)"><span>¿Qué pasa si intento cargar un RUT que ya está
+              activo?</span><span class="faq-icon">+</span></div>
+          <div class="faq-answer">El sistema bloquea automáticamente la operación y muestra un aviso claro: "RUT
+            DUPLICADO — No se puede cargar". Solo cuando el trabajador hace check-out, el RUT queda disponible
+            nuevamente.</div>
+        </div>
+        <div class="faq-item">
+          <div class="faq-question" onclick="toggleFaq(this)"><span>¿Puede haber personas de diferentes empresas en la
+              misma habitación?</span><span class="faq-icon">+</span></div>
+          <div class="faq-answer">No. El sistema impide automáticamente mezclar personas de distintas empresas o géneros
+            diferentes en una misma habitación. Esta regla se aplica tanto en la carga manual como en la carga masiva.
+          </div>
+        </div>
+        <div class="faq-item">
+          <div class="faq-question" onclick="toggleFaq(this)"><span>¿Cómo funciona el informe PDF?</span><span
+              class="faq-icon">+</span></div>
+          <div class="faq-answer">Desde el panel de informe ejecutivo, haz click en "Descargar PDF". El sistema genera
+            un PDF con los datos del momento: ocupación, empresas, camas y estadísticas. No incluye información sensible
+            como contraseñas ni observaciones internas.</div>
+        </div>
+        <div class="faq-item">
+          <div class="faq-question" onclick="toggleFaq(this)"><span>¿Funciona sin conexión a internet?</span><span
+              class="faq-icon">+</span></div>
+          <div class="faq-answer">Sí. PC Hotelería es una PWA (Progressive Web App) que puede instalarse en cualquier
+            dispositivo. Funciona offline y sincroniza automáticamente cuando recupera la conexión.</div>
+        </div>
+        <div class="faq-item">
+          <div class="faq-question" onclick="toggleFaq(this)"><span>¿Cuántos registros se pueden cargar
+              masivamente?</span><span class="faq-icon">+</span></div>
+          <div class="faq-answer">El sistema soporta lotes de hasta 2.000 registros por archivo Excel. El procesamiento
+            es en tiempo real y demora aproximadamente 3 segundos por lote completo.</div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- CONTACT -->
+  <div class="contact-section" id="contact">
+    <div style="max-width:1100px;margin:0 auto;position:relative;z-index:2;text-align:center">
+      <span class="section-tag reveal">📩 Contacto directo</span>
+      <h2 class="section-title reveal">¿Listo para transformar<br>tu campamento?</h2>
+      <p class="section-desc reveal" style="margin:16px auto 0;text-align:center">Escríbenos o llámanos directamente. Te
+        respondemos al tiro.</p>
+    </div>
+    <div class="contact-grid">
+      <div class="contact-card reveal">
+        <h3 style="font-size:20px;font-weight:800;margin-bottom:32px">Información de contacto</h3>
+        <a class="contact-info-item" href="mailto:juan-1154@hotmail.es">
+          <div class="contact-icon" style="background:rgba(230,57,70,0.15)">📧</div>
+          <div class="contact-detail">
+            <h4>Correo electrónico</h4>
+            <p>juan-1154@hotmail.es</p>
+          </div>
+        </a>
+        <a class="contact-info-item" href="tel:+56940370153">
+          <div class="contact-icon" style="background:rgba(34,197,94,0.15)">📱</div>
+          <div class="contact-detail">
+            <h4>Teléfono / WhatsApp</h4>
+            <p>+569 4037 0153</p>
+          </div>
+        </a>
+        <a class="contact-info-item" href="index.html">
+          <div class="contact-icon" style="background:rgba(6,182,212,0.15)">🌐</div>
+          <div class="contact-detail">
+            <h4>Plataforma</h4>
+            <p>Ingresar al sistema →</p>
+          </div>
+        </a>
+        <div
+          style="margin-top:28px;padding:20px;background:rgba(230,57,70,0.08);border:1px solid rgba(230,57,70,0.2);border-radius:16px;font-size:13px;color:rgba(255,255,255,0.6);line-height:1.7">
+          <strong style="color:var(--red)">Aramark Chile</strong> · Gestión de Campamentos Mineros<br>
+          Disponible 24/7 para clientes activos
+        </div>
+      </div>
+      <div class="contact-card reveal reveal-delay-2">
+        <h3 style="font-size:20px;font-weight:800;margin-bottom:32px">Solicitar información</h3>
+        <form class="contact-form" onsubmit="handleForm(event)">
+          <div class="form-group">
+            <label class="form-label">Tu nombre</label>
+            <input type="text" class="form-input" placeholder="Juan Pérez" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Correo electrónico</label>
+            <input type="email" class="form-input" placeholder="correo@empresa.cl" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Empresa</label>
+            <input type="text" class="form-input" placeholder="Nombre de tu empresa" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Mensaje</label>
+            <textarea class="form-input" placeholder="¿Qué necesitas saber sobre PC Hotelería?"></textarea>
+          </div>
+          <button type="submit" class="form-submit">📩 Enviar mensaje</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- CTA -->
+  <div class="cta-section" id="cta">
+    <div class="cta-bg"></div>
+    <h2 class="reveal">¿Listo para<br>digitalizar tu campamento?</h2>
+    <p class="reveal reveal-delay-1">PC Hotelería ya gestiona miles de camas en faenas mineras activas. Únete a la
+      revolución digital del alojamiento industrial.</p>
+    <div class="cta-btns reveal reveal-delay-2">
+      <a href="index.html" class="btn-primary" style="animation:pulse-ring 2s infinite">🚀 Ingresar al sistema</a>
+      <a href="mailto:juan-1154@hotmail.es" class="btn-outline">📧 Enviar correo</a>
+    </div>
+  </div>
+
+  <!-- FOOTER -->
+  <footer>
+    <div class="footer-brand">PC <span>Hotelería</span> · Aramark Chile</div>
+    <div class="footer-links">
+      <a href="index.html">Sistema</a>
+      <a href="#features">Funciones</a>
+      <a href="mailto:juan-1154@hotmail.es">📧 Contacto</a>
+      <a href="tel:+56940370153">📱 +569 4037 0153</a>
+    </div>
+    <div class="footer-copy">© 2026 Aramark · Todos los derechos reservados</div>
+  </footer>
+
+  <script>
+    /* ── CURSOR ── */
+    const cursor = document.getElementById('cursor');
+    const ring = document.getElementById('cursor-ring');
+    let mx = 0, my = 0, rx = 0, ry = 0;
+    document.addEventListener('mousemove', e => {
+      mx = e.clientX; my = e.clientY;
+      cursor.style.left = mx + 'px'; cursor.style.top = my + 'px';
+    });
+    (function animRing() {
+      rx += (mx - rx) * 0.12; ry += (my - ry) * 0.12;
+      ring.style.left = rx + 'px'; ring.style.top = ry + 'px';
+      requestAnimationFrame(animRing);
+    })();
+    document.querySelectorAll('a,button,.feature-card,.faq-question,.contact-info-item,.step').forEach(el => {
+      el.addEventListener('mouseenter', () => {
+        cursor.style.transform = 'translate(-50%,-50%) scale(2.5)';
+        cursor.style.background = 'rgba(230,57,70,0.8)';
+        ring.style.opacity = '0.3';
+      });
+      el.addEventListener('mouseleave', () => {
+        cursor.style.transform = 'translate(-50%,-50%) scale(1)';
+        cursor.style.background = 'var(--cyan)';
+        ring.style.opacity = '1';
+      });
+    });
+
+    /* ── PROGRESS BAR ── */
+    const pb = document.getElementById('progress-bar');
+    window.addEventListener('scroll', () => {
+      const s = window.scrollY, h = document.body.scrollHeight - window.innerHeight;
+      pb.style.width = (s / h * 100) + '%';
+      const nav = document.getElementById('navbar');
+      nav.style.background = s > 50 ? 'rgba(10,22,40,0.98)' : 'rgba(10,22,40,0.85)';
+      nav.style.boxShadow = s > 50 ? '0 4px 24px rgba(0,0,0,0.4)' : 'none';
+    });
+
+    /* ── CANVAS PARTÍCULAS ── */
+    const canvas = document.getElementById('particles');
+    const ctx = canvas.getContext('2d');
+    let W = canvas.width = window.innerWidth, H = canvas.height = window.innerHeight;
+    window.addEventListener('resize', () => { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight });
+    const dots = Array.from({ length: 80 }, () => ({
+      x: Math.random() * W, y: Math.random() * H,
+      vx: (Math.random() - 0.5) * 0.3, vy: (Math.random() - 0.5) * 0.3,
+      r: Math.random() * 2 + 0.5,
+      a: Math.random()
+    }));
+    function drawParticles() {
+      ctx.clearRect(0, 0, W, H);
+      dots.forEach(d => {
+        d.x += d.vx; d.y += d.vy;
+        if (d.x < 0) d.x = W; if (d.x > W) d.x = 0;
+        if (d.y < 0) d.y = H; if (d.y > H) d.y = 0;
+        ctx.beginPath(); ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(6,182,212,${d.a * 0.6})`; ctx.fill();
+        dots.forEach(d2 => {
+          const dx = d.x - d2.x, dy = d.y - d2.y, dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < 120) {
+            ctx.beginPath(); ctx.moveTo(d.x, d.y); ctx.lineTo(d2.x, d2.y);
+            ctx.strokeStyle = `rgba(6,182,212,${(1 - dist / 120) * 0.08})`;
+            ctx.lineWidth = 0.5; ctx.stroke();
+          }
+        });
+      });
+      requestAnimationFrame(drawParticles);
+    }
+    drawParticles();
+
+    /* ── TYPEWRITER HERO ── */
+    const words = ['del campamento', 'de habitaciones', 'de check-in', 'B2B multi-empresa'];
+    let wi = 0, ci = 0, deleting = false, tw = document.getElementById('typewriter');
+    function typeLoop() {
+      const word = words[wi];
+      if (!deleting) {
+        tw.textContent = word.slice(0, ++ci);
+        if (ci === word.length) { deleting = true; setTimeout(typeLoop, 1800); return }
+        setTimeout(typeLoop, 80);
+      } else {
+        tw.textContent = word.slice(0, --ci);
+        if (ci === 0) { deleting = false; wi = (wi + 1) % words.length; setTimeout(typeLoop, 400); return }
+        setTimeout(typeLoop, 40);
+      }
+    }
+    setTimeout(typeLoop, 1200);
+
+    /* ── SCROLL REVEAL ── */
+    const obs = new IntersectionObserver(entries => entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible') }), { threshold: 0.1 });
+    document.querySelectorAll('.reveal').forEach(el => obs.observe(el));
+
+    /* ── CONTADORES ── */
+    const cObs = new IntersectionObserver(entries => {
+      entries.forEach(e => {
+        if (!e.isIntersecting) return;
+        const el = e.target, target = parseInt(el.dataset.target);
+        const suffix = el.dataset.suffix || '';
+        const dur = 2000, step = target / (dur / 16);
+        let cur = 0;
+        const t = setInterval(() => {
+          cur += step; if (cur >= target) { cur = target; clearInterval(t) }
+          el.textContent = Math.floor(cur).toLocaleString('es-CL') + suffix;
+        }, 16);
+        cObs.unobserve(el);
+      });
+    }, { threshold: 0.5 });
+    document.querySelectorAll('[data-target]').forEach(el => cObs.observe(el));
+
+    /* ── TABS ── */
+    function switchTab(id, btn) {
+      document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.getElementById('pane-' + id).classList.add('active');
+      btn.classList.add('active');
+    }
+
+    /* ── TILT EN FEATURE CARDS ── */
+    document.querySelectorAll('[data-tilt]').forEach(card => {
+      card.addEventListener('mousemove', e => {
+        const r = card.getBoundingClientRect();
+        const x = (e.clientX - r.left) / r.width - 0.5;
+        const y = (e.clientY - r.top) / r.height - 0.5;
+        card.style.transform = `perspective(600px) rotateY(${x * 12}deg) rotateX(${-y * 12}deg) translateY(-6px)`;
+        card.style.boxShadow = `${-x * 20}px ${-y * 20}px 40px rgba(0,0,0,0.3)`;
+      });
+      card.addEventListener('mouseleave', () => {
+        card.style.transform = ''; card.style.boxShadow = '';
+      });
+    });
+
+    /* ── PARALLAX GLOW ── */
+    const showcase = document.querySelector('.showcase');
+    const glow = document.getElementById('glow');
+    if (showcase && glow) {
+      showcase.addEventListener('mousemove', e => {
+        const r = showcase.getBoundingClientRect();
+        glow.style.left = (e.clientX - r.left - 300) + 'px';
+        glow.style.top = (e.clientY - r.top - 300) + 'px';
+      });
+    }
+
+    /* ── FAQ ── */
+    function toggleFaq(q) {
+      const item = q.parentElement;
+      const wasOpen = item.classList.contains('open');
+      document.querySelectorAll('.faq-item').forEach(i => i.classList.remove('open'));
+      if (!wasOpen) item.classList.add('open');
+    }
+
+    /* ── FORM ── */
+    function handleForm(e) {
+      e.preventDefault();
+      const toast = document.getElementById('toast');
+      toast.classList.add('show');
+      e.target.reset();
+      setTimeout(() => toast.classList.remove('show'), 4000);
+    }
+
+    /* ── FAKE PDF BTN ── */
+    const fpdf = document.getElementById('fake-pdf-btn');
+    if (fpdf) fpdf.addEventListener('click', () => {
+      fpdf.textContent = '⏳ Generando...';
+      setTimeout(() => { fpdf.textContent = '✅ ¡Listo!'; setTimeout(() => { fpdf.textContent = '⬇ Descargar PDF' }, 2000) }, 1000);
+    });
+  </script>
+
+  <!-- ── SUPABASE LIVE STATS ───────────────────────────────────────────────── -->
+  <script type="module">
+    import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/+esm';
+
+    const SB_URL = 'https://pnkajjduvadcxealodcp.supabase.co';
+    const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBua2FqamR1dmFkY3hlYWxvZGNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUyNDQ1MzIsImV4cCI6MjA5MDgyMDUzMn0.NsL16NP16MVEwTSN-1ggAtwzTA-2tDPF7Ndbcsdl-Ro';
+    const sb = createClient(SB_URL, SB_KEY);
+
+    async function fetchPage(table, select, filter, page = 0, pageSize = 1000) {
+      let q = sb.from(table).select(select).range(page * pageSize, (page + 1) * pageSize - 1);
+      if (filter) q = filter(q);
+      const { data, error } = await q;
+      if (error) throw error;
+      return data || [];
+    }
+
+    async function fetchAll(table, select, filter) {
+      let all = [], page = 0, chunk;
+      do {
+        chunk = await fetchPage(table, select, filter, page++);
+        all = all.concat(chunk);
+      } while (chunk.length === 1000);
+      return all;
+    }
+
+    function animateTo(el, target, suffix = '') {
+      const from = parseInt(el.dataset.target) || 0;
+      const dur = 1600, steps = 60;
+      let step = 0;
+      const inc = (target - from) / steps;
+      const t = setInterval(() => {
+        step++;
+        const val = Math.round(from + inc * step);
+        el.textContent = val.toLocaleString('es-CL') + suffix;
+        el.dataset.target = target; // actualiza para futuros counters
+        if (step >= steps) {
+          el.textContent = target.toLocaleString('es-CL') + suffix;
+          clearInterval(t);
+        }
+      }, dur / steps);
+    }
+
+    async function loadLiveStats() {
+      try {
+        const [camasTodas, asigActivas, empData] = await Promise.all([
+          fetchAll('v2_camas', 'id_cama, estado'),
+          fetchAll('v2_asignaciones', 'id_cama, empresa_id', q => q.is('fecha_checkout', null)),
+          sb.from('v2_empresas').select('id').limit(200),
+        ]);
+
+        // Excluir deshabilitadas (igual que el Informe Ejecutivo)
+        const camas = camasTodas.filter(c =>
+          c.estado !== 'Deshabilitada' && c.estado !== 'deshabilitada');
+
+        const totalCamas = camas.length;
+        const asigSet = new Set(asigActivas.map(a => String(a.id_cama)));
+        const ocupadas = camas.filter(c => asigSet.has(String(c.id_cama))).length;
+        const pctOcup = totalCamas > 0 ? Math.round(ocupadas / totalCamas * 100) : 0;
+
+        // Contar empresas con al menos una asignación activa
+        const empActivas = new Set(asigActivas.map(a => String(a.empresa_id))).size;
+
+        // Actualizar contadores con animación
+        const elCamas = document.getElementById('stat-camas');
+        const elOcupadas = document.getElementById('stat-ocupadas');
+        const elEmpresas = document.getElementById('stat-empresas');
+        const elOcupacion = document.getElementById('stat-ocupacion');
+
+        if (elCamas) animateTo(elCamas, totalCamas);
+        if (elOcupadas) animateTo(elOcupadas, ocupadas);
+        if (elEmpresas) animateTo(elEmpresas, empActivas);
+        if (elOcupacion) animateTo(elOcupacion, pctOcup, '%');
+
+        // Actualizar también el mock dashboard
+        const mockTotal = document.querySelector('.mock-kpi-val[style*="06b6d4"]');
+        const mockOcup = document.querySelector('.mock-kpi-val[style*="ef4444"]');
+        const mockLibres = document.querySelector('.mock-kpi-val[style*="22c55e"]');
+        if (mockTotal) mockTotal.textContent = totalCamas.toLocaleString('es-CL');
+        if (mockOcup) mockOcup.textContent = ocupadas.toLocaleString('es-CL');
+        if (mockLibres) mockLibres.textContent = (totalCamas - ocupadas).toLocaleString('es-CL');
+
+        console.log('[Landing] Stats en vivo →', { totalCamas, ocupadas, empActivas, pctOcup });
+      } catch (e) {
+        console.warn('[Landing] No se pudo cargar stats de Supabase:', e.message);
+        // Si falla, los valores hardcodeados del HTML quedan como respaldo
+      }
+    }
+
+    // Cargar al iniciar la página
+    loadLiveStats();
+    // Refrescar cada 5 minutos
+    setInterval(loadLiveStats, 5 * 60 * 1000);
+  </script>
+</body>
+
+</html>

@@ -7,17 +7,20 @@ import { supabase } from '../../supabaseClient.js';
 
 // ── Tipos de distribución ─────────────────────────────────────────────────────
 const TIPOS = {
-    noche:   { label: '🌙 Turno Noche', color: '#4338ca', bg: '#eef2ff',
-               desc: 'Camas de turno noche. Cuentan como camas noche en el dashboard.' },
-    '4x3':   { label: '🔄 Turno 4×3',  color: '#0891b2', bg: '#ecfeff',
-               desc: 'Rotación 4 días trabajo / 3 días descanso.' },
-    reserva: { label: '📌 Reservas',    color: '#7c3aed', bg: '#f5f3ff',
-               desc: 'Camas reservadas. Se cuentan como ocupadas en el sistema.' },
-    anglo:   { label: '🤝 Anglo',       color: '#d97706', bg: '#fffbeb',
-               desc: 'Acuerdo Anglo: 1 cama cuenta como día + 1 cama como noche por habitación. Se asigna aunque esté ocupada.' },
-    empresa: { label: '🏢 Empresa',     color: '#059669', bg: '#ecfdf5',
-               desc: 'Marca pabellones/pisos/hab para una empresa específica. Se asigna aunque estén ocupadas.' },
+    noche:       { label: '🌙 Turno Noche',    color: '#4338ca', bg: '#eef2ff',
+                   desc: 'Camas de turno noche EECC. Cuentan como camas noche en el dashboard.' },
+    colaborador: { label: '👥 Colaboradores',  color: '#0891b2', bg: '#ecfeff',
+                   desc: 'Camas de colaboradores (ej: Pabellón 7). Ambas camas cuentan como noche.' },
+    '4x3':       { label: '🔄 Turno 4×3',      color: '#7c3aed', bg: '#f5f3ff',
+                   desc: 'Rotación 4 días trabajo / 3 días descanso.' },
+    reserva:     { label: '📌 Reservas',        color: '#6d28d9', bg: '#f5f3ff',
+                   desc: 'Camas reservadas. Se cuentan como ocupadas en el sistema.' },
+    anglo:       { label: '🤝 Anglo',           color: '#d97706', bg: '#fffbeb',
+                   desc: 'Acuerdo Anglo: 1 cama cuenta como día + 1 cama como noche por habitación. Se asigna aunque esté ocupada.' },
+    empresa:     { label: '🏢 Empresa',         color: '#059669', bg: '#ecfdf5',
+                   desc: 'Marca pabellones/pisos/hab para una empresa específica. Se asigna aunque estén ocupadas.' },
 };
+
 
 // ── Estado del módulo ─────────────────────────────────────────────────────────
 let _tab            = 'noche';
@@ -279,18 +282,19 @@ function renderKpis() {
     const el = document.getElementById('dist-kpis');
     if (!el) return;
     const noche   = _distribucion.filter(d => d.tipo === 'noche').length;
+    const colab   = _distribucion.filter(d => d.tipo === 'colaborador').length;
     const x4      = _distribucion.filter(d => d.tipo === '4x3').length;
     const reserva = _distribucion.filter(d => d.tipo === 'reserva').length;
     const anglo   = _distribucion.filter(d => d.tipo === 'anglo').length;
     const empresa = _distribucion.filter(d => d.tipo === 'empresa').length;
-    // Anglo: la mitad cuenta como noche, la otra mitad como día
     const angloNoche = Math.floor(anglo / 2);
     el.innerHTML = [
-        { icon: '🌙', lbl: 'Camas Noche',        val: noche,              c: '#4338ca' },
-        { icon: '🔄', lbl: 'Turno 4×3',           val: x4,                c: '#0891b2' },
-        { icon: '📌', lbl: 'Reservas',             val: reserva,            c: '#7c3aed' },
-        { icon: '🤝', lbl: 'Anglo (noche)',        val: `${angloNoche}/${anglo}`, c: '#d97706' },
-        { icon: '🏢', lbl: 'Camas Empresa',        val: empresa,            c: '#059669' },
+        { icon: '🌙', lbl: 'Noche EECC',         val: noche,              c: '#4338ca' },
+        { icon: '👥', lbl: 'Colaboradores',        val: colab,              c: '#0891b2' },
+        { icon: '🔄', lbl: 'Turno 4×3',            val: x4,                c: '#7c3aed' },
+        { icon: '📌', lbl: 'Reservas',              val: reserva,            c: '#6d28d9' },
+        { icon: '🤝', lbl: 'Anglo (noche)',         val: `${angloNoche}/${anglo}`, c: '#d97706' },
+        { icon: '🏢', lbl: 'Camas Empresa',         val: empresa,            c: '#059669' },
     ].map(k => `
         <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:14px;padding:14px;border-top:3px solid ${k.c}">
           <div style="font-size:18px;margin-bottom:4px">${k.icon}</div>
@@ -298,6 +302,7 @@ function renderKpis() {
           <div style="font-size:10px;color:var(--text-muted);font-weight:700;text-transform:uppercase;letter-spacing:.4px">${k.lbl}</div>
         </div>`).join('');
 }
+
 
 // ── Panel de camas de la habitación seleccionada ──────────────────────────────
 async function renderCamasPanel(habId) {

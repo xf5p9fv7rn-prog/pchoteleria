@@ -4,6 +4,7 @@
  */
 import { supabase } from '../../supabaseClient.js';
 import { logAudit } from '../v2-audit.js';
+import { showToast } from '../../utils.js';
 
 let _datos      = [];   // asignaciones activas agrupadas
 let _solicPend  = [];   // solicitudes aceptadas SIN asignación formal
@@ -12,11 +13,101 @@ let _filtro     = 'todos'; // 'todos' | 'confirmados' | 'pendientes'
 let _busqueda   = '';
 let _empresasMap = {};  // nombre_lower → { id, nombre } — relleno en cargarDatos
 
+// ── Auto Check-Out: el día antes de la fecha de salida ────────────────────────
+async function autoCheckoutVencidos() {
+    try {
+        const hoy    = new Date().toISOString().split('T')[0];
+        const manana = new Date(Date.now() + 86400000).toISOString().split('T')[0];
+
+        // ── 1. Asignaciones reales vencidas ──────────────────────────────────
+        const { data: vencidas, error } = await supabase
+            .from('v2_asignaciones')
+            .select('id, id_cama, nombre_huesped, rut_huesped, fecha_salida_programada')
+            .is('fecha_checkout', null)
+            .lte('fecha_salida_programada', manana)   // salida ≤ mañana
+            .neq('estado_asignacion', 'pre_asignado');
+
+        const ahora   = new Date().toISOString();
+        let total = 0;
+
+        if (!error && vencidas?.length) {
+            const ids     = vencidas.map(a => a.id);
+            const camaIds = [...new Set(vencidas.map(a => a.id_cama).filter(Boolean))];
+            const ruts    = [...new Set(vencidas.map(a => (a.rut_huesped||'').replace(/[\.\-]/g,'').toUpperCase()).filter(Boolean))];
+
+            // Checkout masivo en lotes de 50
+            for (let i = 0; i < ids.length; i += 50) {
+                await supabase.from('v2_asignaciones')
+                    .update({ fecha_checkout: ahora, estado_asignacion: 'checkout_auto' })
+                    .in('id', ids.slice(i, i + 50));
+            }
+            // Liberar camas
+            for (let i = 0; i < camaIds.length; i += 50) {
+                await supabase.from('v2_camas')
+                    .update({ estado: 'Disponible' })
+                    .in('id_cama', camaIds.slice(i, i + 50))
+                    .neq('estado', 'Deshabilitada');
+            }
+            // ✅ Marcar las solicitudes como 'finalizado' para que no vuelvan como sintéticos
+            if (ruts.length) {
+                for (let i = 0; i < ruts.length; i += 50) {
+                    await supabase.from('v2_solicitudes_b2b')
+                        .update({ status: 'finalizado' })
+                        .in('rut_trabajador', ruts.slice(i, i + 50).map(r => {
+                            // Tanto con guión como sin él
+                            return r;
+                        }))
+                        .in('status', ['aceptada', 'aceptada_asignada']);
+                }
+            }
+            total += vencidas.length;
+        }
+
+        // ── 2. Solicitudes SIN asignación real cuya fecha ya venció ──────────
+        const { data: solsVencidas } = await supabase
+            .from('v2_solicitudes_b2b')
+            .select('id, rut_trabajador, nombre_trabajador, fecha_salida')
+            .in('status', ['aceptada', 'aceptada_asignada'])
+            .lte('fecha_salida', manana)   // salida ≤ mañana
+            .not('fecha_salida', 'is', null);
+
+        if (solsVencidas?.length) {
+            const solIds = solsVencidas.map(s => s.id);
+            for (let i = 0; i < solIds.length; i += 50) {
+                await supabase.from('v2_solicitudes_b2b')
+                    .update({ status: 'finalizado' })
+                    .in('id', solIds.slice(i, i + 50));
+            }
+            total += solsVencidas.length;
+            console.log(`[AutoCheckout] 📋 ${solsVencidas.length} solicitudes sin asignación → finalizadas`);
+        }
+
+        if (total > 0) {
+            await logAudit('AUTO_CHECKOUT',
+                `Check-out automático: ${total} trabajadores (salida ≤ ${manana})`,
+                { cantidad: total, fecha_limite: manana }
+            );
+        }
+
+        console.log(`[AutoCheckout] ✅ ${total} trabajadores procesados`);
+        return total;
+    } catch(e) {
+        console.warn('[AutoCheckout] Error:', e.message);
+        return 0;
+    }
+}
+
 // ── Cargar datos (paginado — sin límite de 1000) ──────────────────────────────
 async function cargarDatos() {
     const hoy  = new Date().toISOString().split('T')[0];
     const PAGE = 1000;
     let all = [], page = 0;
+
+    // ⭐ Auto-checkout antes de cargar: el día antes de la salida programada
+    const autoN = await autoCheckoutVencidos();
+    if (autoN > 0) {
+        showToast(`🚨 Check-out automático: ${autoN} trabajador${autoN !== 1 ? 'es' : ''} fueron dados de baja (fecha de salida alcanzada)`, 'warn', 7000);
+    }
 
     while (true) {
         const { data, error } = await supabase
@@ -58,21 +149,25 @@ async function cargarDatos() {
     try {
         // rutsConAsig: solo del turno activo. Trabajadores con asignación antigua/expirada
         // aparecerán en _solicPend como sintéticos y serán actualizados por _autoCrearSilencioso
-        const rutsConAsig = new Set(
-            all.map(a => (a.rut_huesped || '').replace(/[\.-]/g,'').toUpperCase())
-        );
+        // ⚠️ Normalizar igual que el motor: quitar puntos, guiones Y espacios
+        const _normR = r => String(r||'').replace(/[.\-\s]/g,'').toUpperCase();
+        const rutsConAsig = new Set(all.map(a => _normR(a.rut_huesped)));
 
         const { data: sols } = await supabase
             .from('v2_solicitudes_b2b')
             .select('id, nombre_trabajador, rut_trabajador, empresa, hab_solicitada, fecha_llegada, fecha_salida, status')
-            .in('status', ['aceptada', 'aceptada_asignada']);
-            // Sin filtro de fecha_salida — se filtra por RUT vs v2_asignaciones activas
+            .in('status', ['aceptada', 'aceptada_asignada', 'pendiente']);
+            // Incluye 'pendiente': trabajadores cargados que el motor no pudo asignar
+            // (hab. solicitada llena) → deben aparecer en Asistencia como SIN CAMA
 
         // Solo los que NO tienen asignación formal en el turno activo
         _solicPend = (sols || []).filter(s => {
-            const rutS = (s.rut_trabajador || '').replace(/[\.-]/g,'').toUpperCase();
-            if (rutsConAsig.has(rutS)) return false; // ya tiene asignación activa en turno actual
-            // NO filtrar por fecha_salida — si fue aceptada, debe mostrarse siempre
+            const rutS = _normR(s.rut_trabajador);
+            if (rutsConAsig.has(rutS)) return false; // ya tiene asignación activa
+            // Ocultar si la fecha de salida ya pasó
+            if (s.fecha_salida && s.fecha_salida < hoy) return false;
+            // Para 'pendiente': ocultar si no tiene fecha_llegada o ya venció
+            if (s.status === 'pendiente' && s.fecha_llegada && s.fecha_llegada < hoy) return false;
             return true;
         });
 
@@ -82,7 +177,7 @@ async function cargarDatos() {
             return {
                 id:                      'sol_' + s.id,
                 _esSolicitud:            true,
-                rut_huesped:             (s.rut_trabajador || '').replace(/[\.-]/g,'').toUpperCase(),
+                rut_huesped:             _normR(s.rut_trabajador),
                 nombre_huesped:          s.nombre_trabajador || '—',
                 huesped_confirmo:        false,
                 fecha_checkin:           s.fecha_llegada || null,
@@ -98,10 +193,37 @@ async function cargarDatos() {
             };
         });
 
+        // ── PARCHE: asignaciones sin empresa_id → rescatar empresa desde solicitudes ──
+        // Construir mapa rut_norm → solicitud para buscar la empresa por texto
+        const rutASolicitud = {};
+        (sols || []).forEach(s => {
+            const k = _normR(s.rut_trabajador);
+            if (k) rutASolicitud[k] = s;
+        });
+
+        // Para cada asignación sin empresa, intentar rescatarla desde la solicitud
+        all.forEach(a => {
+            if (a.v2_empresas?.id) return; // ya tiene empresa → nada que hacer
+            const k = _normR(a.rut_huesped);
+            const sol = rutASolicitud[k];
+            if (!sol) return;
+            const empReal = matchEmpresa(sol.empresa);
+            if (empReal) {
+                a.v2_empresas = { id: empReal.id, nombre: empReal.nombre };
+                console.log(`[Asistencia] 🔧 Empresa rescatada: ${a.nombre_huesped} → ${empReal.nombre}`);
+            } else {
+                // Al menos usar el nombre de texto para que no quede "Sin empresa"
+                a.v2_empresas = {
+                    id: 'sol_emp_' + (sol.empresa||'').toLowerCase().replace(/[^a-z0-9]/g,'_'),
+                    nombre: sol.empresa || '— Sin empresa —'
+                };
+            }
+        });
+
         // Combinar y deduplicar por RUT — siempre priorizar asignación real sobre sintética
-        const vistos = new Set(all.map(a => (a.rut_huesped || '').replace(/[\.\-\s]/g,'').toUpperCase()));
+        const vistos = new Set(all.map(a => _normR(a.rut_huesped)));
         const sinteticosFiltrados = sinteticos.filter(s => {
-            const rut = (s.rut_huesped || '').replace(/[\.\-\s]/g,'').toUpperCase();
+            const rut = _normR(s.rut_huesped);
             if (vistos.has(rut)) return false; // ya tiene asignación real → no duplicar
             vistos.add(rut);
             return true;
@@ -109,10 +231,8 @@ async function cargarDatos() {
         _datos = all.concat(sinteticosFiltrados);
         console.log(`[Asistencia] 📋 ${_solicPend.length} solicitudes sin asignación | ${all.length} asignaciones activas`);
 
-        // ── Auto-crear asignaciones en background — solo 1 vez cada 10 min ─────
-        const lastRun = parseInt(sessionStorage.getItem('_asAutoCrearTs') || '0');
-        const minsPasados = (Date.now() - lastRun) / 60000;
-        if (_solicPend.length > 0 && minsPasados > 10 && !window._asAutoCreandoEnCurso) {
+        // ── Auto-crear asignaciones en background (sin throttle) ────────────────
+        if (_solicPend.length > 0 && !window._asAutoCreandoEnCurso) {
             window._asAutoCreandoEnCurso = true;
             _autoCrearSilencioso(_solicPend).finally(() => {
                 window._asAutoCreandoEnCurso = false;
@@ -167,29 +287,24 @@ async function _autoCrearSilencioso(pendientes) {
                     if (camas?.length) camaId = camas[0].id_cama;
                 }
             }
-            // Buscar cualquier cama libre en el campamento
+            // ⛔ SIN FALLBACK: si la habitación solicitada no tiene camas libres,
+            //    el trabajador queda como SIN CAMA. NO se asigna a otra habitación.
             if (!camaId) {
-                const { data: camasLibres } = await supabase
-                    .from('v2_camas').select('id_cama').eq('estado', 'Disponible').limit(1);
-                if (camasLibres?.length) camaId = camasLibres[0].id_cama;
+                if (!sol.hab_solicitada) {
+                    console.warn(`[AutoCrear] ⚠️ ${sol.nombre_trabajador}: sin hab_solicitada en el Excel → omitido`);
+                } else {
+                    console.warn(`[AutoCrear] ⚠️ ${sol.nombre_trabajador}: hab. ${sol.hab_solicitada} sin camas libres → SIN CAMA`);
+                }
+                continue;  // NO asignar a otra habitación
             }
-            // Si campamento lleno: usar cualquier cama (pre_asignado puede coexistir con activa)
-            if (!camaId) {
-                const { data: cualquierCama } = await supabase
-                    .from('v2_camas').select('id_cama')
-                    .not('estado', 'eq', 'Deshabilitada')
-                    .not('estado', 'eq', 'Mantencion')
-                    .limit(1);
-                if (cualquierCama?.length) camaId = cualquierCama[0].id_cama;
-            }
-            if (!camaId) { console.warn(`[AutoCrear] No hay camas en el campamento`); continue; }
+
 
             // Buscar empresa_id usando match difuso (mismo que usa cargarDatos)
             const empReal = _matchEmpresa(sol.empresa);
             const empresaId = empReal?.id || null;
             if (!empresaId) console.warn(`[AutoCrear] ⚠️ No se encontró empresa para "${sol.empresa}"`);
 
-            const rutNorm = String(sol.rut_trabajador || '').replace(/\./g,'').toUpperCase().slice(0,12);
+            const rutNorm = String(sol.rut_trabajador || '').replace(/[.\-\s]/g,'').toUpperCase().slice(0,12);
             const estadoAsig = sol.fecha_llegada && sol.fecha_llegada > hoy ? 'pre_asignado' : 'activa';
 
             // Verificar si ya tiene asignación abierta (turno anterior no cerrado)
@@ -297,7 +412,14 @@ function agruparPorEmpresa(lista) {
 
 // ── Filtrar datos ─────────────────────────────────────────────────────────────
 function filtrarDatos() {
+    const hoy = new Date().toISOString().split('T')[0];
     let lista = _datos;
+    // Excluir trabajadores cuya fecha de salida ya pasó y no tienen checkout
+    lista = lista.filter(a => {
+        const sal = a.fecha_salida_programada;
+        if (sal && sal < hoy) return false;  // salida vencida → desaparece
+        return true;
+    });
     if (_filtro === 'confirmados') lista = lista.filter(a => a.huesped_confirmo);
     if (_filtro === 'pendientes')  lista = lista.filter(a => !a.huesped_confirmo);
     if (_busqueda) {
@@ -754,7 +876,7 @@ export async function renderV2Asistencia(container) {
                     huesped_confirmo: false, autorizado_checkin: false,
                 });
                 if (errI) throw new Error(errI.message);
-                await supabase.from('v2_camas').update({ estado: estadoAsig === 'activa' ? 'Ocupada' : 'Disponible' }).eq('id_cama', camaId);
+                await supabase.from('v2_camas').update({ estado: estadoAsig === 'activa' ? 'Ocupada' : 'Disponible' }).eq('id_cama', camaId).neq('estado', 'Deshabilitada');
                 ok++;
             } catch(e) {
                 errores.push(`${sol.nombre_trabajador}: ${e.message}`);

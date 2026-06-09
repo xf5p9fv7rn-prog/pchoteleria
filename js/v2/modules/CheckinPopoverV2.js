@@ -172,11 +172,11 @@ async function renderCheckout(pop, idCama, onSuccess) {
 
     // ══ SECCIÓN PRE-ASIGNADOS (ARRIBA) ══════════════════════════════════════
     const todosPre = [
-        ...preAsig.map(a => ({ tipo:'asig', nombre: a.nombre_huesped, rut: a.rut_huesped,
+        ...preAsig.map(a => ({ tipo:'asig', id: a.id, nombre: a.nombre_huesped, rut: a.rut_huesped,
             empresa: a.v2_empresas?.nombre, turno: a.v2_empresas?.turno,
             gerencia: a.v2_empresas?.v2_gerencias?.nombre, contrato: a.numero_contrato,
             llegada: a.fecha_checkin, salida: a.fecha_salida_programada })),
-        ...solicFiltrada.map(s => ({ tipo:'solic', nombre: s.nombre_trabajador, rut: s.rut_trabajador,
+        ...solicFiltrada.map(s => ({ tipo:'solic', id: s.id, nombre: s.nombre_trabajador, rut: s.rut_trabajador,
             empresa: s.empresa, llegada: s.fecha_llegada, salida: s.fecha_salida }))
     ];
 
@@ -187,7 +187,7 @@ async function renderCheckout(pop, idCama, onSuccess) {
             <span style="background:#7c3aed;color:#fff;border-radius:8px;padding:3px 10px;font-size:10px;font-weight:900;letter-spacing:.6px">PRE-ASIGNADOS</span>
             <span style="font-size:10px;color:#7c3aed;font-weight:700">📅 Por llegar · ${todosPre.length} persona(s)</span>
           </div>
-          ${todosPre.map(p => `
+          ${todosPre.map((p, pidx) => `
           <div style="background:#fff;border:1px solid #ddd6fe;border-radius:10px;padding:11px;margin-bottom:8px">
             <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:6px">
               <div style="font-size:14px;font-weight:800;color:#4c1d95">${p.nombre || '—'}</div>
@@ -202,6 +202,54 @@ async function renderCheckout(pop, idCama, onSuccess) {
               ${field('Llega', dd(p.llegada))}
               ${field('Sale', dd(p.salida))}
             </div>
+            <!-- Acciones para este pre-asignado -->
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px;margin-top:10px">
+              <button data-pre-action="delete" data-pre-idx="${pidx}"
+                style="background:#ef4444;color:white;border:none;border-radius:8px;padding:7px 4px;font-size:11px;font-weight:700;cursor:pointer">
+                🗑️ Eliminar
+              </button>
+              ${p.tipo==='asig' ? `
+              <button data-pre-action="transfer" data-pre-idx="${pidx}"
+                style="background:#6366f1;color:white;border:none;border-radius:8px;padding:7px 4px;font-size:11px;font-weight:700;cursor:pointer">
+                🔀 Transferir
+              </button>` : '<div></div>'}
+              <button data-pre-action="cambiar" data-pre-idx="${pidx}"
+                style="background:linear-gradient(135deg,#0ea5e9,#0284c7);color:white;border:none;border-radius:8px;padding:7px 4px;font-size:11px;font-weight:700;cursor:pointer">
+                👤 Cambiar
+              </button>
+            </div>
+            ${p.tipo==='asig' ? `
+            <div id="pre-tr-panel-${pidx}" style="display:none;margin-top:8px;background:#f5f3ff;border:1px solid #c4b5fd;border-radius:10px;padding:10px">
+              <input type="text" placeholder="Nº habitación destino…" id="pre-tr-inp-${pidx}"
+                style="width:100%;padding:8px 12px;border-radius:8px;border:1.5px solid #a78bfa;font-size:13px;outline:none;box-sizing:border-box;margin-bottom:6px">
+              <div id="pre-tr-res-${pidx}" style="font-size:11px;color:#6b7280;min-height:14px;margin-bottom:6px"></div>
+              <select id="pre-tr-sel-${pidx}" style="display:none;width:100%;padding:8px;border:1.5px solid #a78bfa;border-radius:8px;font-size:12px;outline:none;box-sizing:border-box;margin-bottom:6px">
+                <option value="">— Elige cama libre —</option>
+              </select>
+              <button id="pre-tr-btn-${pidx}" style="display:none;width:100%;background:#6366f1;color:white;border:none;border-radius:8px;padding:9px;font-size:12px;font-weight:700;cursor:pointer">
+                ✅ Confirmar transferencia
+              </button>
+            </div>` : ''}
+            <!-- Panel Cambiar Usuario -->
+            <div id="pre-cambiar-panel-${pidx}" style="display:none;margin-top:8px;background:#f0f9ff;border:1px solid #7dd3fc;border-radius:10px;padding:10px">
+              <div style="font-size:11px;font-weight:800;color:#0369a1;margin-bottom:8px">👤 Cambiar persona asignada</div>
+              <input type="text" id="pre-cambiar-rut-${pidx}" placeholder="Nuevo RUT (12345678-9)"
+                style="width:100%;padding:8px 10px;border-radius:7px;border:1.5px solid #7dd3fc;font-size:12px;outline:none;box-sizing:border-box;margin-bottom:6px;font-family:monospace">
+              <input type="text" id="pre-cambiar-nombre-${pidx}" placeholder="Nombre completo"
+                style="width:100%;padding:8px 10px;border-radius:7px;border:1.5px solid #7dd3fc;font-size:12px;outline:none;box-sizing:border-box;margin-bottom:6px">
+              <select id="pre-cambiar-emp-${pidx}"
+                style="width:100%;padding:8px 10px;border-radius:7px;border:1.5px solid #7dd3fc;font-size:12px;outline:none;box-sizing:border-box;margin-bottom:8px">
+                <option value="">— Cargando empresas… —</option>
+              </select>
+              <div id="pre-cambiar-msg-${pidx}" style="min-height:14px;font-size:11px;font-weight:700;color:#0369a1;margin-bottom:6px"></div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+                <button data-pre-action="cambiar-cancel" data-pre-idx="${pidx}"
+                  style="padding:8px;border:1.5px solid #e2e8f0;border-radius:8px;background:#f9fafb;font-size:11px;font-weight:700;cursor:pointer">✕ Cancelar</button>
+                <button data-pre-action="cambiar-confirm" data-pre-idx="${pidx}"
+                  style="padding:8px;border:none;border-radius:8px;background:#0ea5e9;color:white;font-size:11px;font-weight:700;cursor:pointer">✅ Confirmar</button>
+              </div>
+            </div>
+
           </div>`).join('')}
         </div>`;
     }
@@ -343,6 +391,171 @@ async function renderCheckout(pop, idCama, onSuccess) {
 
     body.innerHTML = html;
 
+    // ── Acciones para cada PRE-ASIGNADO (Cancelar / Transferir) ─────────────
+    todosPre.forEach((p, pidx) => {
+        // ── Cancelar ──────────────────────────────────────────────────────────
+        body.querySelector(`[data-pre-action="cancel"][data-pre-idx="${pidx}"]`)?.addEventListener('click', async () => {
+            const nombre = p.nombre || 'este trabajador';
+            if (!confirm(`¿Cancelar la pre-asignación de ${nombre}?\nLa cama quedará disponible.`)) return;
+            try {
+                if (p.tipo === 'asig' && p.id) {
+                    const { error } = await supabase.from('v2_asignaciones').delete().eq('id', p.id);
+                    if (error) throw error;
+                    // Verificar si quedan más asignaciones activas
+                    const { count } = await supabase.from('v2_asignaciones')
+                        .select('id', { count: 'exact', head: true })
+                        .eq('id_cama', idCama).is('fecha_checkout', null);
+                    if (!count) {
+                        await supabase.from('v2_camas').update({ estado: 'Disponible' }).eq('id_cama', idCama).neq('estado', 'Deshabilitada');
+                    }
+                } else if (p.tipo === 'solic' && p.id) {
+                    await supabase.from('v2_solicitudes_b2b').update({ status: 'cancelada' }).eq('id', p.id);
+                }
+                setMsg('✅ Pre-asignación cancelada — cama libre', '#10b981');
+                setTimeout(() => { cerrarPopover(); onSuccess?.('cancelar_pre', idCama); }, 800);
+            } catch(e) { setMsg('❌ ' + e.message, '#ef4444'); }
+        });
+
+        // ── Transferir ────────────────────────────────────────────────────────
+        if (p.tipo === 'asig') {
+            body.querySelector(`[data-pre-action="transfer"][data-pre-idx="${pidx}"]`)?.addEventListener('click', () => {
+                const panel = document.getElementById(`pre-tr-panel-${pidx}`);
+                if (!panel) return;
+                panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+                if (panel.style.display === 'block') {
+                    document.getElementById(`pre-tr-inp-${pidx}`)?.focus();
+                }
+            });
+
+            // Buscar habitación destino
+            document.getElementById(`pre-tr-inp-${pidx}`)?.addEventListener('input', async (e) => {
+                const num = e.target.value.trim();
+                const res = document.getElementById(`pre-tr-res-${pidx}`);
+                const sel = document.getElementById(`pre-tr-sel-${pidx}`);
+                const btn = document.getElementById(`pre-tr-btn-${pidx}`);
+                sel.style.display = 'none'; btn.style.display = 'none';
+                sel.innerHTML = '<option value="">— Elige cama libre —</option>';
+                if (num.length < 2) { if (res) res.textContent = 'Escribe el número de habitación…'; return; }
+                if (res) res.textContent = '🔍 Buscando…';
+
+                let { data: habs } = await supabase.from('v2_habitaciones')
+                    .select('id_custom, numero_hab').eq('numero_hab', num).limit(5);
+                if (!habs?.length) {
+                    const { data: hl } = await supabase.from('v2_habitaciones')
+                        .select('id_custom, numero_hab').ilike('numero_hab', `%${num}%`).limit(20);
+                    habs = hl;
+                }
+                if (!habs?.length) { if (res) res.textContent = `❌ Habitación "${num}" no encontrada`; return; }
+
+                const { data: camas } = await supabase.from('v2_camas')
+                    .select('id_cama, habitacion_id')
+                    .in('habitacion_id', habs.map(h => h.id_custom))
+                    .eq('estado', 'Disponible').neq('id_cama', idCama).order('id_cama');
+
+                if (!camas?.length) { if (res) res.textContent = `⚠️ Sin camas libres en hab. ${num}`; return; }
+
+                const habNums = {};
+                habs.forEach(h => { habNums[h.id_custom] = h.numero_hab; });
+                if (res) res.textContent = `✅ ${camas.length} cama(s) disponible(s)`;
+                sel.innerHTML = '<option value="">— Elige cama —</option>' +
+                    camas.map(c => `<option value="${c.id_cama}">🛏 ${c.id_cama} · Hab.${habNums[c.habitacion_id]||''}</option>`).join('');
+                sel.style.display = 'block';
+                btn.style.display = 'block';
+                sel.onchange = () => { btn.style.opacity = sel.value ? '1' : '.5'; };
+            });
+
+            // Confirmar transferencia
+            document.getElementById(`pre-tr-btn-${pidx}`)?.addEventListener('click', async () => {
+                const sel    = document.getElementById(`pre-tr-sel-${pidx}`);
+                const newCama = sel?.value;
+                if (!newCama || !p.id) { setMsg('⚠️ Selecciona una cama destino', '#d97706'); return; }
+                setMsg('Transfiriendo pre-asignación…', '#6b7280');
+                // Mover la asignación a la nueva cama (ambas quedan Disponibles hasta que llegue)
+                const { error } = await supabase.from('v2_asignaciones')
+                    .update({ id_cama: newCama }).eq('id', p.id);
+                if (error) { setMsg('❌ ' + error.message, '#ef4444'); return; }
+                setMsg('✅ Pre-asignación transferida a ' + newCama, '#10b981');
+                setTimeout(() => { cerrarPopover(); onSuccess?.('transfer_pre', idCama); }, 900);
+            });
+        }
+
+        // ── Eliminar (hard delete con confirmación) ────────────────────────────
+        body.querySelector(`[data-pre-action="delete"][data-pre-idx="${pidx}"]`)?.addEventListener('click', async () => {
+            const nombre = p.nombre || 'este trabajador';
+            if (!confirm(`¿ELIMINAR definitivamente la asignación de ${nombre}?\n\nLa cama quedará disponible. Esta acción no se puede deshacer.`)) return;
+            try {
+                if (p.tipo === 'asig' && p.id) {
+                    const { error } = await supabase.from('v2_asignaciones').delete().eq('id', p.id);
+                    if (error) throw error;
+                    const { count } = await supabase.from('v2_asignaciones')
+                        .select('id', { count: 'exact', head: true })
+                        .eq('id_cama', idCama).is('fecha_checkout', null);
+                    if (!count) {
+                        await supabase.from('v2_camas').update({ estado: 'Disponible' }).eq('id_cama', idCama).neq('estado', 'Deshabilitada');
+                    }
+                } else if (p.tipo === 'solic' && p.id) {
+                    await supabase.from('v2_solicitudes_b2b').update({ status: 'cancelada' }).eq('id', p.id);
+                }
+                setMsg('🗑️ Asignación eliminada — cama libre', '#10b981');
+                setTimeout(() => { cerrarPopover(); onSuccess?.('eliminar_pre', idCama); }, 800);
+            } catch(e) { setMsg('❌ ' + e.message, '#ef4444'); }
+        });
+
+        // ── Cambiar Usuario — abrir/cerrar panel ──────────────────────────────
+        body.querySelector(`[data-pre-action="cambiar"][data-pre-idx="${pidx}"]`)?.addEventListener('click', async () => {
+            const panel = document.getElementById(`pre-cambiar-panel-${pidx}`);
+            if (!panel) return;
+            const isOpen = panel.style.display !== 'none';
+            panel.style.display = isOpen ? 'none' : 'block';
+            if (!isOpen) {
+                // Cargar lista de empresas al abrir por primera vez
+                const sel = document.getElementById(`pre-cambiar-emp-${pidx}`);
+                if (sel && sel.options.length <= 1) {
+                    const { data: emps } = await supabase.from('v2_empresas').select('id, nombre, turno').order('nombre');
+                    if (emps?.length) {
+                        sel.innerHTML = '<option value="">— Seleccionar empresa —</option>' +
+                            emps.map(e => `<option value="${e.id}">${e.nombre}${e.turno ? ' · ' + e.turno : ''}</option>`).join('');
+                        if (p.empresa_id) sel.value = p.empresa_id;
+                    }
+                }
+                document.getElementById(`pre-cambiar-rut-${pidx}`)?.focus();
+            }
+        });
+
+        // ── Cambiar Usuario — cancelar ─────────────────────────────────────────
+        body.querySelector(`[data-pre-action="cambiar-cancel"][data-pre-idx="${pidx}"]`)?.addEventListener('click', () => {
+            const panel = document.getElementById(`pre-cambiar-panel-${pidx}`);
+            if (panel) panel.style.display = 'none';
+        });
+
+        // ── Cambiar Usuario — confirmar ────────────────────────────────────────
+        body.querySelector(`[data-pre-action="cambiar-confirm"][data-pre-idx="${pidx}"]`)?.addEventListener('click', async () => {
+            const nuevoRut    = document.getElementById(`pre-cambiar-rut-${pidx}`)?.value?.trim();
+            const nuevoNombre = document.getElementById(`pre-cambiar-nombre-${pidx}`)?.value?.trim();
+            const nuevaEmp    = document.getElementById(`pre-cambiar-emp-${pidx}`)?.value;
+            const msgEl       = document.getElementById(`pre-cambiar-msg-${pidx}`);
+            if (!nuevoRut || !nuevoNombre) {
+                if (msgEl) { msgEl.textContent = '⚠️ RUT y Nombre son obligatorios'; msgEl.style.color = '#d97706'; }
+                return;
+            }
+            if (msgEl) { msgEl.textContent = '⏳ Guardando cambio…'; msgEl.style.color = '#0369a1'; }
+            try {
+                if (!p.id) throw new Error('Sin ID de asignación');
+                const { error } = await supabase.from('v2_asignaciones').update({
+                    rut_huesped:    nuevoRut.toUpperCase(),
+                    nombre_huesped: nuevoNombre,
+                    empresa_id:     nuevaEmp || null,
+                }).eq('id', p.id);
+                if (error) throw error;
+                setMsg(`✅ Usuario cambiado a ${nuevoNombre}`, '#10b981');
+                setTimeout(() => { cerrarPopover(); onSuccess?.('cambiar_usuario', idCama); }, 900);
+            } catch(e) {
+                if (msgEl) { msgEl.textContent = '❌ ' + e.message; msgEl.style.color = '#ef4444'; }
+            }
+        });
+    });
+
+
     // Botón check-in manual → cambiar a renderCheckin
     document.getElementById(ID + '-btn-ir-checkin')?.addEventListener('click', () => {
         renderCheckin(pop, idCama, onSuccess);
@@ -386,7 +599,7 @@ async function renderCheckout(pop, idCama, onSuccess) {
         const { error } = await supabase.from('v2_asignaciones')
             .update({ fecha_checkout: hoy }).eq('id', main.id);
         if (error) { setMsg('❌ ' + error.message, '#ef4444'); return; }
-        await supabase.from('v2_camas').update({ estado: 'Disponible' }).eq('id_cama', idCama);
+        await supabase.from('v2_camas').update({ estado: 'Disponible' }).eq('id_cama', idCama).neq('estado', 'Deshabilitada');
         setMsg('✅ Check-out registrado', '#10b981');
         setTimeout(() => { cerrarPopover(); onSuccess?.('checkout', idCama); }, 900);
     });
@@ -419,7 +632,7 @@ async function renderCheckout(pop, idCama, onSuccess) {
         setMsg('Eliminando asignación…', '#6b7280');
         const { error } = await supabase.from('v2_asignaciones').delete().eq('id', main.id);
         if (error) { setMsg('❌ ' + error.message, '#ef4444'); return; }
-        await supabase.from('v2_camas').update({ estado: 'Disponible' }).eq('id_cama', idCama);
+        await supabase.from('v2_camas').update({ estado: 'Disponible' }).eq('id_cama', idCama).neq('estado', 'Deshabilitada');
         setMsg('🗑️ Asignación eliminada', '#10b981');
         setTimeout(() => { cerrarPopover(); onSuccess?.('eliminar', idCama); }, 800);
     });
@@ -474,7 +687,7 @@ async function renderCheckout(pop, idCama, onSuccess) {
             const { error: errMove } = await supabase.from('v2_asignaciones')
                 .update({ id_cama: newCama }).eq('id', main.id);
             if (errMove) { setMsg('❌ ' + errMove.message, '#ef4444'); return; }
-            await supabase.from('v2_camas').update({ estado: 'Disponible' }).eq('id_cama', idCama);
+            await supabase.from('v2_camas').update({ estado: 'Disponible' }).eq('id_cama', idCama).neq('estado', 'Deshabilitada');
             await supabase.from('v2_camas').update({ estado: 'Ocupada' }).eq('id_cama', newCama);
             // Limpiar pre_asignados duplicados del mismo RUT que quedaron de la asignación anterior
             if (main.rut_huesped) {
@@ -841,7 +1054,7 @@ function renderMantencion(pop, idCama, onSuccess) {
         btn.textContent = '⏳ Actualizando…';
         btn.disabled = true;
         const { error } = await supabase.from('v2_camas')
-            .update({ estado: 'Disponible' }).eq('id_cama', idCama);
+            .update({ estado: 'Disponible' }).eq('id_cama', idCama).neq('estado', 'Deshabilitada');
         if (error) {
             const msg = document.getElementById(ID + '-msg');
             if (msg) { msg.textContent = '❌ ' + error.message; msg.style.color = '#ef4444'; }

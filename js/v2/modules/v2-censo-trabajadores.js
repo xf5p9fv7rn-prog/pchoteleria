@@ -134,19 +134,32 @@ async function _ctCargar() {
     const pFin = fmtISO(_periodo.fin);
 
     // 1. Datos de confirmaciones QR en el período
-    const { data, error } = await supabase
-        .from('v2_censo_trabajadores')
-        .select('numero_hab,rut_trabajador,nombre_trabajador,empresa,fecha_scan,hora_scan')
-        .gte('fecha_scan', pIni)
-        .lte('fecha_scan', pFin)
-        .order('hora_scan', { ascending: true });
+    async function fetchAllCensoQR() {
+        const PAGE = 900; let offset = 0, all = [];
+        while (true) {
+            const { data, error } = await supabase
+                .from('v2_censo_trabajadores')
+                .select('numero_hab,rut_trabajador,nombre_trabajador,empresa,fecha_scan,hora_scan')
+                .gte('fecha_scan', pIni)
+                .lte('fecha_scan', pFin)
+                .order('hora_scan', { ascending: true })
+                .range(offset, offset + PAGE - 1);
+            if (error) throw error;
+            if (!data?.length) break;
+            all = all.concat(data);
+            if (data.length < PAGE) break;
+            offset += PAGE;
+        }
+        return all;
+    }
 
-    if (error) {
+    try {
+        _ctData = await fetchAllCensoQR();
+    } catch (error) {
         body.innerHTML = `<div style="text-align:center;padding:40px;color:#ef4444">❌ ${error.message}<br><br>
           <span style="font-size:12px">Ejecuta <code>supabase_censo_trabajadores.sql</code> en Supabase si la tabla no existe.</span></div>`;
         return;
     }
-    _ctData = data || [];
 
     // 2. Habitaciones con pabellón y edificio
     async function fetchAllHabs(filterFn) {
@@ -188,10 +201,22 @@ async function _ctCargar() {
     });
 
     // 3. Asignaciones activas (para empresa, gerencia, contrato)
-    const { data: asigActivas } = await supabase.from('v2_asignaciones')
-        .select('id_cama,numero_contrato,v2_empresas(nombre,v2_gerencias(nombre)),v2_camas(habitacion_id)')
-        .lte('fecha_checkin', pFin)
-        .or(`fecha_checkout.is.null,fecha_checkout.gte.${pIni}`);
+    async function fetchAllAsigActivas() {
+        const PAGE = 900; let offset = 0, all = [];
+        while (true) {
+            const { data } = await supabase.from('v2_asignaciones')
+                .select('id_cama,numero_contrato,v2_empresas(nombre,v2_gerencias(nombre)),v2_camas(habitacion_id)')
+                .lte('fecha_checkin', pFin)
+                .or(`fecha_checkout.is.null,fecha_checkout.gte.${pIni}`)
+                .range(offset, offset + PAGE - 1);
+            if (!data?.length) break;
+            all = all.concat(data);
+            if (data.length < PAGE) break;
+            offset += PAGE;
+        }
+        return all;
+    }
+    const asigActivas = await fetchAllAsigActivas();
 
     // 4. Etiquetas de distribución para saber si es Noche o Anglo
     const { data: distData } = await supabase.from('v2_distribucion_camas').select('id_cama, tipo, etiqueta').limit(10000);

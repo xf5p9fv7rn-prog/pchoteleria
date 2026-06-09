@@ -354,7 +354,7 @@ async function buscarAutorizacion() {
     if (errI) throw new Error(errI.message);
 
     // Marcar cama
-    await sb.from('v2_camas').update({ estado: estadoAsig === 'activa' ? 'Ocupada' : 'Disponible' }).eq('id_cama', camaId);
+    await sb.from('v2_camas').update({ estado: estadoAsig === 'activa' ? 'Ocupada' : 'Disponible' }).eq('id_cama', camaId).neq('estado', 'Deshabilitada');
 
     btn.innerHTML = '🏨 Autorizar Llegada'; btn.disabled = false;
     _mostrarAutorizado(fb, sol.nombre_trabajador, camaId, sol.empresa);
@@ -685,10 +685,16 @@ async function ejecutarCheckoutMasivo() {
   // 2. Checkout masivo
   for (const a of aCheckout) {
     try {
+      // Respetar chk_fechas: checkout nunca puede ser < checkin
+      const fechaCheckinAsig = (a.fecha_checkin || hoy).slice(0, 10);
+      const fechaCheckoutAsig = fechaCheckinAsig > hoy ? fechaCheckinAsig : hoy;
       const { error: eCo } = await sb.from('v2_asignaciones')
-        .update({ fecha_checkout: hoy }).eq('id', a.id);
+        .update({
+          fecha_checkout:    fechaCheckoutAsig,
+          estado_asignacion: fechaCheckinAsig > hoy ? 'cancelado' : 'activa',
+        }).eq('id', a.id);
       if (eCo) throw new Error(eCo.message);
-      await sb.from('v2_camas').update({ estado: 'Disponible' }).eq('id_cama', a.id_cama);
+      await sb.from('v2_camas').update({ estado: 'Disponible' }).eq('id_cama', a.id_cama).neq('estado', 'Deshabilitada');
       okCo++;
     } catch (e) { errores.push(`${a.nombre_huesped}: ${e.message}`); }
   }

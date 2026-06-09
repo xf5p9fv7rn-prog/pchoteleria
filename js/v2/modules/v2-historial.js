@@ -106,16 +106,20 @@ export async function renderV2Historial(container) {
         </div>
       </div>
 
-      <div style="display:flex;gap:8px;margin-bottom:20px">
+      <div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap">
         ${tab('ocupacion','🛏️ Por Empresa','#6366f1',true)}
         ${tab('detalle','📅 Detalle por Persona','#f59e0b',false)}
         ${tab('facturacion','💰 Facturación','#10b981',false)}
+        ${tab('trabajador','👤 Búsqueda por Trabajador','#8b5cf6',false)}
+        ${tab('habitacion','🏠 Búsqueda por Habitación','#0ea5e9',false)}
       </div>
 
       <div id="hist-kpis" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:20px"></div>
       <div id="panel-ocupacion"></div>
       <div id="panel-detalle"     style="display:none"></div>
       <div id="panel-facturacion" style="display:none"></div>
+      <div id="panel-trabajador"  style="display:none"></div>
+      <div id="panel-habitacion"  style="display:none"></div>
     </div>`;
 
     document.getElementById('hist-modo').addEventListener('change', e => {
@@ -123,8 +127,12 @@ export async function renderV2Historial(container) {
         document.getElementById('hist-periodo-wrap').style.display = m==='periodo' ? 'flex' : 'none';
         document.getElementById('hist-rango-wrap').style.display   = m==='rango'   ? 'flex' : 'none';
     });
-    ['ocupacion','detalle','facturacion'].forEach(t =>
-        document.getElementById(`tab-hist-${t}`)?.addEventListener('click',()=>switchTab(t))
+    ['ocupacion','detalle','facturacion','trabajador','habitacion'].forEach(t =>
+        document.getElementById(`tab-hist-${t}`)?.addEventListener('click',()=>{
+            if(t==='trabajador') { switchTab(t); renderPanelTrabajador(); }
+            else if(t==='habitacion') { switchTab(t); renderPanelHabitacion(); }
+            else switchTab(t);
+        })
     );
     document.getElementById('btn-hist-buscar').addEventListener('click', cargar);
     document.getElementById('btn-hist-csv').addEventListener('click', exportCSV);
@@ -138,8 +146,8 @@ function tab(id, label, color, active) {
 
 function switchTab(name) {
     _activeTab = name;
-    const cols = {ocupacion:'#6366f1',detalle:'#f59e0b',facturacion:'#10b981'};
-    ['ocupacion','detalle','facturacion'].forEach(t=>{
+    const cols = {ocupacion:'#6366f1',detalle:'#f59e0b',facturacion:'#10b981',trabajador:'#8b5cf6',habitacion:'#0ea5e9'};
+    ['ocupacion','detalle','facturacion','trabajador','habitacion'].forEach(t=>{
         const b=document.getElementById(`tab-hist-${t}`), p=document.getElementById(`panel-${t}`), on=t===name;
         if(b){b.style.background=on?cols[t]:'var(--bg-card)';b.style.color=on?'#fff':'var(--text-primary)';b.style.borderColor=on?cols[t]:'var(--border)';}
         if(p)p.style.display=on?'block':'none';
@@ -157,7 +165,8 @@ async function fetchAll(sb, filtros = {}) {
             id, id_cama, rut_huesped, nombre_huesped,
             fecha_checkin, fecha_checkout, fecha_salida_programada,
             huesped_confirmo, empresa_id,
-            v2_empresas(id, nombre, turno, v2_gerencias(nombre))
+            v2_empresas(id, nombre, turno, v2_gerencias(nombre)),
+            v2_camas(v2_habitaciones(numero_hab))
         `, { count: 'exact' })
         .order('fecha_checkin', { ascending: false })
         .range(from, from + PAGE - 1);
@@ -217,7 +226,8 @@ async function cargar() {
         kEl.innerHTML = `<div style="color:#ef4444;padding:16px">❌ ${e.message}</div>`; return;
     }
 
-    _lastData = data.filter(a => a.v2_empresas);
+    // Filtrar solo a los confirmados (según solicitud del usuario) y que tengan empresa
+    _lastData = data.filter(a => a.v2_empresas && a.huesped_confirmo === true);
 
     // Calcular días totales y días dentro del período por estadía
     _lastData.forEach(a => {
@@ -345,10 +355,11 @@ function renderOcupacion(empresas, modo, periodoLabel) {
     };
 }
 
-// Construye el detalle día × habitación para una empresa
+// Construye el detalle día × personas para una empresa
 function buildEmpDayDetail(items, color) {
-    // Expandir cada estadía en días individuales que ocupó
-    const dayMap = {}; // { '2026-05-25': { 'COPC000001': count, ... } }
+    // Para cada día que cada persona estuvo, guardar sus datos
+    // dayMap: { 'YYYY-MM-DD': [ { nombre, rut, cama, fechaIn, fechaOut, confirmo } ] }
+    const dayMap = {};
 
     for (const a of items) {
         const ini = new Date((a.fecha_checkin||'').split('T')[0]+'T00:00:00');
@@ -356,44 +367,74 @@ function buildEmpDayDetail(items, color) {
             ? new Date(a.fecha_checkout.split('T')[0]+'T00:00:00')
             : new Date();
 
-        // Por cada día que estuvo (desde checkin hasta checkout-1)
         let cur = new Date(ini);
         while (cur < fin) {
             const key = cur.toISOString().split('T')[0];
-            if (!dayMap[key]) dayMap[key] = {};
-            const cama = a.id_cama || 'S/N';
-            dayMap[key][cama] = (dayMap[key][cama] || 0) + 1;
+            if (!dayMap[key]) dayMap[key] = [];
+            // Evitar duplicar la misma persona el mismo día
+            const ya = dayMap[key].find(p => p.cama === a.id_cama && p.rut === a.rut_huesped);
+            if (!ya) {
+                dayMap[key].push({
+                    nombre:     a.nombre_huesped || '—',
+                    rut:        a.rut_huesped    || '—',
+                    cama:       a.id_cama        || 'S/N',
+                    hab:        a.v2_camas?.v2_habitaciones?.numero_hab || null,
+                    fechaIn:    (a.fecha_checkin||'').split('T')[0],
+                    fechaOut:   a.fecha_checkout ? a.fecha_checkout.split('T')[0] : null,
+                    salidaProg: a.fecha_salida_programada || null,
+                    confirmo:   a.huesped_confirmo,
+                });
+            }
             cur.setDate(cur.getDate() + 1);
         }
     }
 
-    const dias = Object.keys(dayMap).sort().reverse();
+    const dias = Object.keys(dayMap).sort();  // más antigua primero
     if (!dias.length) return `<div style="padding:16px;color:#9ca3af;text-align:center">Sin datos de días</div>`;
 
     const rows = dias.map(d => {
-        const camasDelDia = dayMap[d];
-        const totalCamas  = Object.values(camasDelDia).reduce((s,c)=>s+c,0);
+        const personas = dayMap[d];
+        // Agrupar por cama para ordenar
+        const porCama = {};
+        for (const p of personas) {
+            if (!porCama[p.cama]) porCama[p.cama] = [];
+            porCama[p.cama].push(p);
+        }
         const fecha = new Date(d+'T12:00:00').toLocaleDateString('es-CL',{weekday:'short',day:'2-digit',month:'2-digit',year:'numeric'});
 
-        // Tarjetas de habitación
-        const camaCards = Object.entries(camasDelDia)
-            .sort((a,b) => b[1]-a[1])
-            .map(([cama, cnt]) =>
-                `<span style="background:${color}18;border:1px solid ${color}44;color:${color};border-radius:8px;padding:3px 10px;font-size:12px;font-weight:700;white-space:nowrap">
-                    🛏 ${cama} = ${cnt} cama${cnt>1?'s':''}
-                </span>`
-            ).join('');
+        const personaCards = Object.entries(porCama)
+            .sort(([a],[b]) => a.localeCompare(b))
+            .map(([cama, ps]) => ps.map(p => {
+                const estadoIcon = p.confirmo ? '✅' : (p.fechaOut ? '🚪' : '⏳');
+                const salidaLabel = p.fechaOut
+                    ? `→ ${p.fechaOut}`
+                    : (p.salidaProg ? `→ prog. ${p.salidaProg}` : '');
+                const habLabel = p.hab ? `<span style="background:#6366f1;color:#fff;font-size:11px;font-weight:800;padding:2px 9px;border-radius:6px">🏠 Hab ${p.hab}</span>` : '';
+                return `<div style="background:${color}10;border:1px solid ${color}33;border-radius:10px;padding:8px 12px;min-width:240px;max-width:320px">
+                    <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap">
+                        ${habLabel}
+                        <span style="background:${color};color:#fff;font-size:10px;font-weight:700;padding:2px 7px;border-radius:6px;font-family:monospace">${cama}</span>
+                        <span style="font-size:11px">${estadoIcon}</span>
+                    </div>
+                    <div style="font-size:13px;font-weight:700;color:var(--text-primary)">${p.nombre}</div>
+                    <div style="font-size:11px;color:var(--text-muted);font-family:monospace">${p.rut}</div>
+                    <div style="font-size:11px;color:${color};font-weight:600;margin-top:3px">📅 ${p.fechaIn} ${salidaLabel}</div>
+                </div>`;
+            }).join('')
+        ).join('');
 
-        return `<div style="display:flex;align-items:flex-start;gap:12px;padding:10px 20px;border-bottom:1px solid #f1f5f9">
-            <div style="min-width:140px;font-size:12px;font-weight:700;color:var(--text-primary);padding-top:3px">📅 ${fecha}</div>
-            <div style="display:flex;flex-wrap:wrap;gap:6px;flex:1">${camaCards}</div>
-            <div style="min-width:80px;text-align:right;font-size:13px;font-weight:900;color:${color};padding-top:2px">${totalCamas} cama${totalCamas>1?'s':''}</div>
+        return `<div style="padding:12px 20px;border-bottom:1px solid #f1f5f9">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+                <span style="font-size:12px;font-weight:700;color:var(--text-primary);min-width:140px">📅 ${fecha}</span>
+                <span style="background:${color}22;color:${color};font-size:11px;font-weight:700;padding:2px 10px;border-radius:20px">${personas.length} persona${personas.length!==1?'s':''}</span>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:8px">${personaCards}</div>
         </div>`;
     }).join('');
 
-    return `<div style="background:#fafafa;padding:0">
+    return `<div style="background:var(--bg);padding:0">
         <div style="padding:10px 20px;background:${color}11;border-bottom:1px solid ${color}33;font-size:12px;font-weight:800;color:${color};display:flex;justify-content:space-between">
-            <span>📊 Detalle diario — Habitaciones × Día</span>
+            <span>👤 Personas por día — Nombre · RUT · Cama · Fechas</span>
             <span>${dias.length} días con ocupación</span>
         </div>
         ${rows}
@@ -516,6 +557,395 @@ function renderFacturacion(empresas, periodoDesde, periodoHasta, periodoLabel) {
       💡 <strong>Días-Cama del período</strong>: si una persona entró antes del 21 y salíl despues del 20, solo se cuentan los días dentro del período.
       Ejemplo: ingreso 15 abr → salida 10 mayo, período 21 abr→20 may = <strong>20 días</strong> (solo del 21 abr al 10 mayo).
     </div>`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 👤  PANEL BÚSQUEDA POR TRABAJADOR
+// ─────────────────────────────────────────────────────────────────────────────
+
+function renderPanelTrabajador() {
+    const el = document.getElementById('panel-trabajador');
+    if (!el) return;
+    el.innerHTML = `
+    <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:20px;overflow:hidden">
+
+      <!-- Encabezado búsqueda -->
+      <div style="padding:24px 28px;background:linear-gradient(135deg,#8b5cf622,#6366f111);border-bottom:1px solid var(--border)">
+        <div style="display:flex;align-items:center;gap:14px;margin-bottom:18px">
+          <div style="width:48px;height:48px;border-radius:14px;background:linear-gradient(135deg,#8b5cf6,#6366f1);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0">👤</div>
+          <div>
+            <div style="font-size:18px;font-weight:800;color:var(--text-primary)">Historial por Trabajador</div>
+            <div style="font-size:13px;color:var(--text-muted)">Ingresa el RUT para ver todas las estancias, confirmaciones y empresas</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <input id="trabaj-rut-input" type="text" placeholder="Ej: 12345678-9"
+            style="flex:1;min-width:200px;padding:12px 16px;border-radius:12px;border:2px solid #8b5cf644;background:var(--bg-card);color:var(--text-primary);font-size:15px;font-weight:600;outline:none;transition:border .2s"
+            onfocus="this.style.borderColor='#8b5cf6'" onblur="this.style.borderColor='#8b5cf644'"
+            onkeydown="if(event.key==='Enter') window._buscarTrabajadorHist()">
+          <button onclick="window._buscarTrabajadorHist()"
+            style="padding:12px 28px;border:none;border-radius:12px;background:linear-gradient(135deg,#8b5cf6,#6366f1);color:#fff;font-weight:800;font-size:14px;cursor:pointer;box-shadow:0 4px 14px rgba(139,92,246,.35);transition:transform .1s;white-space:nowrap"
+            onmousedown="this.style.transform='scale(.97)'" onmouseup="this.style.transform='scale(1)'">
+            🔍 Buscar
+          </button>
+        </div>
+      </div>
+
+      <!-- Resultado -->
+      <div id="trabaj-resultado" style="padding:24px 28px">
+        <div style="text-align:center;padding:40px;color:var(--text-muted);font-size:14px">
+          ☝️ Ingresa un RUT para ver el historial completo del trabajador
+        </div>
+      </div>
+    </div>`;
+
+    window._buscarTrabajadorHist = async function() {
+        const raw = document.getElementById('trabaj-rut-input')?.value?.trim();
+        if (!raw) return;
+
+        // Normalizar RUT para buscar (con y sin guión, con y sin puntos)
+        const rutNorm = raw.replace(/\./g,'').replace(/-/g,'').trim().toUpperCase();
+        // Variantes de búsqueda
+        const rutConGuion    = rutNorm.slice(0,-1) + '-' + rutNorm.slice(-1);
+        const rutSinGuion    = rutNorm;
+
+        const res = document.getElementById('trabaj-resultado');
+        res.innerHTML = `<div style="text-align:center;padding:40px"><div style="font-size:28px;margin-bottom:12px">⏳</div><div style="color:var(--text-muted);font-weight:600">Buscando historial…</div></div>`;
+
+        try {
+            const sb = await getSb();
+
+            // Buscar con ambas variantes del RUT
+            const { data: asigs, error } = await sb.from('v2_asignaciones')
+                .select(`
+                    id, id_cama, nombre_huesped, rut_huesped, empresa_id,
+                    fecha_checkin, fecha_checkout, fecha_salida_programada,
+                    huesped_confirmo, estado_asignacion,
+                    v2_empresas(id, nombre),
+                    v2_camas(v2_habitaciones(numero_hab))
+                `)
+                .or(`rut_huesped.eq.${rutConGuion},rut_huesped.eq.${rutSinGuion}`)
+                .order('fecha_checkin', { ascending: true });  // más antigua primero
+
+            if (error) throw error;
+
+            if (!asigs || asigs.length === 0) {
+                res.innerHTML = `
+                <div style="text-align:center;padding:50px">
+                  <div style="font-size:40px;margin-bottom:14px">🔍</div>
+                  <div style="font-size:16px;font-weight:700;color:var(--text-primary);margin-bottom:6px">No se encontró ningún trabajador</div>
+                  <div style="font-size:13px;color:var(--text-muted)">RUT: <code style="background:var(--bg);padding:2px 8px;border-radius:6px">${raw}</code></div>
+                  <div style="font-size:12px;color:var(--text-muted);margin-top:8px">Prueba con y sin guión, o con el dígito verificador exacto</div>
+                </div>`;
+                return;
+            }
+
+            // ── Estadísticas ──────────────────────────────────────────
+            const nombre    = asigs[0].nombre_huesped || '—';
+            const rut       = asigs[0].rut_huesped    || raw;
+            const totalVeces       = asigs.length;
+            const vecesConfirmado  = asigs.filter(a => a.huesped_confirmo === true).length;
+            const vecesNoConfirmado= asigs.filter(a => !a.huesped_confirmo && !a.fecha_checkout).length;
+            const vecesCheckout    = asigs.filter(a => !!a.fecha_checkout).length;
+            const empresasUnicas   = [...new Set(asigs.map(a => a.v2_empresas?.nombre).filter(Boolean))];
+            const habsUnicas       = [...new Set(asigs.map(a => a.v2_camas?.v2_habitaciones?.numero_hab).filter(Boolean))];
+
+            // ── Render resultado ──────────────────────────────────────
+            res.innerHTML = `
+
+            <!-- Tarjeta del trabajador -->
+            <div style="background:linear-gradient(135deg,#8b5cf611,#6366f108);border:1.5px solid #8b5cf633;border-radius:16px;padding:20px 24px;margin-bottom:20px;display:flex;align-items:center;gap:18px;flex-wrap:wrap">
+              <div style="width:60px;height:60px;border-radius:16px;background:linear-gradient(135deg,#8b5cf6,#6366f1);color:#fff;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:900;flex-shrink:0">
+                ${nombre.charAt(0).toUpperCase()}
+              </div>
+              <div style="flex:1;min-width:200px">
+                <div style="font-size:20px;font-weight:900;color:var(--text-primary)">${nombre}</div>
+                <div style="font-size:13px;color:var(--text-muted);margin-top:2px;font-family:monospace">RUT: ${rut}</div>
+                <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">
+                  ${empresasUnicas.map(e => `<span style="background:#8b5cf622;color:#8b5cf6;font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px">${e}</span>`).join('')}
+                </div>
+              </div>
+            </div>
+
+            <!-- Contadores KPI -->
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:24px">
+              ${kpiCard('📥','Veces cargado', totalVeces, '#6366f1')}
+              ${kpiCard('✅','Confirmadas',   vecesConfirmado,   '#10b981')}
+              ${kpiCard('⏳','Sin confirmar', vecesNoConfirmado, '#f59e0b')}
+              ${kpiCard('🚪','Con checkout',  vecesCheckout,     '#64748b')}
+              ${kpiCard('🏠','Habitaciones distintas', habsUnicas.length, '#8b5cf6')}
+            </div>
+
+            <!-- Tabla de historial -->
+            <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:16px;overflow:hidden">
+              <div style="padding:14px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+                <span style="font-weight:800;font-size:14px;color:var(--text-primary)">📋 Historial completo de estancias</span>
+                <span style="background:#8b5cf622;color:#8b5cf6;font-size:12px;font-weight:700;padding:4px 14px;border-radius:20px">${totalVeces} registro${totalVeces!==1?'s':''}</span>
+              </div>
+              <div style="overflow-x:auto">
+                <table style="width:100%;border-collapse:collapse;min-width:680px">
+                  <thead>
+                    <tr style="background:var(--bg);border-bottom:1px solid var(--border)">
+                      ${['N°','Habitación','Empresa','Check-in','Salida prog.','Checkout real','Días','Estado'].map(h =>
+                        `<th style="padding:10px 14px;text-align:left;font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase">${h}</th>`
+                      ).join('')}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${asigs.map((a, i) => {
+                        const hab     = a.v2_camas?.v2_habitaciones?.numero_hab || '—';
+                        const empresa = a.v2_empresas?.nombre || '—';
+                        const fechaIn = (a.fecha_checkin||'').split('T')[0] || '—';
+                        const salidaProg = a.fecha_salida_programada || '—';
+                        const checkout   = a.fecha_checkout ? a.fecha_checkout.split('T')[0] : '—';
+                        const ini = new Date((a.fecha_checkin||'').split('T')[0]+'T00:00:00');
+                        const fin = a.fecha_checkout ? new Date(a.fecha_checkout.split('T')[0]+'T00:00:00') : new Date();
+                        const dias = Math.max(0, Math.round((fin - ini)/86400000));
+
+                        let estado, eColor;
+                        if (a.fecha_checkout)         { estado = '🚪 Checkout';     eColor = '#64748b'; }
+                        else if (a.huesped_confirmo)  { estado = '✅ Confirmado';   eColor = '#10b981'; }
+                        else                           { estado = '⏳ Pendiente';    eColor = '#f59e0b'; }
+
+                        const empColor = colorStr(empresa);
+                        const rowBg = i % 2 ? 'var(--bg)' : 'transparent';
+                        return `<tr style="border-bottom:1px solid var(--border);background:${rowBg}">
+                          <td style="padding:10px 14px;font-size:12px;font-weight:700;color:var(--text-muted)">${i + 1}</td>
+                          <td style="padding:10px 14px">
+                            <span style="background:#6366f122;color:#6366f1;font-size:13px;font-weight:800;padding:4px 12px;border-radius:8px">🏠 ${hab}</span>
+                          </td>
+                          <td style="padding:10px 14px">
+                            <span style="background:${empColor}22;color:${empColor};font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px">${empresa}</span>
+                          </td>
+                          <td style="padding:10px 14px;font-size:12px;color:var(--text-secondary);font-weight:600">${fechaIn}</td>
+                          <td style="padding:10px 14px;font-size:12px;color:var(--text-muted)">${salidaProg}</td>
+                          <td style="padding:10px 14px;font-size:12px;color:${a.fecha_checkout?'#10b981':'var(--text-muted)'};font-weight:${a.fecha_checkout?'700':'400'}">${checkout}</td>
+                          <td style="padding:10px 14px">
+                            <span style="background:#eff6ff;border:1px solid #bfdbfe;color:#1d4ed8;font-size:12px;font-weight:800;padding:3px 10px;border-radius:8px">${dias}d</span>
+                          </td>
+                          <td style="padding:10px 14px;font-size:12px;font-weight:700;color:${eColor}">${estado}</td>
+                        </tr>`;
+                    }).join('')}
+                  </tbody>
+                </table>
+              </div>
+            </div>`;
+
+        } catch(e) {
+            res.innerHTML = `<div style="color:#ef4444;padding:16px;font-weight:600">❌ Error: ${e.message}</div>`;
+        }
+    };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Panel Búsqueda por Habitación
+// ─────────────────────────────────────────────────────────────────────────────
+function renderPanelHabitacion() {
+    const el = document.getElementById('panel-habitacion');
+    if (!el) return;
+    el.innerHTML = `
+    <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:20px;overflow:hidden">
+
+      <!-- Encabezado búsqueda -->
+      <div style="padding:24px 28px;background:linear-gradient(135deg,#0ea5e922,#0369a111);border-bottom:1px solid var(--border)">
+        <div style="display:flex;align-items:center;gap:14px;margin-bottom:18px">
+          <div style="width:48px;height:48px;border-radius:14px;background:linear-gradient(135deg,#0ea5e9,#0369a1);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0">🏠</div>
+          <div>
+            <div style="font-size:18px;font-weight:800;color:var(--text-primary)">Historial por Habitación</div>
+            <div style="font-size:13px;color:var(--text-muted)">Ingresa el número de habitación para ver todas las personas que han ocupado esa cama</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <input id="hab-numero-input" type="text" placeholder="Ej: 1301  o  R220-101"
+            style="flex:1;min-width:200px;padding:12px 16px;border-radius:12px;border:2px solid #0ea5e944;background:var(--bg-card);color:var(--text-primary);font-size:15px;font-weight:600;outline:none;transition:border .2s"
+            onfocus="this.style.borderColor='#0ea5e9'" onblur="this.style.borderColor='#0ea5e944'"
+            onkeydown="if(event.key==='Enter') window._buscarHabitacionHist()">
+          <button onclick="window._buscarHabitacionHist()"
+            style="padding:12px 28px;border:none;border-radius:12px;background:linear-gradient(135deg,#0ea5e9,#0369a1);color:#fff;font-weight:800;font-size:14px;cursor:pointer;box-shadow:0 4px 14px rgba(14,165,233,.35);transition:transform .1s;white-space:nowrap"
+            onmousedown="this.style.transform='scale(.97)'" onmouseup="this.style.transform='scale(1)'">
+            🔍 Buscar
+          </button>
+        </div>
+      </div>
+
+      <!-- Resultado -->
+      <div id="hab-resultado" style="padding:24px 28px">
+        <div style="text-align:center;padding:40px;color:var(--text-muted);font-size:14px">
+          ☝️ Ingresa un número de habitación para ver quiénes han dormido ahí
+        </div>
+      </div>
+    </div>`;
+
+    window._buscarHabitacionHist = async function() {
+        const raw = document.getElementById('hab-numero-input')?.value?.trim();
+        if (!raw) return;
+
+        const res = document.getElementById('hab-resultado');
+        res.innerHTML = `<div style="text-align:center;padding:40px"><div style="font-size:28px;margin-bottom:12px">⏳</div><div style="color:var(--text-muted);font-weight:600">Buscando historial de la habitación…</div></div>`;
+
+        try {
+            const sb = await getSb();
+
+            // 1. Buscar la habitación por numero_hab (coincidencia parcial)
+            const { data: habRows, error: eHab } = await sb
+                .from('v2_habitaciones')
+                .select('id_custom, numero_hab')
+                .ilike('numero_hab', `%${raw}%`)
+                .limit(10);
+            if (eHab) throw eHab;
+
+            if (!habRows?.length) {
+                res.innerHTML = `
+                <div style="text-align:center;padding:50px">
+                  <div style="font-size:40px;margin-bottom:14px">🔍</div>
+                  <div style="font-size:16px;font-weight:700;color:var(--text-primary);margin-bottom:6px">Habitación no encontrada</div>
+                  <div style="font-size:13px;color:var(--text-muted)">Número: <code style="background:var(--bg);padding:2px 8px;border-radius:6px">${raw}</code></div>
+                </div>`;
+                return;
+            }
+
+            // Si hay más de una coincidencia, mostrar selector
+            let habId = habRows[0].id_custom;
+            let habNum = habRows[0].numero_hab;
+
+            if (habRows.length > 1) {
+                // Tomar la coincidencia exacta si existe
+                const exacta = habRows.find(h => String(h.numero_hab).trim() === raw.trim());
+                if (exacta) { habId = exacta.id_custom; habNum = exacta.numero_hab; }
+            }
+
+            // 2. Buscar camas de esa habitación
+            const { data: camas, error: eCamas } = await sb
+                .from('v2_camas')
+                .select('id_cama')
+                .eq('habitacion_id', habId);
+            if (eCamas) throw eCamas;
+
+            const camaIds = (camas || []).map(c => c.id_cama);
+            if (!camaIds.length) {
+                res.innerHTML = `<div style="text-align:center;padding:40px;color:var(--text-muted)">Esta habitación no tiene camas registradas.</div>`;
+                return;
+            }
+
+            // 3. Historial de asignaciones en esas camas
+            const { data: asigs, error: eAsig } = await sb
+                .from('v2_asignaciones')
+                .select(`
+                    id, id_cama, nombre_huesped, rut_huesped,
+                    fecha_checkin, fecha_checkout, fecha_salida_programada,
+                    huesped_confirmo, estado_asignacion,
+                    v2_empresas(id, nombre)
+                `)
+                .in('id_cama', camaIds)
+                .order('fecha_checkin', { ascending: false });
+            if (eAsig) throw eAsig;
+
+            if (!asigs || asigs.length === 0) {
+                res.innerHTML = `
+                <div style="text-align:center;padding:50px">
+                  <div style="font-size:40px;margin-bottom:14px">🏠</div>
+                  <div style="font-size:16px;font-weight:700;color:var(--text-primary);margin-bottom:6px">Habitación ${habNum} sin historial</div>
+                  <div style="font-size:13px;color:var(--text-muted)">Nunca ha sido ocupada o los registros fueron eliminados</div>
+                </div>`;
+                return;
+            }
+
+            // ── Estadísticas ──────────────────────────────────────────────────
+            const totalPersonas       = asigs.length;
+            const personasUnicas      = new Set(asigs.map(a => a.rut_huesped).filter(Boolean)).size;
+            const empresasUnicas      = [...new Set(asigs.map(a => a.v2_empresas?.nombre).filter(Boolean))];
+            const conCheckout         = asigs.filter(a => !!a.fecha_checkout).length;
+            const enCama              = asigs.filter(a => !a.fecha_checkout).length;
+
+            // ── Render ────────────────────────────────────────────────────────
+            res.innerHTML = `
+
+            <!-- Tarjeta de la habitación -->
+            <div style="background:linear-gradient(135deg,#0ea5e911,#0369a108);border:1.5px solid #0ea5e933;border-radius:16px;padding:20px 24px;margin-bottom:20px;display:flex;align-items:center;gap:18px;flex-wrap:wrap">
+              <div style="width:60px;height:60px;border-radius:16px;background:linear-gradient(135deg,#0ea5e9,#0369a1);color:#fff;display:flex;align-items:center;justify-content:center;font-size:26px;flex-shrink:0">🏠</div>
+              <div style="flex:1;min-width:200px">
+                <div style="font-size:22px;font-weight:900;color:var(--text-primary)">Habitación ${habNum}</div>
+                <div style="font-size:12px;color:var(--text-muted);margin-top:2px;font-family:monospace">${camaIds.length} cama${camaIds.length!==1?'s':''} · ID: ${habId}</div>
+                <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">
+                  ${empresasUnicas.map(e => `<span style="background:#0ea5e922;color:#0369a1;font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px">${e}</span>`).join('')}
+                </div>
+              </div>
+            </div>
+
+            <!-- KPIs -->
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:24px">
+              ${kpiCard('📋','Total registros',   totalPersonas,   '#6366f1')}
+              ${kpiCard('👤','Personas únicas',   personasUnicas,  '#0ea5e9')}
+              ${kpiCard('🏢','Empresas distintas',empresasUnicas.length,'#f59e0b')}
+              ${kpiCard('🚪','Con checkout',       conCheckout,     '#64748b')}
+              ${kpiCard('🛏️','En cama ahora',      enCama,          '#10b981')}
+            </div>
+
+            <!-- Tabla historial -->
+            <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:16px;overflow:hidden">
+              <div style="padding:14px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+                <span style="font-weight:800;font-size:14px;color:var(--text-primary)">📋 Historial completo de ocupantes — más reciente primero</span>
+                <span style="background:#0ea5e922;color:#0369a1;font-size:12px;font-weight:700;padding:4px 14px;border-radius:20px">${totalPersonas} registro${totalPersonas!==1?'s':''}</span>
+              </div>
+              <div style="overflow-x:auto">
+                <table style="width:100%;border-collapse:collapse;min-width:700px">
+                  <thead>
+                    <tr style="background:var(--bg);border-bottom:1px solid var(--border)">
+                      ${['N°','Trabajador','RUT','Empresa','Check-in','Salida prog.','Checkout','Días','Estado'].map(h =>
+                        `<th style="padding:10px 14px;text-align:left;font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase">${h}</th>`
+                      ).join('')}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${asigs.map((a, i) => {
+                        const nombre  = a.nombre_huesped || '—';
+                        const rut     = a.rut_huesped    || '—';
+                        const empresa = a.v2_empresas?.nombre || '—';
+                        const fechaIn = (a.fecha_checkin||'').split('T')[0] || '—';
+                        const salidaProg = a.fecha_salida_programada || '—';
+                        const checkout   = a.fecha_checkout ? a.fecha_checkout.split('T')[0] : '—';
+                        const ini = new Date((a.fecha_checkin||'').split('T')[0]+'T00:00:00');
+                        const fin = a.fecha_checkout ? new Date(a.fecha_checkout.split('T')[0]+'T00:00:00') : new Date();
+                        const dias = Math.max(0, Math.round((fin - ini)/86400000));
+
+                        let estado, eColor;
+                        if (a.fecha_checkout)        { estado = '🚪 Checkout';   eColor = '#64748b'; }
+                        else if (a.huesped_confirmo) { estado = '✅ Confirmado'; eColor = '#10b981'; }
+                        else                          { estado = '⏳ Activo';     eColor = '#f59e0b'; }
+
+                        const empColor = colorStr(empresa);
+                        const rowBg = i % 2 ? 'var(--bg)' : 'transparent';
+                        const inicial = nombre.charAt(0).toUpperCase();
+                        return `<tr style="border-bottom:1px solid var(--border);background:${rowBg}">
+                          <td style="padding:10px 14px;font-size:12px;font-weight:700;color:var(--text-muted)">${i + 1}</td>
+                          <td style="padding:10px 14px">
+                            <div style="display:flex;align-items:center;gap:9px">
+                              <div style="width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,#0ea5e9,#0369a1);color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;flex-shrink:0">${inicial}</div>
+                              <span style="font-weight:700;font-size:13px;color:var(--text-primary)">${nombre}</span>
+                            </div>
+                          </td>
+                          <td style="padding:10px 14px;font-family:monospace;font-size:12px;color:#6366f1">${rut}</td>
+                          <td style="padding:10px 14px">
+                            <span style="background:${empColor}22;color:${empColor};font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px">${empresa}</span>
+                          </td>
+                          <td style="padding:10px 14px;font-size:12px;color:var(--text-secondary);font-weight:600">${fechaIn}</td>
+                          <td style="padding:10px 14px;font-size:12px;color:var(--text-muted)">${salidaProg}</td>
+                          <td style="padding:10px 14px;font-size:12px;color:${a.fecha_checkout?'#10b981':'var(--text-muted)'};font-weight:${a.fecha_checkout?'700':'400'}">${checkout}</td>
+                          <td style="padding:10px 14px">
+                            <span style="background:#eff6ff;border:1px solid #bfdbfe;color:#1d4ed8;font-size:12px;font-weight:800;padding:3px 10px;border-radius:8px">${dias}d</span>
+                          </td>
+                          <td style="padding:10px 14px;font-size:12px;font-weight:700;color:${eColor}">${estado}</td>
+                        </tr>`;
+                    }).join('')}
+                  </tbody>
+                </table>
+              </div>
+            </div>`;
+
+        } catch(e) {
+            res.innerHTML = `<div style="color:#ef4444;padding:16px;font-weight:600">❌ Error: ${e.message}</div>`;
+        }
+    };
 }
 
 async function exportCSV() {

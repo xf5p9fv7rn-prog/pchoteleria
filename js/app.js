@@ -9,18 +9,20 @@ import { renderV2Infraestructura } from './v2/modules/v2-infraestructura.js';
 import { renderV2Anglo }          from './v2/modules/v2-anglo.js';
 import { renderV2Dashboard } from './v2/modules/v2-dashboard.js';
 import { renderV2Buscador } from './v2/modules/v2-buscador.js';
-import { renderV2Checkin } from './v2/modules/v2-checkin.js';
+import { renderV2Checkin } from './v2/modules/v2-checkin.js?v=20260604-1000';
 import { renderV2Trabajadores } from './v2/modules/v2-trabajadores.js';
-import { renderV2Solicitudes } from './v2/modules/v2-solicitudes.js?v=20260525-1315';
+import { renderV2Solicitudes } from './v2/modules/v2-solicitudes.js?v=20260602-1700';
 import { renderV2CamasPerdidas } from './v2/modules/v2-camas-perdidas.js';
 import { renderV2Cupos }      from './v2/modules/v2-cupos.js';
 import { renderV2Censo }      from './v2/modules/v2-censo.js';
 import { renderCensoTrabajadores } from './v2/modules/v2-censo-trabajadores.js';
 import { renderV2Distribucion } from './v2/modules/v2-distribucion.js';
-import { renderV2Historial }    from './v2/modules/v2-historial.js';
+import { renderV2Historial }    from './v2/modules/v2-historial.js?v=20260602-1730';
 import { renderV2Cama3 }       from './v2/modules/v2-cama3.js';
 import { renderV2Backup }      from './v2/modules/v2-backup.js';
-import { renderV2Asistencia }  from './v2/modules/v2-asistencia.js';
+import { renderV2Asistencia }  from './v2/modules/v2-asistencia.js?v=20260602-1620';
+import { renderReagrupacion }  from './v2/modules/v2-reagrupacion.js';
+import { renderV2InformeEjecutivo } from './v2/modules/v2-informe-ejecutivo.js?v=20260603-1820';
 
 // ── Supervisores autorizados (Cupos por Gerencia + Censo Admin) ──────────────
 const SUPERVISOR_EMAILS = [
@@ -51,7 +53,8 @@ let currentRoute = 'v2dashboard';
 
 const ROUTES = {
     // ── V2 (Sistema Principal) ────────────────────────────────
-    v2dashboard:      { label: 'Dashboard',               icon: '📊', render: renderV2Dashboard },
+    v2dashboard:      { label: 'Dashboard',               icon: '📊', render: renderV2Dashboard, hidden: true },
+    v2informeejecutivo:{ label: 'Informe Ejecutivo',       icon: '📈', render: renderV2InformeEjecutivo },
     v2solicitudes:    { label: 'Solicitudes Pendientes',   icon: '🔔', render: renderV2Solicitudes, badge: true },
     v2infraestructura:{ label: 'Infraestructura',          icon: '🏛️', render: renderV2Infraestructura },
     v2checkin:        { label: 'Check-in / Check-out',     icon: '🛎️', render: renderV2Checkin },
@@ -61,6 +64,7 @@ const ROUTES = {
     v2censotrab:      { label: 'Censo Trabajadores QR',    icon: '📲', render: renderCensoTrabajadores },
     v2trabajadores:   { label: 'Padrón Trabajadores',      icon: '👥', render: renderV2Trabajadores },
     v2camasperdidas:  { label: 'Camas Perdidas',           icon: '🛏️', render: renderV2CamasPerdidas, supervisorOnly: true },
+    v2reagrupacion:   { label: 'Reagrupación de Camas',     icon: '🔀', render: renderReagrupacion,   supervisorOnly: true },
     v2cupos:          { label: 'Cupos por Gerencia',       icon: '📊', render: renderV2Cupos,        supervisorOnly: true },
     v2distribucion:   { label: 'Distribución Habitaciones',icon: '🏨', render: renderV2Distribucion, supervisorOnly: true },
     v2historial:      { label: 'Historial',                 icon: '📋', render: renderV2Historial,   supervisorOnly: true },
@@ -300,7 +304,7 @@ async function initApp() {
     window.addEventListener('solicitudes-updated', () => {
         const content = document.getElementById('page-content');
         if (content && window._currentRoute === 'solicitudes') {
-            import('./modules/solicitudes.js?v=4').then(m => m.renderSolicitudes(content)).catch(() => { });
+            import('./modules/solicitudes.js?v=82').then(m => m.renderSolicitudes(content)).catch(() => { });
         }
     });
 

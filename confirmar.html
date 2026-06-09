@@ -422,15 +422,24 @@
     document.getElementById('rut-input').classList.add('ok');
 
     // ¿Está en ESTA habitación?
-    // Buscar si alguna cama en esta hab está asignada a este RUT
-    // id_cama tiene el id_custom (COPC...) — necesitamos verificar por numero_hab
-    const { data: camaData } = await sb.from('v2_habitaciones')
+    // Paso 1: obtener el id_custom (habitacion_id) de la habitación por numero_hab
+    const { data: habData } = await sb.from('v2_habitaciones')
       .select('id_custom')
       .eq('numero_hab', HAB_NUM)
-      .limit(25);
+      .limit(1);
 
-    const camasDeHab = (camaData || []).map(c => c.id_custom);
-    const esEstHab = camasDeHab.includes(_asignacion.id_cama);
+    const habId = habData?.[0]?.id_custom || null;
+    let esEstHab = false;
+
+    if (habId) {
+      // Paso 2: obtener todas las camas de esa habitación
+      const { data: camaData } = await sb.from('v2_camas')
+        .select('id_cama')
+        .eq('habitacion_id', habId);
+
+      const camasDeHab = (camaData || []).map(c => c.id_cama);
+      esEstHab = camasDeHab.includes(_asignacion.id_cama);
+    }
 
     if (esEstHab) {
       // ✅ Es su habitación

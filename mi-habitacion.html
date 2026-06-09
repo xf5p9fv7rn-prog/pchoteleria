@@ -619,7 +619,7 @@
                             <label>Empresa</label>
                             <div class="val" id="t-company">—</div>
                         </div>
-                        <div class="info-cell right">
+                        <div class="info-cell right" style="display:none">
                             <label>Turno</label>
                             <div class="val" id="t-shift">—</div>
                         </div>
@@ -784,7 +784,7 @@
             const rutSoloNumeros = rutBase.replace(/[^0-9]/g, '');
 
             btn.style.display = 'none';
-            setProgress(30, '🔍 Consultando base de datos V2...');
+            setProgress(30, '✨ Preparando tu experiencia personalizada...');
 
             try {
                 const sb = await getSb();
@@ -869,7 +869,7 @@
                     return;
                 }
 
-                setProgress(60, '🏨 Cargando datos de habitación...');
+                setProgress(60, '🏨 Preparando experiencia personalizada...');
                 const asignacion = data[0];
                 window._currentAsignacion = asignacion;
                 const emp = asignacion.v2_empresas || {};

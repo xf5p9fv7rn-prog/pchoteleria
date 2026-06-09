@@ -202,7 +202,87 @@ async function ejecutarGrupo(rows) {
         console.warn('[Motor] ⚠️ Cupo automático no creado:', eCupo.message);
     }
 
+    // ── PRE-CHECKOUT: liberar ocupantes de las habitaciones que trae el Excel ──
+    // Al cargar una empresa, se hace checkout automático de los ocupantes
+    // actuales de las habitaciones incluidas en el archivo, preparando la rotación.
+    let preCheckoutCount = 0;
+    try {
+        const habsEnCarga = new Set(
+            rows.map(r => String(r.hab_solicitada || '').trim()).filter(Boolean)
+        );
+        if (habsEnCarga.size > 0) {
+            // Convertir número de habitación → habitacion_id
+            const habIdsEnCarga = new Set(
+                [...habsEnCarga].map(num => habByNumero[num]).filter(Boolean)
+            );
+            if (habIdsEnCarga.size > 0) {
+                // Camas que pertenecen a esas habitaciones
+                const camasEnHabs = (camasData||[])
+                    .filter(c => habIdsEnCarga.has(c.habitacion_id))
+                    .map(c => String(c.id_cama));
+
+                if (camasEnHabs.length > 0) {
+                    const ahora = new Date().toISOString();
+                    console.log(`[Motor] 🔄 Pre-checkout: buscando ocupantes en ${habIdsEnCarga.size} hab(s) del Excel...`);
+
+                    // Checkout de asignaciones activas en esas camas (lotes de 50)
+                    let totalCO = 0;
+                    for (let i = 0; i < camasEnHabs.length; i += 50) {
+                        const lote = camasEnHabs.slice(i, i + 50);
+                        const { data: coData } = await supabase.from('v2_asignaciones')
+                            .update({ fecha_checkout: ahora, estado_asignacion: 'checkout_rotacion' })
+                            .in('id_cama', lote)
+                            .is('fecha_checkout', null)
+                            .select('id_cama');
+                        if (coData?.length) totalCO += coData.length;
+                    }
+
+                    // Liberar camas en BD
+                    for (let i = 0; i < camasEnHabs.length; i += 50) {
+                        await supabase.from('v2_camas')
+                            .update({ estado: 'Disponible' })
+                            .in('id_cama', camasEnHabs.slice(i, i + 50))
+                            .neq('estado', 'Deshabilitada');
+                    }
+
+                    // Marcar solicitudes antiguas de esas camas como 'finalizado'
+                    // (para que no reaparezcan como sintéticos en Asistencia)
+                    const rutsOcupantes = (asigActivas||[])
+                        .filter(a => camasEnHabs.includes(String(a.id_cama)))
+                        .map(a => (a.rut_huesped||'').replace(/[\.\-]/g,'').toUpperCase())
+                        .filter(Boolean);
+                    if (rutsOcupantes.length > 0) {
+                        for (let i = 0; i < rutsOcupantes.length; i += 50) {
+                            await supabase.from('v2_solicitudes_b2b')
+                                .update({ status: 'finalizado' })
+                                .in('rut_trabajador', rutsOcupantes.slice(i, i + 50))
+                                .in('status', ['aceptada', 'aceptada_asignada']);
+                        }
+                    }
+
+                    preCheckoutCount = totalCO;
+                    if (totalCO > 0) {
+                        console.log(`[Motor] ✅ Pre-checkout: ${totalCO} ocupantes liberados de ${habsEnCarga.size} habitaciones`);
+                    }
+
+                    // ── Actualizar en memoria para que el motor los vea como libres ──
+                    const preCheckoutCamaSet = new Set(camasEnHabs);
+                    // Remover de asigActivas
+                    const asigActKept = asigActivas.filter(a => !preCheckoutCamaSet.has(String(a.id_cama)));
+                    asigActivas.splice(0, asigActivas.length, ...asigActKept);
+                    // Marcar como Disponible en camasData
+                    for (const c of camasData) {
+                        if (preCheckoutCamaSet.has(String(c.id_cama))) c.estado = 'Disponible';
+                    }
+                }
+            }
+        }
+    } catch(ePreCO) {
+        console.warn('[Motor] ⚠️ Pre-checkout error (no crítico):', ePreCO.message);
+    }
+
     // Índice directo: id_cama → { habitacion_id, estado }
+
     const camaIndex={};
     for(const c of camasData||[]) camaIndex[String(c.id_cama)]=c;
 
@@ -247,8 +327,17 @@ async function ejecutarGrupo(rows) {
 
     // ── Índice rut → cama activa (para detectar trabajadores ya asignados) ──────
     // Permite saltar duplicados si la carga tiene el mismo RUT+habitación ya registrado.
+    // IMPORTANTE: excluir trabajadores en ROTACIÓN (su asignación termina hoy o antes
+    // de que llegue el nuevo lote). Aunque tienen fecha_checkout=null, su período
+    // ya terminó y DEBEN poder ser reasignados para el nuevo período.
     const rutACamaActiva = {}; // rut_normalizado → id_cama
     for(const a of asigActivas||[]) {
+        // Si este trabajador está en una cama de rotación (se va hoy o antes del lote),
+        // NO bloquear su RUT → permite que sea reasignado para el período nuevo.
+        if(camasEnRotacion.has(String(a.id_cama))) {
+            console.log(`[Motor] 🔄 RUT ${a.rut_huesped} en rotación (cama ${a.id_cama} se libera ${a.fecha_salida_programada}) — habilitado para reasignar`);
+            continue;
+        }
         // Normalizar igual que el motor: quitar puntos, guiones y espacios
         const rutNorm = String(a.rut_huesped||'').replace(/[.\-\s]/g,'').toUpperCase();
         if(rutNorm) rutACamaActiva[rutNorm] = String(a.id_cama);
@@ -408,58 +497,20 @@ async function ejecutarGrupo(rows) {
         }
         _logCount++;
 
-        // ── Sin cama en hab_pedida → buscar en todo el campamento (NO quedar pendiente) ──
+        // ── Sin cama en hab_pedida → DETENER, no reubicar automaticamente ─────────
+        // REGLA CRITICA: si el trabajador venia con hab_solicitada y la hab
+        //    esta llena o no existe, registrar el problema y parar aqui.
+        //    NO asignar a otra habitacion para evitar reacciones en cadena.
         if (!camaAsignada && habPedida) {
-            // Primero registrar el motivo para el log/resumen
-            const razon = habByNumero[habPedida]
-                ? `Hab. ${habPedida} llena → reubicado`
-                : `Hab. ${habPedida} no encontrada → reubicado`;
-            console.warn(`[Motor] ⚠️ ${nombre}: ${razon} — buscando cama libre en todo el campamento...`);
-
-            // Nivel A: misma empresa ya en alguna habitación
-            const habsConEstaEmpresa = new Set(
-                (asigActivas||[])
-                    .filter(a => String(a.empresa_id) === String(empresaId))
-                    .map(a => camaIndex[String(a.id_cama)]?.habitacion_id)
-                    .filter(Boolean)
-            );
-            for (const habId of habsConEstaEmpresa) {
-                const hab = habMap[habId];
-                if (hab) {
-                    const ci = hab.libres.findIndex(cId => camaLibreEnFechas(cId, rowCheckin, rowSalida));
-                    if (ci >= 0) { camaAsignada = hab.libres[ci]; registrarCamaUsada(camaAsignada, rowCheckin, rowSalida); break; }
-                }
-            }
-            // Nivel B: habitación vacía
-            if (!camaAsignada) {
-                for (const [habId, hab] of Object.entries(habMap)) {
-                    const yaOcupada = (asigActivas||[]).some(a =>
-                        camaIndex[String(a.id_cama)]?.habitacion_id === habId);
-                    if (!yaOcupada) {
-                        const ci = hab.libres.findIndex(cId => camaLibreEnFechas(cId, rowCheckin, rowSalida));
-                        if (ci >= 0) { camaAsignada = hab.libres[ci]; registrarCamaUsada(camaAsignada, rowCheckin, rowSalida); break; }
-                    }
-                }
-            }
-            // Nivel C: cualquier cama libre en el campamento
-            if (!camaAsignada) {
-                for (const hab of Object.values(habMap)) {
-                    const ci = hab.libres.findIndex(cId => camaLibreEnFechas(cId, rowCheckin, rowSalida));
-                    if (ci >= 0) { camaAsignada = hab.libres[ci]; registrarCamaUsada(camaAsignada, rowCheckin, rowSalida); break; }
-                }
-            }
-
-            if (camaAsignada) {
-                const habAsig = idCustomToNumero[camaIndex[String(camaAsignada)]?.habitacion_id] || '?';
-                console.log(`[Motor] 🔄 ${nombre}: reubicado de hab ${habPedida} → hab ${habAsig} cama ${camaAsignada}`);
-                _automaticos++;
-            } else {
-                // Genuinamente sin camas en TODO el campamento
-                sinAsignar.push({ nombre, rut, habPedida, razon: `Sin camas libres en todo el campamento`, sugerencias: [], rowId: row.id });
-                console.warn(`[Motor] ❌ ${nombre}: sin camas disponibles en ningún lado`);
-                continue;
-            }
+            const habExiste = !!habByNumero[habPedida];
+            const razon = habExiste
+                ? `Hab. ${habPedida} llena o sin camas libres en las fechas solicitadas`
+                : `Hab. ${habPedida} no existe en el sistema`;
+            console.warn(`[Motor] DETENIDO ${nombre}: ${razon} - intervencion manual requerida`);
+            sinAsignar.push({ nombre, rut, habPedida, razon, sugerencias: [], rowId: row.id });
+            continue; // no asignar a ninguna otra hab
         }
+
 
         // ESCENARIO 2: solo si NO tenía hab_pedida → auto-asignación libre (date-aware)
         if(!camaAsignada) {
@@ -602,7 +653,7 @@ async function ejecutarGrupo(rows) {
         if(camasActivas.length>0)
             await supabase.from('v2_camas').update({estado:'Ocupada'}).in('id_cama',camasActivas);
         if(camasPreAsignadas.length>0)
-            await supabase.from('v2_camas').update({estado:'Disponible'}).in('id_cama',camasPreAsignadas);
+            await supabase.from('v2_camas').update({estado:'Disponible'}).in('id_cama',camasPreAsignadas).neq('estado', 'Deshabilitada');
 
         // Marcar como aceptadas SOLO las que tienen asignación creada/actualizada exitosamente
         if (rowsInsertados.length > 0) {
@@ -655,7 +706,8 @@ async function ejecutarGrupo(rows) {
     console.log('[Motor] 🏢 Distribución por edificio:', edificioConteo);
 
     return {ok:true, asignados:asignaciones.length, fallidos, sinAsignar, empresa,
-            correctos:_correctos, automaticos:_automaticos, edificios:edificioResumen};
+            correctos:_correctos, automaticos:_automaticos, edificios:edificioResumen,
+            preCheckout: preCheckoutCount};
 }
 
 // ── Almacén en memoria para grupos (evita JSON inline en onclick) ────────────
@@ -711,7 +763,7 @@ window._solLimpiarYReasignar = async function(empresa) {
             if(asigPrevias?.length) {
                 step(`Liberando ${asigPrevias.length} camas...`);
                 const camasLiberadas=asigPrevias.map(a=>a.id_cama);
-                await supabase.from('v2_camas').update({estado:'Disponible'}).in('id_cama',camasLiberadas);
+                await supabase.from('v2_camas').update({estado:'Disponible'}).in('id_cama',camasLiberadas).neq('estado', 'Deshabilitada');
 
                 step('Eliminando asignaciones previas...');
                 await supabase.from('v2_asignaciones').delete().in('id',asigPrevias.map(a=>a.id));
@@ -808,6 +860,15 @@ window._solReintentarUno = async function(id) {
 function grupoCardHTML(empresa, rows) {
     const gKey = _grupoIdx++;
     window._gruposData[gKey] = rows;
+    // ── Metadatos por lista (para borrar/checkout solo esta carga) ────────────
+    window._gruposMetadata = window._gruposMetadata || {};
+    window._gruposMetadata[gKey] = {
+        empresa,
+        contrato: rows[0]?.n_contrato  || null,
+        fechaIn:  rows[0]?.fecha_llegada || null,
+        fechaOut: rows[0]?.fecha_salida  || null,
+        ids:      rows.map(r => r.id).filter(Boolean),
+    };
     const tableId = `pend-table-${gKey}`;
 
     const isPending = rows.every(r=>r.status==='pendiente');
@@ -840,7 +901,19 @@ function grupoCardHTML(empresa, rows) {
             <td style="padding:7px 10px;text-align:center">
                 ${r.hab_solicitada
                     ? `<span style="background:#dcfce7;color:#15803d;padding:2px 10px;border-radius:99px;font-size:12px;font-weight:700">🏠 ${r.hab_solicitada}</span>`
-                    : `<span style="background:#fef3c7;color:#92400e;padding:2px 10px;border-radius:99px;font-size:12px">Sin asignar</span>`}
+                    : `<div style="display:inline-flex;align-items:center;gap:4px">
+                        <input type="text"
+                            id="inp-hab-${r.id}"
+                            placeholder="N° hab"
+                            maxlength="8"
+                            onkeydown="if(event.key==='Enter'){event.stopPropagation();window._solSetHabManual('${r.id}','${gKey}',this.value)}"
+                            onclick="event.stopPropagation()"
+                            style="width:68px;border:1.5px solid #c4b5fd;border-radius:7px;padding:3px 6px;font-size:12px;text-align:center;outline:none;font-family:monospace;background:#faf5ff;color:#5b21b6;font-weight:700">
+                        <button
+                            onclick="event.stopPropagation();window._solSetHabManual('${r.id}','${gKey}',document.getElementById('inp-hab-${r.id}').value)"
+                            title="Guardar habitación"
+                            style="padding:3px 8px;border:none;border-radius:6px;background:#7c3aed;color:#fff;font-size:12px;font-weight:700;cursor:pointer;line-height:1.4">✓</button>
+                       </div>`}
             </td>
             <td style="padding:7px 10px;text-align:center;font-size:12px">${r.genero||'—'}</td>
             <td style="padding:7px 10px;font-size:12px;color:#64748b">${fmt(r.fecha_llegada)} → ${fmt(r.fecha_salida)}</td>
@@ -851,6 +924,16 @@ function grupoCardHTML(empresa, rows) {
                     style="padding:4px 10px;border:none;border-radius:7px;background:linear-gradient(135deg,#7c3aed,#a78bfa);color:#fff;font-weight:700;font-size:11px;cursor:pointer">
                     🔍 Sugerir
                 </button>` : `<span style="color:#94a3b8;font-size:11px">—</span>`}
+            </td>
+            <td style="padding:7px 10px;text-align:center">
+                <button
+                    onclick="event.stopPropagation();window._solBorrarUno('${r.id}','${rutB64}','${nombreB64}','${gKey}')"
+                    title="Eliminar este trabajador de la lista"
+                    style="padding:3px 9px;border:none;border-radius:7px;background:#fee2e2;color:#b91c1c;font-size:14px;cursor:pointer;line-height:1.4;transition:background .2s"
+                    onmouseover="this.style.background='#fecaca'"
+                    onmouseout="this.style.background='#fee2e2'">
+                    🗑️
+                </button>
             </td>
         </tr>`;
     }).join('');
@@ -882,12 +965,17 @@ function grupoCardHTML(empresa, rows) {
                 ${gLabel?`<span style="background:${gColor};color:${gTextColor};padding:4px 12px;border-radius:99px;font-size:12px;font-weight:700">${gLabel}</span>`:''}
                 ${isPending?`<span style="background:#fef9c3;color:#92400e;padding:4px 12px;border-radius:99px;font-size:12px;font-weight:800">⏳ Pendiente</span>`:`<span style="background:#dcfce7;color:#15803d;padding:4px 12px;border-radius:99px;font-size:12px;font-weight:800">✅ Procesada</span>`}
                 <button onclick="event.stopPropagation();window._solDescargarExcelGrupo(${gKey})"
-                    title="Descargar Excel de esta empresa"
+                    title="Descargar Excel de esta lista"
                     style="padding:5px 12px;border:none;border-radius:8px;background:#1e40af;color:#fff;font-weight:700;font-size:11px;cursor:pointer">
                     📥 Excel
                 </button>
-                <button data-empresa="${empresa.replace(/"/g,'&quot;')}" onclick="event.stopPropagation();window._solBorrarListaEmpresa(this.dataset.empresa)"
-                    title="Borrar toda la lista de solicitudes (para volver a cargar el Excel)"
+                <button data-gkey="${gKey}" onclick="event.stopPropagation();window._solCheckoutLista(parseInt(this.dataset.gkey))"
+                    title="Realizar Check-Out de los trabajadores de SOLO esta lista"
+                    style="padding:5px 12px;border:none;border-radius:8px;background:linear-gradient(135deg,#0369a1,#0ea5e9);color:#fff;font-weight:700;font-size:11px;cursor:pointer">
+                    🚪 Check Out
+                </button>
+                <button data-gkey="${gKey}" onclick="event.stopPropagation();window._solBorrarLista(parseInt(this.dataset.gkey))"
+                    title="Borrar SOLO esta lista de solicitudes (no afecta otras listas de la misma empresa)"
                     style="padding:5px 12px;border:none;border-radius:8px;background:#fee2e2;color:#b91c1c;font-weight:700;font-size:11px;cursor:pointer">
                     🗑️ Borrar lista
                 </button>
@@ -915,6 +1003,7 @@ function grupoCardHTML(empresa, rows) {
                             <th style="padding:8px 10px;text-align:center;font-size:10px;color:#94a3b8;font-weight:700;text-transform:uppercase">Género</th>
                             <th style="padding:8px 10px;text-align:left;font-size:10px;color:#94a3b8;font-weight:700;text-transform:uppercase">Fechas</th>
                             <th style="padding:8px 10px;text-align:center;font-size:10px;color:#94a3b8;font-weight:700;text-transform:uppercase">Asignación</th>
+                            <th style="padding:8px 10px;text-align:center;font-size:10px;color:#b91c1c;font-weight:700;text-transform:uppercase">Borrar</th>
                         </tr>
                     </thead>
                     <tbody>${workerRows}</tbody>
@@ -1175,34 +1264,249 @@ window._solAsignarSugerida = async function(solicitudId, rutB64, camaId) {
     } catch(e) { alert('❌ Error: '+e.message); }
 };
 
-// ── Borrar SOLO la lista de solicitudes (sin tocar asignaciones/camas) ──────
-window._solBorrarListaEmpresa = async function(empresa) {
-    if(!empresa) { alert('Error: empresa no definida'); return; }
-    const {data:sol} = await supabase.from('v2_solicitudes_b2b')
-        .select('id',{count:'exact'}).ilike('empresa',empresa);
-    const total = sol?.length || 0;
-    if(!total) { toast('No hay registros para borrar'); return; }
-    if(!await _solConfirm(`¿Borrar la lista de ${total} solicitudes de ${empresa}?
+// ── Asignar habitación manual desde el input inline de la tabla ─────────────
+window._solSetHabManual = async function(solicitudId, gKey, numHab) {
+    numHab = (numHab || '').toString().trim();
+    if (!numHab) {
+        const inp = document.getElementById('inp-hab-' + solicitudId);
+        if (inp) {
+            inp.style.borderColor = '#ef4444';
+            inp.focus();
+            setTimeout(() => { inp.style.borderColor = '#c4b5fd'; }, 1500);
+        }
+        return;
+    }
+    const inp = document.getElementById('inp-hab-' + solicitudId);
+    if (inp) { inp.disabled = true; inp.style.opacity = '0.5'; }
+    try {
+        const { error } = await supabase
+            .from('v2_solicitudes_b2b')
+            .update({ hab_solicitada: numHab })
+            .eq('id', solicitudId);
+        if (error) throw new Error(error.message);
+        // Refrescar la vista de solicitudes pendientes
+        window._renderV2Solicitudes?.();
+    } catch(e) {
+        if (inp) { inp.disabled = false; inp.style.opacity = '1'; }
+        alert('❌ Error al guardar habitación: ' + e.message);
+    }
+};
 
-Solo se elimina la lista — las asignaciones y camas NO se modifican.
-Después puedes volver a cargar el Excel.`, {confirmText:'🗑️ Borrar lista', danger:true})) return;
+// ── Borrar SOLO la lista de solicitudes (sin tocar asignaciones/camas) ──────
+// ── _solBorrarListaEmpresa: alias de compatibilidad → usa _solBorrarLista ─────
+window._solBorrarListaEmpresa = function(empresa) {
+    // Busca el gKey cuya metadata tenga esa empresa
+    const meta = window._gruposMetadata || {};
+    const key = Object.keys(meta).find(k => meta[k].empresa === empresa);
+    if(key != null) { window._solBorrarLista(parseInt(key)); }
+    else { toast('⚠️ Recarga la página antes de borrar', 'warn'); }
+};
+
+/**
+ * _solBorrarLista(gKey)
+ * Borra ÚNICAMENTE los registros de la lista seleccionada por sus IDs.
+ * NO filtra por empresa — garantiza que otras listas de la misma empresa
+ * no sean afectadas aunque tengan el mismo contrato.
+ */
+window._solBorrarLista = async function(gKey) {
+    const data = window._gruposData[gKey];
+    const rows = Array.isArray(data) ? data : (data?.allRows || data?.rows || []);
+    const meta = (window._gruposMetadata || {})[gKey] || {};
+    const empresa = meta.empresa || rows[0]?.empresa || 'esta empresa';
+    const ids = (meta.ids?.length ? meta.ids : rows.map(r => r.id)).filter(Boolean);
+    const ruts = [...new Set(rows.map(r => r.rut_trabajador).filter(Boolean))];
+
+    if(!ids.length) { toast('No hay registros en esta lista', 'warn'); return; }
+    if(!await _solConfirm(
+        `¿Borrar esta lista de ${ids.length} solicitudes de "${empresa}"?\n\n` +
+        `Período: ${meta.fechaIn||'—'} → ${meta.fechaOut||'—'}\n` +
+        `N° Contrato: ${meta.contrato||'—'}\n\n` +
+        `• Se hará Check-Out de los trabajadores asignados\n` +
+        `• Las camas quedarán libres\n` +
+        `• Desaparecerán de Control de Asistencia e Infraestructura\n` +
+        `Solo se elimina ESTA lista — otras listas no se ven afectadas.`,
+        {confirmText:'🗑️ Borrar y liberar', danger:true}
+    )) return;
+
+    // ── Overlay de progreso ────────────────────────────────────────────────────
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:99999;display:flex;align-items:center;justify-content:center';
+    overlay.innerHTML = `<div style="background:#fff;border-radius:20px;padding:32px 40px;text-align:center;min-width:340px">
+        <div style="font-size:36px;margin-bottom:10px">🗑️</div>
+        <div style="font-weight:900;font-size:15px;margin-bottom:6px">Borrando lista: ${empresa}</div>
+        <div id="_bl_txt" style="font-size:13px;color:#64748b;min-height:20px;margin-bottom:12px">Preparando…</div>
+        <div style="height:7px;background:#f1f5f9;border-radius:99px;overflow:hidden">
+            <div id="_bl_prog" style="height:100%;width:0%;background:linear-gradient(90deg,#b91c1c,#ef4444);transition:width .4s;border-radius:99px"></div>
+        </div></div>`;
+    document.body.appendChild(overlay);
+    const setStep = (txt, pct) => {
+        const el = document.getElementById('_bl_txt');
+        const pr = document.getElementById('_bl_prog');
+        if(el) el.textContent = txt;
+        if(pr && pct !== undefined) pr.style.width = pct + '%';
+    };
 
     try {
-        const {error} = await supabase.from('v2_solicitudes_b2b')
-            .delete().ilike('empresa',empresa);
+        // PASO 1: Obtener detalles de las solicitudes y empresa
+        const {data:sols} = await supabase.from('v2_solicitudes_b2b').select('rut_trabajador,nombre_trabajador').in('id', ids);
+        const rutsNorm = [...new Set((sols||[]).map(s=>String(s.rut_trabajador||'').replace(/[.\-\s]/g,'').toUpperCase().slice(0,12)).filter(Boolean))];
+        const nombresNorm = [...new Set((sols||[]).map(s=>s.nombre_trabajador).filter(Boolean))];
+        
+        const {data:empRows} = await supabase.from('v2_empresas').select('id').ilike('nombre', empresa).limit(1);
+        const empId = empRows?.[0]?.id;
+
+        setStep(`Buscando asignaciones activas de la lista…`, 20);
+        let asigIds = [], camaIds = [];
+        
+        // PASO 2: Buscar asignaciones activas (fecha_checkout=null) por RUT o Nombre + Empresa
+        if(empId && (rutsNorm.length > 0 || nombresNorm.length > 0)) {
+            let query = supabase.from('v2_asignaciones').select('id,id_cama').is('fecha_checkout', null).eq('empresa_id', empId);
+            
+            // Construir filtro OR para RUT o Nombres
+            let orFiltros = [];
+            if (rutsNorm.length > 0) orFiltros.push(`rut_huesped.in.(${rutsNorm.join(',')})`);
+            if (nombresNorm.length > 0) orFiltros.push(`nombre_huesped.in.(${nombresNorm.map(n=>`"${n}"`).join(',')})`);
+            
+            query = query.or(orFiltros.join(','));
+            
+            const {data:asigs} = await query;
+            asigIds  = (asigs||[]).map(a => a.id);
+            camaIds  = [...new Set((asigs||[]).map(a => a.id_cama).filter(Boolean))];
+        }
+
+        // PASO 3: Liberar camas INMEDIATAMENTE
+        setStep(`Liberando ${camaIds.length} camas…`, 45);
+        if(camaIds.length) {
+            for(let i = 0; i < camaIds.length; i += 50) {
+                await supabase.from('v2_camas')
+                    .update({ estado: 'Disponible' })
+                    .in('id_cama', camaIds.slice(i, i + 50))
+                    .neq('estado', 'Deshabilitada');
+            }
+        }
+
+        // PASO 4: Eliminar asignaciones por completo (DELETE)
+        setStep(`Borrando ${asigIds.length} asignaciones…`, 65);
+        if(asigIds.length) {
+            for(let i = 0; i < asigIds.length; i += 50) {
+                await supabase.from('v2_asignaciones')
+                    .delete()
+                    .in('id', asigIds.slice(i, i + 50));
+            }
+        }
+
+        // PASO 5: Eliminar solicitudes de B2B
+        setStep('Eliminando solicitudes…', 85);
+        const {error} = await supabase.from('v2_solicitudes_b2b').delete().in('id', ids);
         if(error) throw new Error(error.message);
-        toast(`✅ Lista de ${empresa} borrada (${total} registros) — ya puedes volver a cargar el Excel`);
+
+        setStep('✅ Lista borrada', 100);
+        await new Promise(r => setTimeout(r, 700));
+        overlay.remove();
+        toast(
+            `✅ Lista de "${empresa}" borrada · ${asigIds.length} checkout · ${camaIds.length} camas liberadas`,
+            'success'
+        );
         window._renderV2Solicitudes?.();
         refreshBadge();
     } catch(e) {
+        overlay.remove();
         alert('❌ Error al borrar lista:\n'+e.message);
     }
 };
 
-// ── Descargar Excel del grupo ────────────────────────────────────────────────
+// ── Borrar UN SOLO trabajador de la lista (checkout + liberar cama + eliminar solicitud) ──
+window._solBorrarUno = async function(solicitudId, rutB64, nombreB64, gKey) {
+    const rut    = decodeURIComponent(escape(atob(rutB64)));
+    const nombre = decodeURIComponent(escape(atob(nombreB64)));
+
+    if (!await _solConfirm(
+        `¿Eliminar a "${nombre}" (${rut}) de esta lista?\n\n` +
+        `• Si tiene cama asignada, se registrará Check-Out\n` +
+        `• La cama quedará disponible\n` +
+        `• Solo se borra este trabajador`,
+        { confirmText: '🗑️ Eliminar', danger: true }
+    )) return;
+
+    try {
+        // 1. Obtener detalles de la solicitud a borrar (RUT, Nombre, Empresa)
+        const { data: sol } = await supabase.from('v2_solicitudes_b2b').select('rut_trabajador,nombre_trabajador,empresa').eq('id', solicitudId).single();
+        const rutSol = sol?.rut_trabajador || rut || '';
+        const nomSol = sol?.nombre_trabajador || nombre || '';
+        const empSol = sol?.empresa || '';
+        
+        const rutNorm = String(rutSol).replace(/[.\-\s]/g,'').toUpperCase().slice(0,12);
+        
+        // Obtener empresa_id
+        let empId = null;
+        if(empSol) {
+            const {data:empRows} = await supabase.from('v2_empresas').select('id').ilike('nombre', empSol).limit(1);
+            empId = empRows?.[0]?.id;
+        }
+
+        // Buscar asignación activa por RUT o Nombre
+        let asigIds = [], camaIds = [];
+        if(empId && (rutNorm || nomSol)) {
+            let query = supabase.from('v2_asignaciones').select('id,id_cama').is('fecha_checkout', null).eq('empresa_id', empId);
+            
+            let orFiltros = [];
+            if (rutNorm) orFiltros.push(`rut_huesped.eq.${rutNorm}`);
+            if (nomSol)  orFiltros.push(`nombre_huesped.eq."${nomSol}"`);
+            
+            if (orFiltros.length > 0) {
+                query = query.or(orFiltros.join(','));
+                const { data: asigs } = await query;
+                asigIds = (asigs || []).map(a => a.id);
+                camaIds = [...new Set((asigs || []).map(a => a.id_cama).filter(Boolean))];
+            }
+        }
+
+        // 2. Liberar camas INMEDIATAMENTE
+        if (camaIds.length) {
+            await supabase.from('v2_camas')
+                .update({ estado: 'Disponible' })
+                .in('id_cama', camaIds)
+                .neq('estado', 'Deshabilitada');
+        }
+
+        // 3. Eliminar asignaciones por completo (DELETE)
+        if (asigIds.length) {
+            await supabase.from('v2_asignaciones')
+                .delete()
+                .in('id', asigIds);
+        }
+
+        // 3. Liberar camas
+        if (camaIds.length) {
+            await supabase.from('v2_camas')
+                .update({ estado: 'Disponible' })
+                .in('id_cama', camaIds)
+                .neq('estado', 'Deshabilitada');
+        }
+
+        // 4. Eliminar la solicitud
+        const { error } = await supabase
+            .from('v2_solicitudes_b2b')
+            .delete()
+            .eq('id', solicitudId);
+        if (error) throw new Error(error.message);
+
+        const camasTxt = camaIds.length
+            ? ` · ${camaIds.length} cama${camaIds.length !== 1 ? 's' : ''} liberada${camaIds.length !== 1 ? 's' : ''}`
+            : '';
+        toast(`✅ ${nombre} eliminado${camasTxt}`, 'success');
+        window._renderV2Solicitudes?.();
+    } catch(e) {
+        alert('❌ Error al eliminar trabajador:\n' + e.message);
+    }
+};
+
+
 
 window._solDescargarExcelGrupo = async function(gKey) {
-    const rows = window._gruposData[gKey];
+    const _raw = window._gruposData[gKey];
+    // Soporta formato array (Pendientes) y objeto {allRows} (Historial)
+    const rows = Array.isArray(_raw) ? _raw : (_raw?.allRows || _raw?.rows || []);
     if(!rows?.length) { alert('No hay datos disponibles'); return; }
 
     if(!window.XLSX) {
@@ -1721,11 +2025,12 @@ export async function renderV2Solicitudes(container) {
             // Fechas — FECHA INI / FECHA TERM son los nombres exactos del Excel Aramark/Hualpen
             const cLle = fc('llegada','checkin','ingreso','inicio','fecha llegada','fechallegada','entrada','desde','fecha inicio','ini','fechaini','fecha ini');
             const cSal = fc('salida','checkout','termino','fin','fecha salida','fechasalida','hasta','fecha fin','fecha termino','term','fechaterm','fecha term');
-            // Género (SEX / SEXO / GÉNERO)
-            const cGen = fc('genero','sexo','gender','sex','sexo trab');
-            // TIPO: turno día / turno noche — busca 'tipo' primero (no 'turno' para evitar confusión
-            // con la col TURNO que contiene "Turno 1", "Turno 2" y no es la jornada)
-            const cTipo = fc('tipo','tipoturno','tipo turno','jornada','shift');
+            // Género: por nombre de columna O por posición P (columna 16, índice 15)
+            const cGen = fc('genero','sexo','gender','sex','sexo trab') ||
+                         (headers.length > 15 ? headers[15] : null); // columna P
+            // Turno Día/Noche: por nombre de columna O por posición L (columna 12, índice 11)
+            const cTipo = fc('tipo','tipoturno','tipo turno','jornada','shift','turno dia','turno noche','dia noche','d n') ||
+                          (headers.length > 11 ? headers[11] : null); // columna L
 
             // ── Validaciones con mensaje informativo ────────────────────────────
             const tieneNombre = !!(cNomCompleto || cNomSolo || cApePat || cApeSolo);
@@ -1745,7 +2050,7 @@ export async function renderV2Solicitudes(container) {
                 detail(`⚠️ No se encontró columna de Habitación. Se cargará sin hab. asignada para que el motor la busque automáticamente.\nColumnas encontradas: ${colsList}`);
             }
 
-            detail(`Columnas detectadas: ${[cRut&&'RUT',tieneNombre&&'Nombre',cHab&&'Hab',cTipo&&'Tipo',cLle&&'Llegada',cSal&&'Salida'].filter(Boolean).join(', ')}`);
+            detail(`Columnas detectadas: ${[cRut&&`RUT(${cRut})`,tieneNombre&&'Nombre',cHab&&`Hab(${cHab})`,cGen&&`Género(${cGen})`,cTipo&&`Turno(${cTipo})`,cLle&&`Llegada(${cLle})`,cSal&&`Salida(${cSal})`].filter(Boolean).join(', ')}`);
 
             const hoy = new Date().toISOString().split('T')[0];
             function parseFecha(v) {
@@ -1802,25 +2107,32 @@ export async function renderV2Solicitudes(container) {
                     nom = [ap, am||ap2, nm].filter(Boolean).join(' ').trim();
                 }
 
-                const rut  = String(row[cRut]||'').replace(/[.\s]/g,'').trim().toUpperCase();
+                const rut  = String(row[cRut]||'').replace(/[.\-\s]/g,'').trim().toUpperCase();
                 const emp  = String(row[cEmp]||'').trim();
                 const ger  = cGer ? String(row[cGer]||'').trim() : '';
                 const con  = cCon ? String(row[cCon]||'').trim() : '';
                 const hab  = cHab ? (String(row[cHab]||'').replace(/[\s.,]/g,'').trim() || null) : null;
                 const lle  = parseFecha(cLle ? row[cLle] : null) || hoy;
                 const sal  = parseFecha(cSal ? row[cSal] : null) || null;
-                const gR   = cGen ? String(row[cGen]||'').trim().toUpperCase() : '';
-                const gen  = gR.startsWith('F')?'F':gR.startsWith('M')?'M':null;
-                const tipo = cTipo ? parseTurno(row[cTipo]) : null;
+                const gR   = cGen  ? String(row[cGen]||'').trim().toUpperCase() : '';
+                const gen  = gR.startsWith('F')?'F':gR.startsWith('M')?'M':
+                             gR==='1'?'F':gR==='2'?'M':null;  // algunos Excel usan 1=F, 2=M
+                const tipoRaw = cTipo ? String(row[cTipo]||'').trim() : '';
+                const tipo = parseTurno(tipoRaw);
 
                 if(!nom && !rut) continue;
                 if(!hab) sinHab++; // no hab → sigue (hab_solicitada quedará null → motor auto-asigna)
 
+                // Extraer el nombre de la empresa DESDE EL NOMBRE DEL ARCHIVO (quitando la extensión)
+                // como regla de negocio obligatoria.
+                const empresaDesdeArchivo = file.name.replace(/\.[^/.]+$/, "").trim();
+
                 registros.push({
-                    empresa:           emp||'Sin empresa',
+                    empresa:           empresaDesdeArchivo || emp || 'Sin empresa',
                     nombre_trabajador: nom||rut,
                     rut_trabajador:    rut||null,
                     genero:            gen,
+                    turno:             tipo,          // ← GUARDADO (columna L del Excel)
                     n_contrato:        con||null,
                     gerencia:          ger||null,
                     hab_solicitada:    hab,
@@ -1874,6 +2186,7 @@ export async function renderV2Solicitudes(container) {
 
             const totalAsig=resultados.reduce((s,r)=>s+(r.asignados||0),0);
             const totalFall=resultados.reduce((s,r)=>s+(r.fallidos?.length||0),0);
+            const totalPreCO=resultados.reduce((s,r)=>s+(r.preCheckout||0),0);
             const resHTML=resultados.map(r=>{
                 const col=r.ok?'#15803d':'#b91c1c', bg=r.ok?'#dcfce7':'#fee2e2', ico=r.ok?'✅':'❌';
                 return `<div style="display:flex;justify-content:space-between;padding:8px 12px;background:${bg};border-radius:8px;margin-bottom:6px">
@@ -1887,7 +2200,7 @@ export async function renderV2Solicitudes(container) {
                 <div style="display:flex;align-items:center;gap:12px;margin-bottom:18px">
                     <div style="font-size:36px">📂</div>
                     <div><div style="font-weight:900;font-size:17px;color:#0f172a">Carga completada</div>
-                    <div style="font-size:12px;color:#64748b;margin-top:3px">✅ ${totalAsig} asignados${totalFall>0?` · ⚠️ ${totalFall} sin cama`:''}${sinHab>0?` · ℹ️ ${sinHab} omitidas`:''}</div></div>
+                    <div style="font-size:12px;color:#64748b;margin-top:3px">✅ ${totalAsig} asignados${totalPreCO>0?` · 🔄 ${totalPreCO} check-out automático`:''}${totalFall>0?` · ⚠️ ${totalFall} sin cama`:''}${sinHab>0?` · ℹ️ ${sinHab} omitidas`:''}</div></div>
                 </div>
                 <div style="max-height:260px;overflow-y:auto;margin-bottom:16px">${resHTML}</div>
                 <button onclick="this.closest('[style*=fixed]').remove();window._solTab('history')"
@@ -1947,16 +2260,22 @@ async function renderTab(tab) {
         }
 
         if(tab==='pending') {
-            // Agrupar por empresa
+            // ── Agrupar por CARGA: empresa + contrato + fecha_llegada + fecha_salida
+            // Regla: misma empresa con mismo contrato Y mismas fechas = misma lista.
+            // Misma empresa con distinto contrato O distintas fechas = listas separadas.
             const grupos={};
             for(const r of reqs) {
-                const key=r.empresa||'Sin empresa';
+                const key=(r.empresa||'Sin empresa')+'||'+(r.n_contrato||'')+'||'+(r.fecha_llegada||'')+'||'+(r.fecha_salida||'');
                 if(!grupos[key]) grupos[key]=[];
                 grupos[key].push(r);
             }
-            body.innerHTML=Object.entries(grupos)
-                .sort(([a],[b])=>a.localeCompare(b))
-                .map(([emp,rows])=>grupoCardHTML(emp,rows))
+            body.innerHTML=Object.values(grupos)
+                .sort((a,b)=>{
+                    const ec=(a[0]?.empresa||'').localeCompare(b[0]?.empresa||'');
+                    if(ec!==0) return ec;
+                    return (a[0]?.fecha_llegada||'').localeCompare(b[0]?.fecha_llegada||'');
+                })
+                .map(rows=>grupoCardHTML(rows[0]?.empresa||'Sin empresa', rows))
                 .join('');
         } else {
             // HISTORIAL: agrupado por empresa + contrato + fecha_llegada + fecha_salida
@@ -2009,17 +2328,94 @@ async function renderTab(tab) {
                 g.rows = Object.values(uniqueRows);
             }
 
-            const cards=Object.values(grupos)
-                .sort((a,b)=>{
-                    const ec=a.empresa.localeCompare(b.empresa);
-                    if(ec!==0) return ec;
-                    return (b.fechaOut||'').localeCompare(a.fechaOut||'');
-                })
-                .map(g=>{
+            // ── Guardar todos los grupos para filtrado ──
+            window._histGrupos = Object.values(grupos);
+            window._histSortAsc = true;
+
+            const empresasUnicas = [...new Set(window._histGrupos.map(g=>g.empresa))].sort();
+            body.innerHTML = `
+            <div id="hist-filters" style="background:#fff;border:1.5px solid #e2e8f0;border-radius:16px;padding:16px 20px;margin-bottom:16px;display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end">
+              <div style="flex:1;min-width:180px">
+                <div style="font-size:11px;font-weight:700;color:#64748b;margin-bottom:5px;text-transform:uppercase">🏢 Empresa</div>
+                <input id="hf-empresa" list="hf-emp-list" placeholder="Filtrar empresa…" oninput="window._aplicarFiltroHist()"
+                  style="width:100%;padding:9px 12px;border:1.5px solid #e2e8f0;border-radius:10px;font-size:13px;font-weight:600;color:#0f172a;outline:none;box-sizing:border-box"
+                  onfocus="this.style.borderColor='#6366f1'" onblur="this.style.borderColor='#e2e8f0'">
+                <datalist id="hf-emp-list">${empresasUnicas.map(e=>`<option value="${e}">`).join('')}</datalist>
+              </div>
+              <div style="min-width:140px">
+                <div style="font-size:11px;font-weight:700;color:#64748b;margin-bottom:5px;text-transform:uppercase">📅 Desde</div>
+                <input id="hf-desde" type="date" onchange="window._aplicarFiltroHist()"
+                  style="width:100%;padding:9px 12px;border:1.5px solid #e2e8f0;border-radius:10px;font-size:13px;color:#0f172a;outline:none;box-sizing:border-box"
+                  onfocus="this.style.borderColor='#6366f1'" onblur="this.style.borderColor='#e2e8f0'">
+              </div>
+              <div style="min-width:140px">
+                <div style="font-size:11px;font-weight:700;color:#64748b;margin-bottom:5px;text-transform:uppercase">📅 Hasta</div>
+                <input id="hf-hasta" type="date" onchange="window._aplicarFiltroHist()"
+                  style="width:100%;padding:9px 12px;border:1.5px solid #e2e8f0;border-radius:10px;font-size:13px;color:#0f172a;outline:none;box-sizing:border-box"
+                  onfocus="this.style.borderColor='#6366f1'" onblur="this.style.borderColor='#e2e8f0'">
+              </div>
+              <div style="min-width:140px">
+                <div style="font-size:11px;font-weight:700;color:#64748b;margin-bottom:5px;text-transform:uppercase">✅ Estado</div>
+                <select id="hf-status" onchange="window._aplicarFiltroHist()"
+                  style="width:100%;padding:9px 12px;border:1.5px solid #e2e8f0;border-radius:10px;font-size:13px;font-weight:600;color:#0f172a;background:#fff;outline:none;cursor:pointer;box-sizing:border-box">
+                  <option value="">Todos</option>
+                  <option value="aceptada">✅ Aceptadas</option>
+                  <option value="rechazada">❌ Rechazadas</option>
+                  <option value="finalizado">📦 Finalizadas</option>
+                </select>
+              </div>
+              <div style="min-width:130px">
+                <div style="font-size:11px;font-weight:700;color:#64748b;margin-bottom:5px;text-transform:uppercase">🔃 Orden</div>
+                <button id="hf-sort-btn" onclick="window._toggleSortHist()"
+                  style="width:100%;padding:9px 12px;border:1.5px solid #6366f1;border-radius:10px;font-size:12px;font-weight:700;color:#6366f1;background:#eff6ff;cursor:pointer;box-sizing:border-box">
+                  ⬆️ Más antigua
+                </button>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
+                <button onclick="window._limpiarFiltroHist()"
+                  style="padding:9px 16px;border:1.5px solid #e2e8f0;border-radius:10px;font-size:12px;font-weight:700;color:#64748b;background:#f8fafc;cursor:pointer;white-space:nowrap">
+                  🗑️ Limpiar
+                </button>
+                <div id="hf-count" style="font-size:11px;font-weight:700;color:#94a3b8;white-space:nowrap"></div>
+              </div>
+            </div>
+            <div id="hist-cards-body"></div>`;
+
+            window._aplicarFiltroHist = function() {
+                const emp    = (document.getElementById('hf-empresa')?.value||'').toLowerCase().trim();
+                const desde  = document.getElementById('hf-desde')?.value||'';
+                const hasta  = document.getElementById('hf-hasta')?.value||'';
+                const status = document.getElementById('hf-status')?.value||'';
+                const asc    = window._histSortAsc;
+                let filtered = (window._histGrupos||[]).filter(g => {
+                    if (emp    && !g.empresa.toLowerCase().includes(emp)) return false;
+                    if (desde  && g.fechaIn  && g.fechaIn < desde)        return false;
+                    if (hasta  && g.fechaIn  && g.fechaIn > hasta)        return false;
+                    if (status && g.status !== status)                    return false;
+                    return true;
+                });
+                filtered.sort((a,b)=>{
+                    const ec = a.empresa.localeCompare(b.empresa);
+                    if (ec !== 0) return ec;
+                    const cmp = (a.fechaIn||'').localeCompare(b.fechaIn||'');
+                    return asc ? cmp : -cmp;
+                });
+                const cnt = document.getElementById('hf-count');
+                if (cnt) cnt.textContent = `${filtered.length} carga${filtered.length!==1?'s':''}`;
+                const cardsBody = document.getElementById('hist-cards-body');
+                if (!cardsBody) return;
+                if (!filtered.length) {
+                    cardsBody.innerHTML = `<div style="text-align:center;color:#94a3b8;padding:40px;background:#fff;border-radius:16px;border:2px dashed #e2e8f0"><div style="font-size:40px;margin-bottom:10px">🔍</div><div style="font-weight:700;color:#475569">Sin resultados con los filtros actuales</div></div>`;
+                    return;
+                }
+                cardsBody.innerHTML = filtered.map(g=>{
                 const rechazados=g.rows.filter(r=>r.status==='rechazada');
                 const isRechazado=g.status==='rechazada';
                 const rKey = _grupoIdx++;
-                window._gruposData[rKey] = { rechazados, allRows: g.rows, empresa: g.empresa };
+                window._gruposData[rKey] = { rechazados, allRows: g.rows, rows: g.rows, empresa: g.empresa };
+                // Metadata para checkout/borrar por lista (no por empresa)
+                window._gruposMetadata = window._gruposMetadata || {};
+                window._gruposMetadata[rKey] = { empresa: g.empresa, contrato: g.contrato, fechaIn: g.fechaIn, fechaOut: g.fechaOut, ids: g.rows.map(r=>r.id).filter(Boolean) };
                 const stBg=isRechazado?'#fee2e2':'#dcfce7';
                 const stColor=isRechazado?'#b91c1c':'#15803d';
                 const stLabel=isRechazado?'❌ Rechazada':'✅ Aceptada';
@@ -2079,9 +2475,15 @@ async function renderTab(tab) {
                                 title="Descargar lista en Excel" style="padding:6px 12px;border:none;border-radius:8px;background:#dcfce7;color:#15803d;font-weight:700;font-size:11px;cursor:pointer">
                                 📥 Excel
                             </button>
-                            <button data-empresa="${g.empresa.replace(/"/g,'&quot;')}" onclick="event.stopPropagation();window._solBorrarEmpresa(this.dataset.empresa)"
-                                title="Borrar TODA la asignación de esta empresa" style="padding:6px 12px;border:none;border-radius:8px;background:#fee2e2;color:#b91c1c;font-weight:700;font-size:11px;cursor:pointer">
-                                🗑️ Borrar empresa
+                            <button data-gkey="${rKey}" onclick="event.stopPropagation();window._solCheckoutLista(parseInt(this.dataset.gkey))"
+                                title="Check-Out de SOLO esta lista — libera camas y guarda cobro"
+                                style="padding:6px 12px;border:none;border-radius:8px;background:linear-gradient(135deg,#0369a1,#0ea5e9);color:#fff;font-weight:700;font-size:11px;cursor:pointer">
+                                🚪 Check Out
+                            </button>
+                            <button data-gkey="${rKey}" onclick="event.stopPropagation();window._solBorrarLista(parseInt(this.dataset.gkey))"
+                                title="Borrar SOLO esta lista — no afecta otras listas de la misma empresa"
+                                style="padding:6px 12px;border:none;border-radius:8px;background:#fee2e2;color:#b91c1c;font-weight:700;font-size:11px;cursor:pointer">
+                                🗑️ Borrar lista
                             </button>
                             ${isRechazado&&rechazados.length>0?`
                             <button onclick="event.stopPropagation();window._solReintentarGrupoIds(${rKey})"
@@ -2108,14 +2510,40 @@ async function renderTab(tab) {
                         </table>
                     </div>
                 </div>`;
-            }).join('');
-            body.innerHTML=`
-                <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:12px;padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;gap:10px">
-                    <span style="font-size:20px">💡</span>
-                    <span style="font-size:13px;color:#92400e;font-weight:600">Cada tarjeta es una carga. La misma empresa con distintas fechas de turno aparece como tarjetas separadas.</span>
-                </div>
-                ${cards}`;
+                }).join('');
+            };
+
+            window._toggleSortHist = function() {
+                window._histSortAsc = !window._histSortAsc;
+                const btn = document.getElementById('hf-sort-btn');
+                if (btn) btn.textContent = window._histSortAsc ? '⬆️ Más antigua' : '⬇️ Más reciente';
+                window._aplicarFiltroHist();
+            };
+
+            window._limpiarFiltroHist = function() {
+                const e = document.getElementById('hf-empresa');
+                const d = document.getElementById('hf-desde');
+                const h = document.getElementById('hf-hasta');
+                const s = document.getElementById('hf-status');
+                if (e) e.value = '';
+                if (d) d.value = '';
+                if (h) h.value = '';
+                if (s) s.value = '';
+                window._aplicarFiltroHist();
+            };
+
+            // Insertar aviso amarillo antes del filtro
+            const filtersDiv = document.getElementById('hist-filters');
+            if (filtersDiv) {
+                const tip = document.createElement('div');
+                tip.style.cssText = 'background:#fffbeb;border:1px solid #fde68a;border-radius:12px;padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;gap:10px';
+                tip.innerHTML = '<span style="font-size:20px">💡</span><span style="font-size:13px;color:#92400e;font-weight:600">Cada tarjeta es una carga. La misma empresa con distintas fechas de turno aparece como tarjetas separadas.</span>';
+                filtersDiv.parentElement.insertBefore(tip, filtersDiv);
+            }
+
+            window._aplicarFiltroHist();
         }
+
 
     } catch(e) {
         body.innerHTML=`<div style="text-align:center;color:#ef4444;padding:40px;background:#fff;border-radius:16px">
@@ -2161,7 +2589,7 @@ La cama quedará libre.`, {confirmText:'🗑️ Borrar', danger:true})) return;
         if(asigs?.length) {
             const {id:asigId, id_cama} = asigs[0];
             // 2. Liberar cama
-            await supabase.from('v2_camas').update({estado:'Disponible'}).eq('id_cama', id_cama);
+            await supabase.from('v2_camas').update({estado:'Disponible'}).eq('id_cama', id_cama).neq('estado', 'Deshabilitada');
             // 3. Borrar asignación
             await supabase.from('v2_asignaciones').delete().eq('id', asigId);
         }
@@ -2188,7 +2616,7 @@ window._solReasignarUno = async function(solicitudId, rut, empresa, contrato) {
         const {data:asigs} = await supabase.from('v2_asignaciones')
             .select('id,id_cama').eq('rut_huesped', rut).is('fecha_checkout',null).limit(1);
         if(asigs?.length) {
-            await supabase.from('v2_camas').update({estado:'Disponible'}).eq('id_cama', asigs[0].id_cama);
+            await supabase.from('v2_camas').update({estado:'Disponible'}).eq('id_cama', asigs[0].id_cama).neq('estado', 'Deshabilitada');
             await supabase.from('v2_asignaciones').delete().eq('id', asigs[0].id);
         }
 
@@ -2200,21 +2628,35 @@ window._solReasignarUno = async function(solicitudId, rut, empresa, contrato) {
         const {data:empRows} = await supabase.from('v2_empresas').select('id').ilike('nombre',empresa).limit(1);
         const empresaId = empRows?.[0]?.id || null;
 
-        // 4. Buscar cama disponible
-        const {data:camas} = await supabase.from('v2_camas').select('id_cama,habitacion_id')
-            .eq('estado','Disponible').limit(1);
-        if(!camas?.length) throw new Error('No hay camas disponibles en el campamento');
-        const cama = camas[0];
+        // 4. Buscar cama REALMENTE disponible (sin ninguna asignación activa, incluida pre_asignado)
+        // Una cama con estado='Disponible' puede tener un pre_asignado → no tocarla hasta su checkout
+        const {data:todasDisp} = await supabase.from('v2_camas')
+            .select('id_cama,habitacion_id')
+            .eq('estado','Disponible')
+            .limit(50);
+        if(!todasDisp?.length) throw new Error('No hay camas disponibles en el campamento');
+
+        // Filtrar las que tengan asignaciones activas (incluyendo pre_asignado)
+        const camaIdsDisp = todasDisp.map(c => c.id_cama);
+        const {data:conReserva} = await supabase.from('v2_asignaciones')
+            .select('id_cama')
+            .in('id_cama', camaIdsDisp)
+            .is('fecha_checkout', null);
+        const reservadas = new Set((conReserva||[]).map(a => a.id_cama));
+        const cama = todasDisp.find(c => !reservadas.has(c.id_cama));
+        if(!cama) throw new Error('No hay camas realmente libres — todas tienen reservas vigentes o pre-asignaciones');
 
         // 5. Crear asignación
         const {error:eAsig} = await supabase.from('v2_asignaciones').insert({
             id_cama:                 cama.id_cama,
             rut_huesped:             (rut || '').slice(0, 12),
+            nombre_huesped:          sol.nombre_trabajador || rut,   // ← campo obligatorio
             empresa_id:              empresaId,
             fecha_checkin:           sol.fecha_llegada || new Date().toISOString().split('T')[0],
             fecha_salida_programada: sol.fecha_salida  || null,
             fecha_checkout:          null,
-            numero_contrato:         contrato || null
+            numero_contrato:         contrato || null,
+            huesped_confirmo:        true,
         });
         if(eAsig) throw new Error(eAsig.message);
 
@@ -2236,6 +2678,155 @@ window._solReasignarUno = async function(solicitudId, rut, empresa, contrato) {
 };
 
 // ── Borrar TODA la asignación de una empresa ─────────────────────────────────
+/**
+ * _solCheckoutLista(gKey)
+ * Realiza el check-out de TODOS los trabajadores de UNA lista específica.
+ * - Registra fecha_checkout en v2_asignaciones
+ * - Libera las camas (estado → 'Disponible')
+ * - Guarda registro de cobro en v2_checkout_registros
+ * - Elimina las solicitudes de v2_solicitudes_b2b
+ * - NO afecta ninguna otra lista, aunque sea de la misma empresa
+ */
+window._solCheckoutLista = async function(gKey) {
+    const data = window._gruposData[gKey];
+    const rows = Array.isArray(data) ? data : (data?.allRows || data?.rows || []);
+    const meta = (window._gruposMetadata || {})[gKey] || {};
+    const empresa  = meta.empresa  || rows[0]?.empresa    || 'Sin empresa';
+    const contrato = meta.contrato || rows[0]?.n_contrato || null;
+    const fechaIn  = meta.fechaIn  || rows[0]?.fecha_llegada || null;
+    const fechaOut = meta.fechaOut || rows[0]?.fecha_salida  || null;
+    const solicitudIds = (meta.ids?.length ? meta.ids : rows.map(r=>r.id)).filter(Boolean);
+    const ruts = [...new Set(rows.map(r=>r.rut_trabajador).filter(Boolean))];
+
+    if(!ruts.length) { toast('No hay trabajadores en esta lista', 'error'); return; }
+    const fmt2 = d => d ? new Date(d).toLocaleDateString('es-CL') : '—';
+    if(!await _solConfirm(
+        `¿Realizar Check-Out de ${ruts.length} trabajadores de "${empresa}"?\n\n` +
+        `Período: ${fmt2(fechaIn)} → ${fmt2(fechaOut)}\n` +
+        `N° Contrato: ${contrato||'—'}\n\n` +
+        `• Se registrará el checkout en las asignaciones activas\n` +
+        `• Las camas quedarán libres\n` +
+        `• Se guardará el registro de cobro\n` +
+        `• La lista desaparecerá de esta vista\n\n` +
+        `Esta acción no se puede deshacer.`,
+        {confirmText:'🚪 Confirmar Check-Out', danger:false}
+    )) return;
+
+    // ── Overlay de progreso ───────────────────────────────────────────────────
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:99999;display:flex;align-items:center;justify-content:center';
+    const box = document.createElement('div');
+    box.style.cssText = 'background:#fff;border-radius:20px;padding:32px 40px;text-align:center;min-width:360px;max-width:500px';
+    box.innerHTML = `
+        <div style="font-size:36px;margin-bottom:10px">🚪</div>
+        <div style="font-weight:900;font-size:16px;margin-bottom:6px">Check-Out: ${empresa}</div>
+        <div id="_co_txt" style="font-size:13px;color:#64748b;min-height:20px;margin-bottom:16px">Preparando…</div>
+        <div style="height:8px;background:#f1f5f9;border-radius:99px;overflow:hidden;margin-bottom:20px">
+            <div id="_co_prog" style="height:100%;width:0%;background:linear-gradient(90deg,#0369a1,#0ea5e9);transition:width .4s;border-radius:99px"></div>
+        </div>`;
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+
+    const setStep = (txt, pct) => {
+        const el = document.getElementById('_co_txt');
+        const pr = document.getElementById('_co_prog');
+        if(el) el.textContent = txt;
+        if(pr && pct !== undefined) pr.style.width = pct + '%';
+    };
+
+    try {
+        // ── PASO 1: Buscar asignaciones activas por RUTs de ESTA lista ────────
+        setStep(`Buscando asignaciones de ${ruts.length} trabajadores…`, 15);
+        const {data:asigs, error:eAsig} = await supabase
+            .from('v2_asignaciones')
+            .select('id,id_cama,nombre_huesped,rut_huesped,fecha_checkin,fecha_salida_programada,numero_contrato')
+            .in('rut_huesped', ruts)
+            .is('fecha_checkout', null);
+        if(eAsig) throw new Error('Leer asignaciones: ' + eAsig.message);
+
+        const fechaCheckout = new Date().toISOString();
+        const asigIds  = (asigs||[]).map(a => a.id);
+        const camaIds  = [...new Set((asigs||[]).map(a => a.id_cama).filter(Boolean))];
+
+        // ── PASO 2: Registrar fecha_checkout en asignaciones ─────────────────
+        setStep(`Registrando checkout de ${asigIds.length} asignaciones…`, 35);
+        if(asigIds.length) {
+            const {error:eUpd} = await supabase
+                .from('v2_asignaciones')
+                .update({ fecha_checkout: fechaCheckout })
+                .in('id', asigIds);
+            if(eUpd) throw new Error('Actualizar asignaciones: ' + eUpd.message);
+        }
+
+        // ── PASO 3: Liberar camas ─────────────────────────────────────────────
+        setStep(`Liberando ${camaIds.length} camas…`, 55);
+        if(camaIds.length) {
+            const {error:eCama} = await supabase
+                .from('v2_camas')
+                .update({ estado: 'Disponible' })
+                .in('id_cama', camaIds);
+            if(eCama) console.warn('[Checkout] Error liberando camas:', eCama.message);
+        }
+
+        // ── PASO 4: Calcular y guardar registro de cobro ──────────────────────
+        setStep('Guardando registro de cobro…', 70);
+        const calcNoches = (a) => {
+            if(!a.fecha_checkin) return 0;
+            const ins  = new Date(a.fecha_checkin);
+            const outs = new Date(fechaCheckout);
+            return Math.max(0, Math.round((outs - ins) / 86_400_000));
+        };
+        const detalle = (asigs||[]).map(a => ({
+            rut:    a.rut_huesped,
+            nombre: a.nombre_huesped,
+            noches: calcNoches(a),
+            id_cama: a.id_cama,
+        }));
+        const totalNoches = detalle.reduce((s,d) => s + d.noches, 0);
+
+        await supabase.from('v2_checkout_registros').insert({
+            empresa,
+            numero_contrato:         contrato,
+            fecha_llegada:           fechaIn,
+            fecha_salida:            fechaOut,
+            total_trabajadores:      ruts.length,
+            total_camas_liberadas:   camaIds.length,
+            total_noches_cobradas:   totalNoches,
+            ruts_trabajadores:       ruts,
+            detalle_facturacion:     detalle,
+            fecha_checkout_realizado: fechaCheckout,
+        });
+
+        // ── PASO 5: Eliminar solicitudes de esta lista (solo sus IDs) ─────────
+        setStep('Cerrando lista de solicitudes…', 85);
+        if(solicitudIds.length) {
+            const {error:eDel} = await supabase
+                .from('v2_solicitudes_b2b')
+                .delete()
+                .in('id', solicitudIds);
+            if(eDel) throw new Error('Eliminar solicitudes: ' + eDel.message);
+        }
+
+        // ── Éxito ─────────────────────────────────────────────────────────────
+        setStep(`✅ Check-Out completado`, 100);
+        await new Promise(r => setTimeout(r, 900));
+        overlay.remove();
+        toast(
+            `✅ Check-Out "${empresa}": ${asigIds.length} trabajadores · ` +
+            `${camaIds.length} camas libres · ${totalNoches} noches registradas`,
+            'success'
+        );
+        window._renderV2Solicitudes?.();
+        refreshBadge();
+
+    } catch(e) {
+        overlay.remove();
+        console.error('[CheckoutLista] ERROR:', e.message);
+        alert('❌ Error en Check-Out:\n' + e.message);
+    }
+};
+
+/** _solBorrarEmpresa — mantenido para compatibilidad. Ahora usa _solBorrarLista. */
 window._solBorrarEmpresa = async function(empresa) {
     if(!empresa) { alert('Error: empresa no definida'); return; }
     if(!await _solConfirm(`¿Borrar TODAS las asignaciones de "${empresa}"?
@@ -2314,7 +2905,7 @@ Esta acción no se puede deshacer.`, {confirmText:'🗑️ Sí, borrar todo', da
             if(camaIds.length > 0) {
                 setStep(`Liberando ${camaIds.length} camas…`, 50);
                 const {error:eCama} = await supabase.from('v2_camas')
-                    .update({estado:'Disponible'}).in('id_cama', camaIds);
+                    .update({estado:'Disponible'}).in('id_cama', camaIds).neq('estado', 'Deshabilitada');
                 if(eCama) console.warn('[BorrarEmpresa] liberando camas:', eCama.message);
             }
 

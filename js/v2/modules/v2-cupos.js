@@ -114,6 +114,7 @@ window._cupoImportarExcel = async (file) => {
             // gerencia
             'gerencia':             'gerencia',
             'area':                 'gerencia',
+            'proceso':              'gerencia',
             // nombre_contrato
             'nombre contrato':      'nombre_contrato',
             'nombre del contrato':  'nombre_contrato',
@@ -135,6 +136,17 @@ window._cupoImportarExcel = async (file) => {
             'termino vigencia':     'fecha_termino',
             'vigencia hasta':       'fecha_termino',
             'fecha fin':            'fecha_termino',
+            // cupos_totales — NUEVO: permite importar cupos desde Excel
+            'cupos':                'cupos_totales',
+            'cupos totales':        'cupos_totales',
+            'total cupos':          'cupos_totales',
+            'cantidad cupos':       'cupos_totales',
+            'plazas':               'cupos_totales',
+            'camas asignadas':      'cupos_totales',
+            'camas':                'cupos_totales',
+            'dotacion':             'cupos_totales',
+            'dotacion maxima':      'cupos_totales',
+            'dotacion max':         'cupos_totales',
         };
 
         // Detectar qué columnas del Excel mapean a BD
@@ -206,23 +218,56 @@ window._cupoImportarExcel = async (file) => {
             );
         }
 
-        if (statusEl) statusEl.textContent = `Insertando ${filas.length} contratos en Supabase…`;
+        if (statusEl) statusEl.textContent = `Procesando ${filas.length} contratos (actualizar/insertar)…`;
 
-        // ── Insert directo en lotes de 100 (evita timeout y el error de upsert) ──
-        const BATCH = 100;
-        let insertados = 0;
-        for (let i = 0; i < filas.length; i += BATCH) {
-            const lote = filas.slice(i, i + BATCH);
-            if (statusEl) statusEl.textContent = `Guardando ${i + lote.length}/${filas.length}…`;
-            const { error } = await supabase
-                .from('v2_cupos_gerencias')
-                .insert(lote);
-            if (error) throw new Error(`Error en lote ${i / BATCH + 1}: ${error.message}`);
-            insertados += lote.length;
+        // ── Estrategia: buscar por (numero_contrato + empresa) → UPDATE si existe, INSERT si no ──
+        let actualizados = 0;
+        let insertados   = 0;
+        let errores      = 0;
+
+        for (let i = 0; i < filas.length; i++) {
+            const fila = filas[i];
+            if (statusEl && i % 10 === 0)
+                statusEl.textContent = `Procesando ${i + 1}/${filas.length}…`;
+
+            // Buscar si ya existe por numero_contrato + empresa
+            let existingId = null;
+            if (fila.numero_contrato || fila.empresa) {
+                let q = supabase.from('v2_cupos_gerencias').select('id');
+                if (fila.numero_contrato) q = q.eq('numero_contrato', fila.numero_contrato);
+                if (fila.empresa)         q = q.ilike('empresa', fila.empresa);
+                const { data: found } = await q.limit(1);
+                existingId = found?.[0]?.id || null;
+            }
+
+            if (existingId) {
+                // UPDATE: actualizar todos los campos del Excel (no tocar cupos_ocupados)
+                const updateData = { ...fila };
+                delete updateData.cupos_ocupados; // no sobreescribir los ocupados actuales
+                const { error } = await supabase
+                    .from('v2_cupos_gerencias')
+                    .update(updateData)
+                    .eq('id', existingId);
+                if (error) { console.warn('[Cupos] Update error:', error.message); errores++; }
+                else actualizados++;
+            } else {
+                // INSERT: nuevo contrato
+                const { error } = await supabase
+                    .from('v2_cupos_gerencias')
+                    .insert(fila);
+                if (error) { console.warn('[Cupos] Insert error:', error.message); errores++; }
+                else insertados++;
+            }
         }
 
         if (overlay) overlay.style.display = 'none';
-        toast(`✅ ${insertados} contratos importados correctamente`);
+        const msg = [
+            actualizados > 0 ? `✅ ${actualizados} actualizados` : '',
+            insertados   > 0 ? `➕ ${insertados} nuevos`         : '',
+            errores      > 0 ? `⚠️ ${errores} con error`         : '',
+        ].filter(Boolean).join('  ·  ');
+        toast(msg || '✅ Proceso completado');
+        if (errores > 0) toast(`${errores} registros tuvieron error. Revisa la consola (F12).`, 'warn');
 
         // Resetear input file para permitir reimportar el mismo archivo
         const fi = document.getElementById('cupo-file-input');

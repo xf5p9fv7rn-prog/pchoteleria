@@ -161,18 +161,22 @@ function getVisible() {
     );
 }
 
-function renderTabla() {
+function renderKPIs() {
     const visible  = getVisible();
-    const habilitadas    = visible.filter(c => c.estado !== 'Deshabilitada').length;
-    const deshabilitadas = visible.filter(c => c.estado === 'Deshabilitada').length;
-
-    // KPIs
     document.getElementById('c3-kpis').innerHTML = [
         kpi('🛏️', 'Camas 3 totales',      _allCamas3.length,   '#6366f1'),
         kpi('✅',  'Habilitadas',           _allCamas3.filter(c=>c.estado!=='Deshabilitada').length, '#10b981'),
         kpi('🚫',  'Deshabilitadas',        _allCamas3.filter(c=>c.estado==='Deshabilitada').length, '#ef4444'),
         kpi('👁️',  'Visibles en filtro',   visible.length,      '#f59e0b'),
     ].join('');
+}
+
+function renderTabla() {
+    const visible  = getVisible();
+    const habilitadas    = visible.filter(c => c.estado !== 'Deshabilitada').length;
+    const deshabilitadas = visible.filter(c => c.estado === 'Deshabilitada').length;
+
+    renderKPIs();
 
     if (!visible.length) {
         document.getElementById('c3-tabla').innerHTML = `<div style="text-align:center;padding:40px;color:var(--text-muted)">Sin resultados para el filtro seleccionado</div>`;
@@ -227,17 +231,44 @@ function renderTabla() {
 }
 
 async function toggleCama(id_cama, nuevoEstado) {
-    const sb = await getSb();
     const btn = document.querySelector(`button[data-id="${id_cama}"]`);
-    if (btn) btn.disabled = true;
-
-    const { error } = await sb.from('v2_camas').update({ estado: nuevoEstado }).eq('id_cama', id_cama);
-    if (error) { alert('Error: ' + error.message); if (btn) btn.disabled = false; return; }
-
-    // Actualizar local sin re-fetch
     const c = _allCamas3.find(x => x.id_cama === id_cama);
-    if (c) c.estado = nuevoEstado;
-    renderTabla();
+    if (!c) return;
+
+    // Actualización Optimista del UI
+    const estadoAnterior = c.estado;
+    c.estado = nuevoEstado;
+    const activa = nuevoEstado !== 'Deshabilitada';
+    
+    if (btn) {
+        btn.dataset.action = activa ? 'deshabilitar' : 'habilitar';
+        btn.style.background = activa ? '#fee2e2' : '#dcfce7';
+        btn.style.color = activa ? '#c53030' : '#15803d';
+        btn.style.borderColor = activa ? '#fca5a5' : '#86efac';
+        btn.innerHTML = activa ? '🚫 Deshabilitar' : '✅ Habilitar';
+        
+        const tr = btn.closest('tr');
+        if (tr) {
+            const span = tr.querySelector('td:nth-child(5) span');
+            if (span) {
+                const estadoColor = activa ? '#10b981' : '#ef4444';
+                span.style.background = `${estadoColor}22`;
+                span.style.color = estadoColor;
+                span.innerHTML = activa ? '✅ Habilitada' : '🚫 Deshabilitada';
+            }
+        }
+    }
+    renderKPIs();
+
+    // Guardado en background
+    const sb = await getSb();
+    const { error } = await sb.from('v2_camas').update({ estado: nuevoEstado }).eq('id_cama', id_cama);
+    
+    if (error) { 
+        alert('Error: ' + error.message); 
+        c.estado = estadoAnterior; 
+        renderTabla(); // rollback 
+    }
 }
 
 async function toggleVisibles(nuevoEstado) {

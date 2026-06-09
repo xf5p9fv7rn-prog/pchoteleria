@@ -9,7 +9,7 @@ import {
     checkRutDuplicado, checkGeneroHabitacion
 } from '../v2-service.js';
 
-import { abrirPopover, cerrarPopover } from './CheckinPopoverV2.js';
+import { abrirPopover, cerrarPopover } from './CheckinPopoverV2.js?v=20260604-1200';
 import { supabase } from '../../supabaseClient.js';
 
 let _edificios = [], _pabellones = [], _habitaciones = [], _empresas = [];
@@ -225,7 +225,7 @@ window._v2iAutoRotacion = async function(silent = false) {
                     .eq('id', asig.id);
                 if (errCO) continue;
 
-                await supabase.from('v2_camas').update({ estado: 'Disponible' }).eq('id_cama', asig.id_cama);
+                await supabase.from('v2_camas').update({ estado: 'Disponible' }).eq('id_cama', asig.id_cama).neq('estado', 'Deshabilitada');
                 checkouts++;
 
                 const numHab = String(asig.v2_camas?.v2_habitaciones?.numero_hab || '');
@@ -479,7 +479,7 @@ async function renderGrid() {
 
         // 4. ✅ FIX: La cama debe quedar Disponible para que se muestre como "Pre-asignada"
         //    getCamas() detecta preAsignado cuando estado='Disponible' + asignación 'pre_asignado'
-        await supabase.from('v2_camas').update({ estado: 'Disponible' }).eq('id_cama', camaId);
+        await supabase.from('v2_camas').update({ estado: 'Disponible' }).eq('id_cama', camaId).neq('estado', 'Deshabilitada');
 
         // 5. Marcar solicitud como aceptada
         await supabase.from('v2_solicitudes_b2b').update({ status: 'aceptada' }).eq('id', sol.id);
@@ -556,9 +556,9 @@ async function renderGrid() {
       ${habsFilt.map((h, i) => {
         const cs = camasFilt[i];
         const hoyStats = new Date().toISOString().split('T')[0];
-        const hs  = cs.filter(c=>c.estado==='Ocupada' && c.fecha_salida_programada===hoyStats && !c.preAsignado).length;
-        const ho  = cs.filter(c=>c.estado==='Ocupada' && !c.huesped_confirmo && c.fecha_salida_programada!==hoyStats).length;
-        const hc  = cs.filter(c=>c.estado==='Ocupada' &&  c.huesped_confirmo && c.fecha_salida_programada!==hoyStats).length;
+        const hs   = cs.filter(c => c.saliente).length;
+        const ho   = cs.filter(c => c.nombre_huesped && !c.huesped_confirmo && !c.preAsignado).length;
+        const hc   = cs.filter(c => c.nombre_huesped &&  c.huesped_confirmo && !c.preAsignado).length;
         const hd  = cs.filter(c=>c.estado==='Disponible' && !c.preAsignado).length;
         const hp  = cs.filter(c=>c.preAsignado).length;
         const hm  = cs.filter(c=>c.estado==='Mantencion').length;
@@ -573,47 +573,59 @@ async function renderGrid() {
             const colors = { noche:'#4338ca', '4x3':'#0891b2', reserva:'#7c3aed', anglo:'#d97706', empresa:'#059669' };
             const icons  = { noche:'🌙', '4x3':'🔄', reserva:'📌', anglo:'🤝', empresa:'🏢' };
             const lbl = tag.tipo === 'empresa' ? (tag.etiqueta || 'Empresa') : tag.tipo.toUpperCase();
-            const c = colors[tag.tipo] || '#64748b';
-            return `<div style="position:absolute;bottom:10px;right:10px;background:${c};color:white;border-radius:6px;padding:2px 7px;font-size:9px;font-weight:800;letter-spacing:.3px">${icons[tag.tipo]||''} ${lbl}</div>`;
+            const tagColor = colors[tag.tipo] || '#64748b';
+            return `<div style="position:absolute;bottom:10px;right:10px;background:${tagColor};color:white;border-radius:6px;padding:2px 7px;font-size:9px;font-weight:800;letter-spacing:.3px">${icons[tag.tipo]||''} ${lbl}</div>`;
           })()}
           <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px">
             ${(() => {
               const hoy = new Date().toISOString().split('T')[0];
-              const saliendo  = cs.filter(c => c.estado==='Ocupada' && c.fecha_salida_programada===hoy);
-              const activos   = cs.filter(c => !(c.estado==='Ocupada' && c.fecha_salida_programada===hoy));
+              // SALIENDO: camas con estado 'saliente' en DB (procesadas por auto-rotación)
+              // Fallback: activa con fecha_salida <= hoy (si la rotación aún no corrió)
+              const saliendo  = cs.filter(c =>
+                  c.saliente ||
+                  (c.estado==='Ocupada' && !c.preAsignado && c.fecha_salida_programada && c.fecha_salida_programada <= hoy && !c.nombre_huesped)
+              );
+              // ACTUALES: incluye Disponibles, Mantención, Deshabilitadas Y activos
+              //   Excluye: pre-asignados (van a PRE) y saliente-sin-nuevo-activo (solo en SALIDA)
+              const activos = cs.filter(c => {
+                if (c.preAsignado) return false;                    // va a sección PRE
+                if (c.saliente && !c.nombre_huesped) return false;  // solo saliente, sin relevo aún
+                return true; // Disponible ✅ Mantencion ✅ Deshabilitada ✅ Ocupada ✅
+              });
+              // PRE: camas con pre-asignación pendiente
               const porLlegar = cs.filter(c => c.preAsignado);
 
               function getBg(c) {
                 const deshabilitada = c.estado === 'Deshabilitada';
-                const confirmo  = c.estado==='Ocupada' && c.huesped_confirmo;
-                const ocupada   = c.estado==='Ocupada';
-                const salidaHoy = ocupada && c.fecha_salida_programada === hoy && !c.preAsignado;
-                const vencida   = ocupada && c.fecha_salida_programada && c.fecha_salida_programada < hoy && !salidaHoy;
+                const esSaliente = c._isSaliente; // flag virtual — solo para render de sección SALIENTE
                 const preAsig   = !!c.preAsignado;
+                // ✅ FIX: detectar ocupante por estado O por tener nombre_huesped activo
+                const tieneOcupante = c.estado === 'Ocupada' || (!!c.nombre_huesped && !preAsig && !esSaliente);
+                const confirmo  = tieneOcupante && !!c.huesped_confirmo;
                 return deshabilitada ? null
-                     : salidaHoy  ? '#f59e0b'
-                     : vencida    ? '#fbbf24'
-                     : ocupada    ? (confirmo ? '#22c55e' : '#ef4444')
-                     : preAsig    ? '#a855f7'
+                     : esSaliente   ? '#f59e0b'  // ámbar para saliente
+                     : tieneOcupante ? (confirmo ? '#22c55e' : '#ef4444')  // 🟢 conf / 🔴 s/conf
+                     : preAsig      ? '#a855f7'
                      : c.estado==='Mantencion' ? '#64748b' : '#06b6d4';
               }
               function getLbl(c) {
                 const deshabilitada = c.estado === 'Deshabilitada';
-                const confirmo  = c.estado==='Ocupada' && c.huesped_confirmo;
-                const ocupada   = c.estado==='Ocupada';
-                const salidaHoy = ocupada && c.fecha_salida_programada === hoy && !c.preAsignado;
-                const vencida   = ocupada && c.fecha_salida_programada && c.fecha_salida_programada < hoy && !salidaHoy;
+                const esSaliente = c._isSaliente;
+                const preAsig   = !!c.preAsignado;
+                // ✅ FIX: misma lógica que getBg
+                const tieneOcupante = c.estado === 'Ocupada' || (!!c.nombre_huesped && !preAsig && !esSaliente);
+                const confirmo  = tieneOcupante && !!c.huesped_confirmo;
                 return deshabilitada ? 'D'
-                     : salidaHoy  ? 'S'
-                     : vencida    ? '⚠'
-                     : ocupada    ? (confirmo ? '✓' : 'O')
+                     : esSaliente   ? 'S'
+                     : tieneOcupante ? (confirmo ? '✓' : 'O')  // ✓ verde / O rojo
                      : c.preAsignado ? 'P'
                      : c.estado==='Mantencion' ? 'M' : 'L';
               }
               function getTooltip(c) {
                 if (c.estado==='Deshabilitada') return `${c.id_cama} — sin instalar`;
+                if (c._isSaliente) return `SALE: ${c.nombre_huesped||''} · ${c.empresa||''} · ${c.fecha_salida_programada||'—'}`;
                 if (c.preAsignado) return `PRE: ${c.preAsignado.nombre||''} · llega ${c.preAsignado.fecha||'?'}`;
-                if (c.estado==='Ocupada') return `${c.nombre_huesped||''} · ${c.empresa||''} · sale ${c.fecha_salida_programada||'—'}`;
+                if (c.nombre_huesped) return `${c.nombre_huesped||''} · ${c.empresa||''} · sale ${c.fecha_salida_programada||'—'}`;
                 if (c.estado==='Mantencion') return `${c.id_cama} — Mantención`;
                 return `${c.id_cama} — Disponible`;
               }
@@ -632,7 +644,7 @@ async function renderGrid() {
                     }
                     return `<button onclick="window._v2iOpenCama(event,'${c.id_cama}')" title="${tip}"
                       style="width:30px;height:30px;border-radius:7px;border:none;background:${bg};color:#fff;font-size:11px;font-weight:800;cursor:pointer;transition:transform .1s;flex-shrink:0"
-                      onmouseover="this.style.transform='scale(1.18)'" onmouseout="this.style.transform='scale(1)'">${lbl}</button>`;
+                      onmouseover="this.style.transform='scale(1.18)'" onmouseout="this.style.transform='scale(1)'">  ${lbl}</button>`;
                   }).join('')}
                 </div>`;
               }
@@ -647,37 +659,28 @@ async function renderGrid() {
                 </div>`;
               }
 
-              // ── LLEGARON HOY sin confirmar (activa + fecha_checkin===hoy + !huesped_confirmo) ──
-              const llegaronHoySinConf = activos.filter(c =>
-                c.estado === 'Ocupada' &&
-                !c.huesped_confirmo &&
-                c.fecha_checkin === hoy &&
-                c.fecha_salida_programada !== hoy
-              );
-              // Excluir del bloque "actuales" los que están en llegaronHoySinConf
-              const llegaronHoyIds = new Set(llegaronHoySinConf.map(c => c.id_cama));
-              const activosFiltrados = activos.filter(c => !llegaronHoyIds.has(c.id_cama));
-
-              if (llegaronHoySinConf.length > 0) {
-                html += `<div style="background:#fff1f2;border:1.5px solid #fecaca;border-radius:8px;padding:6px 8px">
-                  <div style="font-size:9px;font-weight:900;color:#dc2626;letter-spacing:.6px;text-transform:uppercase;margin-bottom:5px">🔴 Llegaron hoy — Confirmar (${llegaronHoySinConf.length})</div>
-                  ${renderSeccion(llegaronHoySinConf)}
-                </div>`;
-              }
-
-              // ── ACTUALES (confirmados + sin conf que no son de hoy) ─────────
-              if (activosFiltrados.length > 0) {
+              // ── ACTUALES ───────────────────────────────────────────────
+              if (activos.length > 0) {
                 html += `<div>
-                  ${activosFiltrados.length>0&&(porLlegar.length>0||llegaronHoySinConf.length>0)?`<div style="font-size:9px;font-weight:900;color:var(--text-muted);letter-spacing:.6px;text-transform:uppercase;margin-bottom:4px">Actuales</div>`:''}
-                  ${renderSeccion(activosFiltrados)}
+                  ${(porLlegar.length > 0 || saliendo.length > 0) ? `<div style="font-size:9px;font-weight:900;color:var(--text-muted);letter-spacing:.6px;text-transform:uppercase;margin-bottom:4px">Actuales</div>` : ''}
+                  ${renderSeccion(activos)}
                 </div>`;
               }
 
-              // ── SALIENDO ────────────────────────────────────────────────────
+              // ── SALIENDO (saliente DB + fallback fecha) ───────────────────────
               if (saliendo.length > 0) {
-                html += `<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:6px 8px">
-                  <div style="font-size:9px;font-weight:900;color:#d97706;letter-spacing:.6px;text-transform:uppercase;margin-bottom:5px">🧳 Saliendo hoy (${saliendo.length})</div>
-                  ${renderSeccion(saliendo)}
+                // Crear objetos virtuales con datos del saliente (no del nuevo activo)
+                const salienteVirts = saliendo.map(c => ({
+                  ...c,
+                  nombre_huesped:          c.saliente?.nombre      || c.nombre_huesped,
+                  empresa:                 c.saliente?.empresa     || c.empresa,
+                  fecha_salida_programada: c.saliente?.fechaSalida || c.fecha_salida_programada,
+                  huesped_confirmo: false,
+                  _isSaliente: true,
+                }));
+                html += `<div style="background:#fffbeb;border:1.5px solid #fde68a;border-radius:8px;padding:6px 8px">
+                  <div style="font-size:9px;font-weight:900;color:#d97706;letter-spacing:.6px;text-transform:uppercase;margin-bottom:5px">🧳 Salida hoy (${saliendo.length})</div>
+                  ${renderSeccion(salienteVirts)}
                 </div>`;
               }
 

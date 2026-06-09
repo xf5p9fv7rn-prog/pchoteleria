@@ -57,7 +57,7 @@ export async function getCamas(habitacionId) {
         const { data, error } = await supabase
             .from('v2_camas')
             // ✅ FIX: estado_asignacion y fecha_checkin son obligatorios para
-            //    identificar asigActiva y asigEntrante correctamente
+            //    identificar asigActiva, asigEntrante y asigSaliente correctamente
             .select('id_cama,habitacion_id,estado,v2_asignaciones(huesped_confirmo,fecha_checkout,fecha_checkin,fecha_salida_programada,numero_contrato,nombre_huesped,estado_asignacion,v2_empresas(nombre,v2_gerencias(nombre)))')
             .eq('habitacion_id', habitacionId)
             .order('id_cama');
@@ -69,6 +69,8 @@ export async function getCamas(habitacionId) {
                                || asigs.find(a => !a.fecha_checkout && !a.estado_asignacion && a.fecha_checkin);
             const asigEntrante = asigs.find(a => !a.fecha_checkout && a.estado_asignacion === 'pre_asignado')
                                || asigs.find(a => !a.fecha_checkout && !a.estado_asignacion && !a.fecha_checkin); // compatibilidad
+            // 🆕 SALIENTE: persona cuya fecha de salida es HOY — visible durante el día, archivada mañana
+            const asigSaliente = asigs.find(a => !a.fecha_checkout && a.estado_asignacion === 'saliente');
             const hoy = new Date().toISOString().split('T')[0];
             return {
                 id_cama:                c.id_cama,
@@ -91,16 +93,20 @@ export async function getCamas(habitacionId) {
                     empresa: asigEntrante.v2_empresas?.nombre || null,
                 } : null,
                 // Pre-asignación sobre cama Disponible (sin ocupante actual)
-                // También aplica cuando la cama está 'Ocupada' pero la asignación es pre_asignado
                 preAsignado: (!asigActiva && asigEntrante) ? {
                     nombre:   asigEntrante.nombre_huesped,
                     fecha:    asigEntrante.fecha_checkin,
                     empresa:  asigEntrante.v2_empresas?.nombre || null,
                     contrato: asigEntrante.numero_contrato || null,
                 } : null,
-                // Info del actual para camas con pre_asignado como ocupante principal
                 nombre_huesped_pre: (!asigActiva && asigEntrante) ? asigEntrante.nombre_huesped : null,
                 empresa_pre:        (!asigActiva && asigEntrante) ? (asigEntrante.v2_empresas?.nombre || null) : null,
+                // 🆕 SALIENTE: datos de quien sale HOY (para sección SALIDA en la tarjeta)
+                saliente: asigSaliente ? {
+                    nombre:      asigSaliente.nombre_huesped,
+                    empresa:     asigSaliente.v2_empresas?.nombre || null,
+                    fechaSalida: asigSaliente.fecha_salida_programada,
+                } : null,
             };
         });
     } catch(_) {
@@ -132,7 +138,7 @@ export async function getAsignacionByCama(idCama) {
         .select('id,rut_huesped,nombre_huesped,fecha_checkin,fecha_salida_programada,numero_contrato,telefono,estado_asignacion,v2_empresas(id,nombre,turno,gerencia_id,v2_gerencias(nombre))')
         .eq('id_cama', idCama)
         .is('fecha_checkout', null)
-        .in('estado_asignacion', ['activa', 'pre_asignado'])
+        .in('estado_asignacion', ['activa', 'pre_asignado', 'saliente'])
         .order('estado_asignacion'); // 'activa' antes que 'pre_asignado'
     if (error) throw new Error('[v2-service] asignacion by cama: ' + error.message);
     const rows = data || [];
@@ -149,7 +155,7 @@ export async function checkConflictoFechas(idCama, fechaLlegadaNueva) {
         .select('id,nombre_huesped,fecha_salida_programada,estado_asignacion')
         .eq('id_cama', idCama)
         .is('fecha_checkout', null)
-        .in('estado_asignacion', ['activa', 'pre_asignado']);
+        .in('estado_asignacion', ['activa', 'pre_asignado', 'saliente']);
     const rows = data || [];
     if (rows.length === 0) return { ok: true, libre: true };
 
@@ -382,7 +388,7 @@ export async function checkRutDuplicado(rutHuesped, fechaCheckin, fechaSalida) {
         .select('id, nombre_huesped, fecha_checkin, fecha_salida_programada, v2_camas(habitacion_id)')
         .ilike('rut_huesped', `%${rutNorm}%`)
         .is('fecha_checkout', null)
-        .in('estado_asignacion', ['activa', 'pre_asignado']);
+        .in('estado_asignacion', ['activa', 'pre_asignado', 'saliente']);
 
     if (error) return { ok: true }; // Si falla la query, no bloqueamos
     const rows = data || [];
@@ -440,7 +446,7 @@ export async function checkGeneroHabitacion(habitacionId, rutNuevo) {
         .select('rut_huesped, nombre_huesped')
         .in('id_cama', idsCamas)
         .is('fecha_checkout', null)
-        .in('estado_asignacion', ['activa', 'pre_asignado']);
+        .in('estado_asignacion', ['activa', 'pre_asignado', 'saliente']);
 
     if (!ocupantes?.length) return { ok: true };
 
@@ -514,9 +520,26 @@ export async function doCheckin({ idCama, rutHuesped, nombreHuesped, empresaId, 
 
 
 export async function doCheckout(asigId) {
+    const hoy = new Date().toISOString().split('T')[0];
+
+    // Obtener la asignación para verificar si el checkin es futuro
+    const { data: asig } = await supabase
+        .from('v2_asignaciones')
+        .select('id, fecha_checkin')
+        .eq('id', asigId)
+        .single();
+
+    // Si fecha_checkin > hoy (nunca llegó), usar fecha_checkin como checkout
+    // para satisfacer la restricción chk_fechas (checkout >= checkin)
+    const fechaCheckin  = asig?.fecha_checkin?.slice(0, 10) || hoy;
+    const fechaCheckout = fechaCheckin > hoy ? fechaCheckin : hoy;
+
     const { error } = await supabase
         .from('v2_asignaciones')
-        .update({ fecha_checkout: new Date().toISOString().split('T')[0] })
+        .update({
+            fecha_checkout:    fechaCheckout,
+            estado_asignacion: 'cancelado',   // marca que nunca llegó
+        })
         .eq('id', asigId);
     if (error) throw new Error('[v2-service] checkout: ' + error.message);
 }
@@ -525,7 +548,7 @@ export async function getAsignacionesActivas({ busqueda = null, limit = 50 } = {
     let q = supabase.from('v2_asignaciones')
         .select('id,rut_huesped,nombre_huesped,id_cama,fecha_checkin,fecha_salida_programada,estado_asignacion,v2_empresas(nombre,turno)')
         .is('fecha_checkout', null)
-        .in('estado_asignacion', ['activa', 'pre_asignado'])
+        .in('estado_asignacion', ['activa', 'pre_asignado', 'saliente'])
         .order('fecha_checkin', { ascending: false })
         .limit(limit);
     if (busqueda) {
@@ -552,52 +575,93 @@ export async function getAsignacionesActivas({ busqueda = null, limit = 50 } = {
 export async function ejecutarAutoRotacion() {
     const hoy = new Date().toISOString().split('T')[0];
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // PASO 1: Auto-checkout de trabajadores que debían salir hoy o antes
-    //   ✅ FIX: lte (<=) en lugar de lt (<) para incluir salidas de HOY mismo
-    // ─────────────────────────────────────────────────────────────────────────
+    // ═════════════════════════════════════════════════════════════════════════
+    // FASE 0: Archivar 'salientes' del día anterior (fecha_salida < hoy)
+    //   Fueron visibles ayer como SALIENTE → hoy se archivan definitivamente
+    // ═════════════════════════════════════════════════════════════════════════
+    const { data: salientesViejos } = await supabase
+        .from('v2_asignaciones')
+        .select('id,nombre_huesped,id_cama')
+        .is('fecha_checkout', null)
+        .eq('estado_asignacion', 'saliente')
+        .lt('fecha_salida_programada', hoy); // < hoy: ya pasó su día de visibilidad
+
+    if (salientesViejos?.length > 0) {
+        await supabase.from('v2_asignaciones')
+            .update({ fecha_checkout: hoy, estado_asignacion: 'sin_checkout', auto_checkout: true })
+            .in('id', salientesViejos.map(v => v.id));
+
+        // Liberar camas que no tienen un activo nuevo
+        const { data: activasActuales } = await supabase
+            .from('v2_asignaciones').select('id_cama')
+            .is('fecha_checkout', null).eq('estado_asignacion', 'activa');
+        const camasConActiva = new Set((activasActuales || []).map(a => a.id_cama));
+        const camasSinActiva = salientesViejos.filter(v => !camasConActiva.has(v.id_cama));
+        if (camasSinActiva.length > 0) {
+            await supabase.from('v2_camas')
+                .update({ estado: 'Disponible' })
+                .in('id_cama', camasSinActiva.map(v => v.id_cama))
+                .neq('estado', 'Deshabilitada');
+        }
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // FASE 1A: Mover activos de HOY a estado 'saliente'
+    //   fecha_salida = HOY → pasan a SALIENTE (visibles durante el día)
+    //   NO se hace fecha_checkout todavía — eso ocurre en FASE 0 del día siguiente
+    // ═════════════════════════════════════════════════════════════════════════
+    const { data: salientesHoy } = await supabase
+        .from('v2_asignaciones')
+        .select('id,nombre_huesped,id_cama')
+        .is('fecha_checkout', null)
+        .eq('estado_asignacion', 'activa')
+        .eq('fecha_salida_programada', hoy);
+
+    let autoCheckout = [];
+    if (salientesHoy?.length > 0) {
+        await supabase.from('v2_asignaciones')
+            .update({ estado_asignacion: 'saliente' })
+            .in('id', salientesHoy.map(s => s.id));
+        autoCheckout = salientesHoy;
+        // La cama permanece 'Ocupada' — el saliente sigue visible en la tarjeta
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // FASE 1B: Archivar activos vencidos que no pasaron por FASE 1A
+    //   fecha_salida < hoy Y estado='activa' → sin_checkout directo (sin pasar por saliente)
+    //   Captura casos donde la app no corrió ayer
+    // ═════════════════════════════════════════════════════════════════════════
     const { data: vencidos } = await supabase
         .from('v2_asignaciones')
         .select('id,nombre_huesped,id_cama,fecha_salida_programada')
         .is('fecha_checkout', null)
         .eq('estado_asignacion', 'activa')
-        .lte('fecha_salida_programada', hoy); // ✅ FIX: <= hoy (incluye salidas de hoy)
+        .lt('fecha_salida_programada', hoy); // < hoy (estrictamente antes)
 
-    let autoCheckout = [];
-    if (vencidos && vencidos.length > 0) {
-        const ids = vencidos.map(v => v.id);
+    if (vencidos?.length > 0) {
         await supabase.from('v2_asignaciones')
-            .update({
-                fecha_checkout:    hoy,
-                estado_asignacion: 'sin_checkout',
-                auto_checkout:     true
-            })
-            .in('id', ids);
+            .update({ fecha_checkout: hoy, estado_asignacion: 'sin_checkout', auto_checkout: true })
+            .in('id', vencidos.map(v => v.id));
 
-        // Determinar qué camas tienen un entrante pre-asignado (no liberar esas)
-        const camasConEntrante = new Set();
         const { data: preAsig } = await supabase
-            .from('v2_asignaciones')
-            .select('id_cama')
-            .is('fecha_checkout', null)
-            .eq('estado_asignacion', 'pre_asignado');
-        (preAsig || []).forEach(a => camasConEntrante.add(a.id_cama));
-
-        // Liberar camas que no tienen entrante (las que sí tienen entrante se marcarán
-        // como Ocupadas en el PASO 2 cuando el pre-asignado se active)
+            .from('v2_asignaciones').select('id_cama')
+            .is('fecha_checkout', null).eq('estado_asignacion', 'pre_asignado');
+        const camasConEntrante = new Set((preAsig || []).map(a => a.id_cama));
         const camasSinEntrante = vencidos.filter(v => !camasConEntrante.has(v.id_cama));
         if (camasSinEntrante.length > 0) {
             await supabase.from('v2_camas')
                 .update({ estado: 'Disponible' })
-                .in('id_cama', camasSinEntrante.map(v => v.id_cama));
+                .in('id_cama', camasSinEntrante.map(v => v.id_cama))
+                .neq('estado', 'Deshabilitada');
         }
-        autoCheckout = vencidos;
+        autoCheckout = [...autoCheckout, ...vencidos];
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // PASO 2: Activar pre-asignados cuya fecha_checkin ya llegó
-    //   Se ejecuta DESPUÉS del checkout para no tener 2 activos en la misma cama
-    // ─────────────────────────────────────────────────────────────────────────
+    // ═════════════════════════════════════════════════════════════════════════
+    // FASE 2: Activar pre-asignados cuya fecha_checkin ya llegó
+    //   Se ejecuta DESPUÉS de las salidas → el incoming pasa de PRE a ACTUAL
+    //   Si la cama tiene un saliente, ambos coexisten 1 día (saliente + activo nuevo)
+    // ═════════════════════════════════════════════════════════════════════════
     const { data: activables } = await supabase
         .from('v2_asignaciones')
         .select('id,nombre_huesped,id_cama,fecha_checkin')
@@ -606,16 +670,13 @@ export async function ejecutarAutoRotacion() {
         .lte('fecha_checkin', hoy);
 
     let activados = [];
-    if (activables && activables.length > 0) {
-        const ids = activables.map(a => a.id);
+    if (activables?.length > 0) {
         await supabase.from('v2_asignaciones')
             .update({ estado_asignacion: 'activa' })
-            .in('id', ids);
-        // Marcar sus camas como Ocupadas (batch update para eficiencia)
-        const camasIds = activables.map(a => a.id_cama);
+            .in('id', activables.map(a => a.id));
         await supabase.from('v2_camas')
             .update({ estado: 'Ocupada' })
-            .in('id_cama', camasIds);
+            .in('id_cama', activables.map(a => a.id_cama));
         activados = activables;
     }
 

@@ -432,7 +432,7 @@ async function renderGrid(camasArrIn = null, habTagMapIn = null, solicCacheIn = 
             if (!solicCache[k]) solicCache[k] = [];
             solicCache[k].push(s);
         });
-    }
+
         // 💾 Guardar en caché de pabellón
         if (saveToPabId) {
             _cachePorPab[saveToPabId] = {

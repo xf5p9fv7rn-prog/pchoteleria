@@ -1,6 +1,6 @@
 // 🔄 IMPORTANTE: Incrementar CACHE_NAME en cada deploy para limpiar caches viejos.
 // Sincronizado con CM_VER en index.html (actualmente v87).
-const CACHE_NAME = 'v2-purge-fix-19';
+const CACHE_NAME = 'v2-purge-fix-20';  // ← bumped para forzar limpieza del caché roto
 
 const STATIC_ASSETS = [
   '/',
@@ -24,7 +24,7 @@ self.addEventListener('install', (event) => {
   self.skipWaiting();
 });
 
-// Activate: limpiar caches antiguos
+// Activate: limpiar TODOS los caches anteriores
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
@@ -34,20 +34,25 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// Fetch
+// Fetch: SOLO interceptar recursos del mismo origen
 self.addEventListener('fetch', (event) => {
   const url = event.request.url;
 
-  // Ignorar no-HTTP, Supabase, CDNs externos, no-GET
+  // Ignorar no-HTTP y no-GET
   if (!url.startsWith('http')) return;
-  if (url.includes('supabase.co')) return;
-  if (url.includes('cdn.') || url.includes('cdnjs.') || url.includes('tailwindcss.com')) return;
   if (event.request.method !== 'GET') return;
+
+  // ── REGLA CRÍTICA: solo cachear recursos propios del sitio ──────────────────
+  // Si el recurso es de CUALQUIER dominio externo (jsdelivr.net, supabase.co,
+  // googleapis.com, tailwindcss.com, etc.) lo dejamos pasar SIN interceptar.
+  // Esto evita el bug donde el SW redirige imports ESM de Supabase a localhost.
+  const selfOrigin = self.location.origin;
+  if (!url.startsWith(selfOrigin)) return;  // ← deja pasar todo lo externo
 
   const isJS = url.includes('.js');
 
   if (isJS) {
-    // ⚡ NETWORK-FIRST para JS: siempre intentar red primero
+    // ⚡ NETWORK-FIRST para JS propio: siempre intentar red primero
     event.respondWith(
       fetch(event.request)
         .then((response) => {
@@ -60,7 +65,7 @@ self.addEventListener('fetch', (event) => {
         .catch(() => caches.match(event.request))
     );
   } else {
-    // 📦 CACHE-FIRST para assets estáticos
+    // 📦 CACHE-FIRST para assets estáticos propios (imágenes, CSS, HTML)
     event.respondWith(
       caches.match(event.request).then((cached) => {
         if (cached) return cached;

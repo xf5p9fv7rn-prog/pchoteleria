@@ -689,35 +689,105 @@ export async function renderV2InformeEjecutivo(container) {
 function renderCharts({ ocupadas, disponibles, mantencion, totalCamas, empRows, asigActivas = [] }) {
     const font = { family: 'Inter', size: 12 };
 
-    // Donut
+    // ── Plugin: texto en el centro del donut ─────────────────────────────────
+    const centerTextPlugin = (line1Fn, line2Fn) => ({
+        id: 'centerText',
+        afterDraw(chart) {
+            const { ctx, chartArea: { top, bottom, left, right } } = chart;
+            const total = chart.data.datasets[0].data.reduce((a, b) => (a || 0) + (b || 0), 0);
+            if (!total) return;
+            const cx = (left + right) / 2;
+            const cy = (top + bottom) / 2;
+            ctx.save();
+            ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            ctx.font = 'bold 22px Inter';
+            ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--text-primary').trim() || '#1e293b';
+            ctx.fillText(line1Fn(total), cx, cy - 10);
+            ctx.font = '12px Inter';
+            ctx.fillStyle = '#94a3b8';
+            ctx.fillText(line2Fn(total), cx, cy + 12);
+            ctx.restore();
+        }
+    });
+
+    // ── Plugin: números encima de las barras ──────────────────────────────────
+    const barLabelsPlugin = {
+        id: 'barLabels',
+        afterDatasetsDraw(chart) {
+            const { ctx } = chart;
+            chart.data.datasets.forEach((dataset, i) => {
+                const meta = chart.getDatasetMeta(i);
+                meta.data.forEach((bar, index) => {
+                    const value = dataset.data[index];
+                    if (!value) return;
+                    ctx.save();
+                    ctx.font = 'bold 11px Inter';
+                    ctx.fillStyle = '#475569';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'bottom';
+                    ctx.fillText(value.toLocaleString('es-CL'), bar.x, bar.y - 3);
+                    ctx.restore();
+                });
+            });
+        }
+    };
+
+    // ── Leyenda con % y cantidad ─────────────────────────────────────────────
+    const legendWithPct = (labels, colors) => ({
+        display: true,
+        position: 'bottom',
+        labels: {
+            font, padding: 14,
+            generateLabels(chart) {
+                const data   = chart.data.datasets[0].data;
+                const total  = data.reduce((a, b) => (a || 0) + (b || 0), 0);
+                return labels.map((lbl, i) => {
+                    const val = data[i] || 0;
+                    const pct = total > 0 ? Math.round(val / total * 100) : 0;
+                    return {
+                        text: `${lbl}: ${val.toLocaleString('es-CL')} (${pct}%)`,
+                        fillStyle: colors[i],
+                        strokeStyle: colors[i],
+                        lineWidth: 0,
+                        hidden: false,
+                        index: i,
+                    };
+                });
+            }
+        }
+    });
+
+    // ── 1. Donut: Estado de Camas ─────────────────────────────────────────────
     const donutCtx = document.getElementById('inf-chart-donut');
     if (donutCtx) {
+        const total = ocupadas + disponibles + mantencion;
+        const pctOcup = total > 0 ? Math.round(ocupadas / total * 100) : 0;
         new Chart(donutCtx, {
             type: 'doughnut',
             data: {
-                labels: ['🔴 Ocupadas','🟢 Disponibles','🟡 Mantención'],
-                datasets: [{
-                    data: [ocupadas, disponibles, mantencion],
-                    backgroundColor: ['#ef4444','#10b981','#f59e0b'],
-                    borderWidth: 0,
-                    hoverOffset: 8,
-                }],
+                labels: ['Ocupadas','Disponibles','Mantención'],
+                datasets: [{ data: [ocupadas, disponibles, mantencion], backgroundColor: ['#ef4444','#10b981','#f59e0b'], borderWidth: 0, hoverOffset: 8 }],
             },
             options: {
                 responsive: true, maintainAspectRatio: false,
                 plugins: {
-                    legend: { position: 'bottom', labels: { font, padding: 14 } },
-                    tooltip: { callbacks: { label: c => ` ${c.label}: ${c.raw.toLocaleString('es-CL')} camas` } },
+                    legend: legendWithPct(['🔴 Ocupadas','🟢 Disponibles','🟡 Mantención'], ['#ef4444','#10b981','#f59e0b']),
+                    tooltip: { callbacks: { label: c => { const pct = total > 0 ? Math.round(c.raw / total * 100) : 0; return ` ${c.label}: ${c.raw.toLocaleString('es-CL')} camas (${pct}%)`; } } },
                 },
                 cutout: '65%',
             },
+            plugins: [centerTextPlugin(
+                t => `${pctOcup}%`,
+                () => `${ocupadas.toLocaleString('es-CL')} ocup.`
+            )],
         });
     }
 
-    // Barras por empresa
+    // ── 2. Barras: Por Empresa ────────────────────────────────────────────────
     const empCtx = document.getElementById('inf-chart-empresas');
     if (empCtx && empRows.length > 0) {
         const top10 = empRows.slice(0, 10);
+        const totalEmp = top10.reduce((s, e) => s + e.count, 0);
         new Chart(empCtx, {
             type: 'bar',
             data: {
@@ -733,73 +803,108 @@ function renderCharts({ ocupadas, disponibles, mantencion, totalCamas, empRows, 
             },
             options: {
                 responsive: true, maintainAspectRatio: false,
-                plugins: { legend: { display: false } },
+                layout: { padding: { top: 22 } },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            label: ctx => {
+                                const pct = totalEmp > 0 ? Math.round(ctx.raw / totalEmp * 100) : 0;
+                                return ` ${ctx.raw.toLocaleString('es-CL')} camas (${pct}% del total)`;
+                            }
+                        }
+                    }
+                },
                 scales: {
                     y: { beginAtZero: true, grid: { color: 'rgba(148,163,184,.15)' } },
                     x: { grid: { display: false } },
                 },
             },
+            plugins: [barLabelsPlugin],
         });
     }
 
-    // Turno Día vs Noche
-    // ── Solicitudes vs Confirmados ─────────────────────────────────────────
+    // ── 3. Donut: Solicitudes vs Confirmados ──────────────────────────────────
     const confCtx = document.getElementById('inf-chart-confirmados');
     if (confCtx) {
         const totalAsig   = asigActivas.length;
         const confirmados = asigActivas.filter(a => a.huesped_confirmo).length;
         const pendientes  = totalAsig - confirmados;
+        const pctConf = totalAsig > 0 ? Math.round(confirmados / totalAsig * 100) : 0;
         new Chart(confCtx, {
             type: 'doughnut',
             data: {
-                labels: [`✅ Confirmados (${confirmados})`, `🔴 Sin confirmar (${pendientes})`],
-                datasets: [{
-                    data: [confirmados, pendientes],
-                    backgroundColor: ['#10b981', '#ef4444'],
-                    borderWidth: 0,
-                    hoverOffset: 6,
-                }],
+                labels: ['Confirmados', 'Sin confirmar'],
+                datasets: [{ data: [confirmados, pendientes], backgroundColor: ['#10b981','#ef4444'], borderWidth: 0, hoverOffset: 6 }],
             },
             options: {
                 responsive: true, maintainAspectRatio: false,
                 cutout: '65%',
                 plugins: {
-                    legend: { position: 'bottom', labels: { font, padding: 14, color: '#94a3b8' } },
+                    legend: legendWithPct(['✅ Confirmados','🔴 Sin confirmar'], ['#10b981','#ef4444']),
                     tooltip: {
                         callbacks: {
                             label: ctx => {
                                 const pct = totalAsig > 0 ? Math.round(ctx.parsed / totalAsig * 100) : 0;
-                                return ` ${ctx.parsed.toLocaleString('es-CL')} (${pct}%)`;
+                                return ` ${ctx.label}: ${ctx.parsed.toLocaleString('es-CL')} (${pct}%)`;
                             }
                         }
                     }
                 },
             },
+            plugins: [centerTextPlugin(
+                () => `${pctConf}%`,
+                () => `${confirmados.toLocaleString('es-CL')} conf.`
+            )],
         });
     }
 
-    // Participación % (doughnut horizontal)
+    // ── 4. Donut: Participación % por empresa ─────────────────────────────────
     const partCtx = document.getElementById('inf-chart-participacion');
     if (partCtx && empRows.length > 0) {
-        const top5 = empRows.slice(0, 5);
-        const otros = empRows.slice(5).reduce((s,e)=>s+e.count,0);
-        const data  = [...top5.map(e=>e.count), otros>0?otros:null].filter(Boolean);
-        const labs  = [...top5.map(e=>e.nombre.split(' ')[0]), otros>0?'Otros':null].filter(Boolean);
-        const cols  = [...top5.map((_,i)=>empColor(i)), '#94a3b8'];
+        const top5  = empRows.slice(0, 5);
+        const otros = empRows.slice(5).reduce((s, e) => s + e.count, 0);
+        const data  = [...top5.map(e => e.count), otros > 0 ? otros : null].filter(Boolean);
+        const labs  = [...top5.map(e => e.nombre.split(' ')[0]), otros > 0 ? 'Otros' : null].filter(Boolean);
+        const cols  = [...top5.map((_, i) => empColor(i)), '#94a3b8'];
+        const totalPart = data.reduce((a, b) => a + b, 0);
         new Chart(partCtx, {
             type: 'doughnut',
             data: {
                 labels: labs,
-                datasets: [{ data, backgroundColor: cols.slice(0,data.length), borderWidth: 0 }],
+                datasets: [{ data, backgroundColor: cols.slice(0, data.length), borderWidth: 0 }],
             },
             options: {
                 responsive: true, maintainAspectRatio: false,
                 plugins: {
-                    legend: { position: 'bottom', labels: { font, padding: 10, boxWidth: 12 } },
-                    tooltip: { callbacks: { label: c => ` ${c.label}: ${c.raw.toLocaleString('es-CL')} camas` } },
+                    legend: {
+                        position: 'bottom',
+                        labels: {
+                            font, padding: 10, boxWidth: 12,
+                            generateLabels(chart) {
+                                return chart.data.labels.map((lbl, i) => {
+                                    const val = chart.data.datasets[0].data[i] || 0;
+                                    const pct = totalPart > 0 ? Math.round(val / totalPart * 100) : 0;
+                                    return {
+                                        text: `${lbl} (${pct}%)`,
+                                        fillStyle: cols[i],
+                                        strokeStyle: cols[i],
+                                        lineWidth: 0,
+                                        hidden: false,
+                                        index: i,
+                                    };
+                                });
+                            }
+                        }
+                    },
+                    tooltip: { callbacks: { label: c => { const pct = totalPart > 0 ? Math.round(c.raw / totalPart * 100) : 0; return ` ${c.label}: ${c.raw.toLocaleString('es-CL')} camas (${pct}%)`; } } },
                 },
                 cutout: '60%',
             },
+            plugins: [centerTextPlugin(
+                t => t.toLocaleString('es-CL'),
+                () => 'camas'
+            )],
         });
     }
 }

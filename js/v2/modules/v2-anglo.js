@@ -609,6 +609,25 @@ async function _descargarPlantilla() {
     XL.writeFile(wb, `Plantilla_Asignacion_Anglo_${hoy}.xlsx`);
 }
 
+// ── HELPER: Convertir fecha Excel (serial o string) a ISO YYYY-MM-DD ───────────────
+// Excel guarda fechas como números (ej: 46185 = 14/06/2026)
+function _excelDateToISO(val) {
+    if (!val && val !== 0) return null;
+    // Ya es una fecha ISO (YYYY-MM-DD)
+    if (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(val.trim())) return val.trim();
+    // Es un objeto Date (cuando XLSX parsea con cellDates:true)
+    if (val instanceof Date) return val.toISOString().split('T')[0];
+    // Es un número serial de Excel
+    const num = Number(val);
+    if (!isNaN(num) && num > 40000 && num < 80000) {
+        // Fórmula: (serial - 25569) días desde Unix epoch (1 Ene 1970)
+        // +0.5 para centrar en mediodia y evitar errores de zona horaria
+        const d = new Date(Math.round((num - 25569) * 86400 * 1000));
+        return d.toISOString().split('T')[0];
+    }
+    return null;
+}
+
 // ── PROCESAR EXCEL MASIVO ─────────────────────────────────────────────────────
 async function _procesarExcelMasivo(input) {
     const file = input.files[0];
@@ -669,7 +688,7 @@ async function _procesarExcelMasivo(input) {
         const rutRaw  = String(row[colRut]).trim();
         const hab     = String(row[colHab]).trim();
         const turnoRaw = String(row[colTurno]).trim().toUpperCase();
-        const salida  = colSalida >= 0 && row[colSalida] ? String(row[colSalida]).trim() : salidaDef;
+        const salida = _excelDateToISO(colSalida >= 0 ? row[colSalida] : null) || salidaDef;
 
         // Normalizar RUT
         const rut = window._normRut ? window._normRut(rutRaw) : rutRaw.replace(/[.\s-]/g,'').toUpperCase();

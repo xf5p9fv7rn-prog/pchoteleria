@@ -796,12 +796,6 @@ window.exportarPDF = async function() {
     <tbody>${rows}</tbody>
   </table>
   <p style="margin-top:14px;font-size:9px;color:#94a3b8;text-align:center">PC Hotería · Aramark Chile · ${new Date().toLocaleString('es-CL')}</p>
-  <script>
-    window.onload = function() {
-      // Intentar guardar como PDF automáticamente
-      setTimeout(function() { window.print(); }, 300);
-    };
-  <\/script>
   </body></html>`;
 
   try {

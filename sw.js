@@ -1,6 +1,6 @@
 // 🔄 IMPORTANTE: Incrementar CACHE_NAME en cada deploy para limpiar caches viejos.
 // Sincronizado con CM_VER en index.html (actualmente v87).
-const CACHE_NAME = 'v2-purge-fix-20';  // ← bumped para forzar limpieza del caché roto
+const CACHE_NAME = 'v2-purge-fix-21';  // ← bumped para forzar limpieza del caché roto
 
 const STATIC_ASSETS = [
   '/',

@@ -63,18 +63,51 @@ export async function renderV2Infraestructura(container) {
       <div id="v2i-edif-row" style="display:none;flex-wrap:wrap;gap:8px;margin-bottom:12px"></div>
       <div id="v2i-pab-row"  style="display:none;flex-wrap:wrap;gap:8px;margin-bottom:14px"></div>
       <div id="v2i-stats"    style="display:none;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:14px"></div>
+
+      <!-- Panel de Mantenimiento Rápido -->
+      <div id="v2i-mant-panel" style="display:none;background:#fffbeb;border:2px solid #f59e0b;border-radius:14px;padding:14px 18px;margin-bottom:14px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+          <span style="font-size:16px">🔧</span>
+          <span style="font-size:14px;font-weight:800;color:#92400e">Mantenimiento de Habitaciones</span>
+          <button onclick="document.getElementById('v2i-mant-panel').style.display='none'"
+            style="margin-left:auto;background:none;border:none;font-size:18px;cursor:pointer;color:#92400e;line-height:1">&#215;</button>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <input id="v2i-mant-input" type="text" placeholder="N\u00ba habitaci\u00f3n (ej: 1301)" inputmode="numeric"
+            style="padding:10px 14px;border-radius:10px;border:1.5px solid #f59e0b;background:white;font-size:14px;font-weight:700;outline:none;width:200px"
+            onkeydown="if(event.key==='Enter')window._v2iMantBloquear()">
+          <button onclick="window._v2iMantBloquear()"
+            style="background:linear-gradient(135deg,#f59e0b,#d97706);color:white;border:none;border-radius:10px;padding:10px 18px;font-size:13px;font-weight:800;cursor:pointer">
+            🔧 Bloquear
+          </button>
+          <button onclick="window._v2iMantReparar()"
+            style="background:linear-gradient(135deg,#10b981,#059669);color:white;border:none;border-radius:10px;padding:10px 18px;font-size:13px;font-weight:800;cursor:pointer">
+            ✅ Reparar
+          </button>
+        </div>
+        <div id="v2i-mant-lista" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:6px"></div>
+      </div>
+
+      <!-- Botón para abrir panel de mantenimiento (visible cuando hay pabellón seleccionado) -->
+      <div id="v2i-mant-btn-row" style="display:none;margin-bottom:10px">
+        <button onclick="window._v2iAbrirMant()"
+          style="background:#fffbeb;border:1.5px solid #f59e0b;border-radius:10px;padding:8px 16px;font-size:12px;font-weight:800;color:#92400e;cursor:pointer">
+          🔧 Mantenimiento de habitaciones
+        </button>
+      </div>
+
       <!-- Barra de filtros (oculta hasta que se seleccione pabellón) -->
       <div id="v2i-filters" style="display:none;margin-bottom:14px">
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
-          <input id="v2i-search" type="text" placeholder="🏠 Número o ID hab…"
+          <input id="v2i-search" type="text" placeholder="🏠 N\u00famero o ID hab…"
             style="padding:11px 14px;border-radius:12px;border:1.5px solid var(--border);background:var(--bg-card);color:var(--text-primary);font-size:13px;outline:none">
           <input id="v2i-f-empresa" type="text" placeholder="🏢 Empresa…"
             style="padding:11px 14px;border-radius:12px;border:1.5px solid var(--border);background:var(--bg-card);color:var(--text-primary);font-size:13px;outline:none">
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-          <input id="v2i-f-nombre" type="text" placeholder="👤 Nombre huésped…"
+          <input id="v2i-f-nombre" type="text" placeholder="👤 Nombre hu\u00e9sped…"
             style="padding:11px 14px;border-radius:12px;border:1.5px solid var(--border);background:var(--bg-card);color:var(--text-primary);font-size:13px;outline:none">
-          <input id="v2i-f-gerencia" type="text" placeholder="🏛 Gerencia…"
+          <input id="v2i-f-gerencia" type="text" placeholder="🏦 Gerencia…"
             style="padding:11px 14px;border-radius:12px;border:1.5px solid var(--border);background:var(--bg-card);color:var(--text-primary);font-size:13px;outline:none">
         </div>
       </div>
@@ -334,6 +367,10 @@ async function selectPabellon(id) {
             if (el) el.value = '';
         });
     }
+    // Mostrar botón de acceso rápido a mantención
+    const mantBtnRow = document.getElementById('v2i-mant-btn-row');
+    if (mantBtnRow) mantBtnRow.style.display = 'block';
+
     markSel('v2i-p', _pabellones, id, '#6366f1');
 
     const cached = _cachePorPab[id];
@@ -773,16 +810,11 @@ async function renderGrid(camasArrIn = null, habTagMapIn = null, solicCacheIn = 
               </div>
             </div>`;
           })()}
-          <div style="margin-top:10px;border-top:1px solid ${h.en_mantencion?'#f59e0b':'var(--border)'};padding-top:8px;text-align:right">
-            <button onclick="event.stopPropagation();window._v2iToggleMantencionHab('${h.id_custom}',${!h.en_mantencion})"
-              style="background:${h.en_mantencion?'linear-gradient(135deg,#10b981,#059669)':'linear-gradient(135deg,#f59e0b,#d97706)'};color:white;border:none;border-radius:8px;padding:5px 12px;font-size:11px;font-weight:800;cursor:pointer">
-              ${h.en_mantencion?'✅ Reparar habitaci\u00f3n':'🔧 Poner en manten\u00f3n'}
-            </button>
-          </div>
         </div>`;
 
       }).join('')}`;
 }
+
 
 // ⚡ Pre-carga silenciosa de un pabellón sin tocar la UI
 async function _prefetchPabellon(pabId) {
@@ -885,11 +917,91 @@ window._v2iToggleMantencionHab = async function(habId, poner) {
         document.body.appendChild(t);
         setTimeout(() => { t.style.opacity='0'; setTimeout(() => t.remove(), 500); }, 3000);
 
+        // Actualizar lista del panel
+        _v2iMantActualizarLista();
+
     } catch(e) {
         alert('Error al cambiar estado de habitación: ' + e.message);
     }
 };
 
+// ─── PANEL DE MANTENIMIENTO RÁPIDO ───────────────────────────────────────────
+
+// Actualiza los chips de habitaciones en mantención en el panel superior
+function _v2iMantActualizarLista() {
+    const lista = document.getElementById('v2i-mant-lista');
+    if (!lista) return;
+    const enMant = _habitaciones.filter(h => h.en_mantencion);
+    if (!enMant.length) {
+        lista.innerHTML = `<span style="font-size:12px;color:#92400e;font-style:italic">Sin habitaciones bloqueadas actualmente</span>`;
+        return;
+    }
+    lista.innerHTML = enMant.map(h => `
+        <div style="display:inline-flex;align-items:center;gap:6px;background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:4px 10px">
+            <span style="font-size:12px;font-weight:800;color:#92400e">🔧 ${h.numero_hab}</span>
+            <button onclick="window._v2iToggleMantencionHab('${h.id_custom}',false)"
+                title="Reparar habitación ${h.numero_hab}"
+                style="background:#10b981;color:white;border:none;border-radius:5px;width:18px;height:18px;font-size:10px;cursor:pointer;font-weight:900;line-height:1">✕</button>
+        </div>`).join('');
+}
+
+// Abrir/mostrar el panel
+window._v2iAbrirMant = function() {
+    const panel = document.getElementById('v2i-mant-panel');
+    if (panel) {
+        panel.style.display = 'block';
+        _v2iMantActualizarLista();
+        document.getElementById('v2i-mant-input')?.focus();
+    }
+};
+
+// Bloquear habitación por número
+window._v2iMantBloquear = async function() {
+    const input = document.getElementById('v2i-mant-input');
+    const numStr = input?.value?.trim();
+    if (!numStr) { input?.focus(); return; }
+
+    // Buscar en todos los pabellones del edificio actual
+    const todasHabs = Object.values(_cachePorPab).flatMap(p => p.habs || []);
+    // También incluir las habitaciones del pabellón activo
+    const habsPool = [..._habitaciones, ...todasHabs].filter((h, i, arr) => arr.findIndex(x => x.id_custom === h.id_custom) === i);
+    const hab = habsPool.find(h => String(h.numero_hab) === numStr);
+
+    if (!hab) {
+        const input = document.getElementById('v2i-mant-input');
+        if (input) { input.style.borderColor = '#ef4444'; setTimeout(() => input.style.borderColor = '#f59e0b', 2000); }
+        alert(`No se encontró la habitación ${numStr} en los pabellones cargados.\nNavega primero al pabellón que la contiene.`);
+        return;
+    }
+    if (hab.en_mantencion) {
+        alert(`La habitación ${numStr} ya está en mantención.`);
+        return;
+    }
+    await window._v2iToggleMantencionHab(hab.id_custom, true);
+    if (input) input.value = '';
+};
+
+// Reparar habitación por número
+window._v2iMantReparar = async function() {
+    const input = document.getElementById('v2i-mant-input');
+    const numStr = input?.value?.trim();
+    if (!numStr) { input?.focus(); return; }
+
+    const todasHabs = Object.values(_cachePorPab).flatMap(p => p.habs || []);
+    const habsPool = [..._habitaciones, ...todasHabs].filter((h, i, arr) => arr.findIndex(x => x.id_custom === h.id_custom) === i);
+    const hab = habsPool.find(h => String(h.numero_hab) === numStr);
+
+    if (!hab) {
+        alert(`No se encontró la habitación ${numStr} en los pabellones cargados.\nNavega primero al pabellón que la contiene.`);
+        return;
+    }
+    if (!hab.en_mantencion) {
+        alert(`La habitación ${numStr} no está en mantención.`);
+        return;
+    }
+    await window._v2iToggleMantencionHab(hab.id_custom, false);
+    if (input) input.value = '';
+};
 
 async function handleCheckin(idCama) {
     const msg  = (t,c) => { const e=document.getElementById('ci-msg'); if(e){e.textContent=t;e.style.color=c;} };

@@ -268,6 +268,9 @@ async function toggleCama(id_cama, nuevoEstado) {
         alert('Error: ' + error.message); 
         c.estado = estadoAnterior; 
         renderTabla(); // rollback 
+    } else {
+        // Invalidar caché de infraestructura para que refleje el nuevo estado
+        window._v2iInvalidarCache?.();
     }
 }
 
@@ -288,6 +291,8 @@ async function toggleVisibles(nuevoEstado) {
     }
 
     aActualizar.forEach(c => { c.estado = nuevoEstado; });
+    // Invalidar caché de infraestructura (cambio masivo de estados)
+    window._v2iInvalidarCache?.();
     renderTabla();
 }
 

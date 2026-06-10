@@ -22,6 +22,12 @@ let _filtEmpresa = '', _filtNombre = '', _filtGerencia = '';
 const _cachePorPab = {};     // { [pabId]: { camasArr, habTagMap, solicCache } }
 const CACHE_MAX_MS = 5 * 60 * 1000; // 5 minutos: refresco automático si la info es vieja
 
+// Permite que otros módulos (ej: v2-cama3.js) invaliden el caché tras cambiar estados de camas
+window._v2iInvalidarCache = () => {
+    Object.keys(_cachePorPab).forEach(k => delete _cachePorPab[k]);
+    console.log('[Infraestructura] Caché invalidado por cambio externo');
+};
+
 export async function renderV2Infraestructura(container) {
     container.innerHTML = `
     <div style="padding:20px;max-width:1200px;margin:0 auto">

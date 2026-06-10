@@ -671,7 +671,56 @@ async function renderCheckout(pop, idCama, onSuccess) {
             const { data: camas } = await supabase.from('v2_camas')
                 .select('id_cama,habitacion_id').in('habitacion_id', habIds)
                 .eq('estado', 'Disponible').neq('id_cama', idCama).order('id_cama');
-            if (!camas?.length) { res.textContent = `⚠️ Hab. ${num} encontrada pero sin camas libres`; return; }
+            if (!camas?.length) {
+                // ── Sin camas libres: mostrar quién está y hasta cuándo ──────
+                res.style.fontStyle = 'normal';
+
+                // Buscar las camas de esa habitación (todas, no solo disponibles)
+                const { data: todasCamas } = await supabase.from('v2_camas')
+                    .select('id_cama').in('habitacion_id', habIds);
+
+                const todosIds = (todasCamas || []).map(c => c.id_cama);
+                let ocupantesHTML = '';
+
+                if (todosIds.length) {
+                    const { data: ocupantes } = await supabase
+                        .from('v2_asignaciones')
+                        .select('nombre_huesped, fecha_salida_programada')
+                        .in('id_cama', todosIds)
+                        .is('fecha_checkout', null)
+                        .order('fecha_salida_programada', { ascending: true });
+
+                    if (ocupantes?.length) {
+                        const fmt = f => f
+                            ? new Date(f + 'T12:00').toLocaleDateString('es-CL', { day: 'numeric', month: 'short', year: 'numeric' })
+                            : 'sin fecha de salida';
+                        ocupantesHTML = `
+                            <div style="margin-top:8px;display:flex;flex-direction:column;gap:4px">
+                                <div style="font-size:10px;font-weight:700;color:#94a3b8;text-transform:uppercase;margin-bottom:2px">Ocupantes actuales:</div>
+                                ${ocupantes.map(o => `
+                                <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 10px;background:#fff5f5;border-radius:8px;border-left:3px solid #ef4444">
+                                    <span style="font-weight:700;color:#1e293b;font-size:12px">${o.nombre_huesped || '—'}</span>
+                                    <span style="color:#dc2626;font-weight:800;font-size:11px;white-space:nowrap;margin-left:8px">📅 Sale: ${fmt(o.fecha_salida_programada)}</span>
+                                </div>`).join('')}
+                            </div>`;
+                    }
+                }
+
+                res.innerHTML = `
+                    <div style="background:#fef2f2;border:1.5px solid #fca5a5;border-radius:10px;padding:10px 12px;margin-top:4px">
+                        <div style="font-weight:800;color:#dc2626;font-size:12px;margin-bottom:4px">🚫 Hab. ${habs.map(h=>h.numero_hab).join(', ')} sin camas disponibles</div>
+                        ${ocupantesHTML || '<div style="font-size:11px;color:#94a3b8">No se encontraron ocupantes activos.</div>'}
+                    </div>`;
+
+                // Ocultar selector y botón — no se puede transferir
+                sel.style.display = 'none';
+                btn.disabled = true;
+                btn.style.opacity = '.5';
+                return;
+            }
+
+            res.style.fontStyle = 'normal';
+
             const habNums = {};
             for (const h of habs) habNums[h.id_custom] = h.numero_hab;
             res.textContent = `✅ ${camas.length} cama(s) disponible(s) en hab. ${habs.map(h=>h.numero_hab).join(', ')}`;

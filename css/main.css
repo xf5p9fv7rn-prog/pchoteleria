@@ -490,12 +490,7 @@ ul {
     border: 2px solid #fff;
 }
 
-/* ── Page Content ───────────────────────────────── */
-.page-content {
-    flex: 1;
-    overflow-y: auto;
-    padding: 24px;
-}
+/* ── Page Content (definición canónica en línea ~387, no duplicar aquí) ─────── */
 
 /* ── Section Header ─────────────────────────────── */
 .section-header {

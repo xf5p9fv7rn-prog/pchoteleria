@@ -1,0 +1,60 @@
+# ============================================================
+# .netlifyignore — Archivos que NO deben ser públicos en Netlify
+# Scripts de migración, datos sensibles y utilidades de desarrollo
+# ============================================================
+
+# Datos sensibles / JSON con información de trabajadores
+usuarios_anglo.json
+extracted_rooms.json
+
+# Scripts SQL de migración y mantenimiento
+*.sql
+sql/
+
+# Scripts Python de utilidades
+*.py
+
+# Archivos Excel con datos internos
+*.xlsx
+*.xls
+*.pptx
+
+# Archivos ZIP de deploy
+*.zip
+
+# Scripts JS de utilidad (no son parte de la app)
+brutal_clean.js
+count_cama3.js
+create_cama3.js
+delete_hualpen.js
+delete_hualpen_8.js
+delete_hualpen_fix.js
+delete_hualpen_real.js
+delete_rut.js
+delete_rut_fix.js
+generar_2000_camas_llenas.js
+generar_2000_usuarios_prueba.js
+generar_excel_prueba_2030.js
+limpiar_2030.js
+limpiar_hualpen.js
+sql_cama3.js
+sql_cama3_2.js
+sql_cama3_3.js
+sql_cama3_4.js
+test_asig.js
+test_cama3.js
+test_cama3_format.js
+test_emp.js
+test_hualpen.js
+test_constraint.py
+fix_anglo_dedup.py
+parse_excel.py
+generate_js.py
+
+# Git y archivos de IDE
+.git/
+.gitignore
+.vscode/
+
+# Archivos macOS
+.DS_Store

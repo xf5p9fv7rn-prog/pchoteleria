@@ -1,17 +1,19 @@
-const CACHE_NAME = 'v2-purge-fix-18'; // 🔄 Incrementar en cada deploy para limpiar cache viejo
-
-
+// 🔄 IMPORTANTE: Incrementar CACHE_NAME en cada deploy para limpiar caches viejos.
+// Sincronizado con CM_VER en index.html (actualmente v87).
+const CACHE_NAME = 'v2-purge-fix-19';
 
 const STATIC_ASSETS = [
   '/',
   '/index.html',
   '/css/main.css',
-  '/css/premium.css',
+  '/css/premium.css?v=5',   // ← debe coincidir con el ?v= del <link> en index.html
   '/aramark.png',
   '/anglo.png',
   '/Mirian.png',
   '/manifest.json',
   '/solicitud-empresa.html',
+  '/icons/icon-192.png',
+  '/icons/icon-512.png',
 ];
 
 // Install: cache solo assets estáticos

@@ -261,6 +261,7 @@ export async function put(storeName, data) {
 // Suscripciones EXCLUSIVAMENTE a tablas v2_ (las legacy ya no existen).
 // ─────────────────────────────────────────────────────────────────────────────
 let _realtimeInitialized = false;
+let _realtimeChannels = []; // Referencias para poder hacer cleanup
 
 export function initRealtimeSync() {
     if (_realtimeInitialized) return;
@@ -273,12 +274,11 @@ export function initRealtimeSync() {
     ];
 
     V2_EVENTS.forEach(({ table, event }) => {
-        supabase
+        const channel = supabase
             .channel(`rt_v2_${table}_${Math.random().toString(36).slice(2, 7)}`)
             .on('postgres_changes',
                 { event: '*', schema: 'public', table },
                 (payload) => {
-                    console.log(`[Realtime V2] ${table} ${payload.eventType}`);
                     // Disparar evento genérico para que los módulos V2 recarguen
                     window.dispatchEvent(new CustomEvent('db:changed', {
                         detail: { storeName: table, source: 'realtime', payload }
@@ -288,13 +288,22 @@ export function initRealtimeSync() {
                 }
             )
             .subscribe((status) => {
-                if (status === 'SUBSCRIBED') {
-                    console.log(`[Realtime V2] ✅ Suscrito a '${table}'`);
-                } else if (status === 'CHANNEL_ERROR') {
+                if (status === 'CHANNEL_ERROR') {
                     console.warn(`[Realtime V2] ⚠️ Error en canal '${table}' — sin Realtime en esta tabla`);
                 }
             });
+        // Guardar referencia para poder hacer unsubscribe al cerrar sesión
+        _realtimeChannels.push(channel);
     });
+}
+
+/** Cancela todas las suscripciones Realtime activas. Llamar al hacer logout. */
+export function cleanupRealtimeSync() {
+    _realtimeChannels.forEach(ch => {
+        try { supabase.removeChannel(ch); } catch (_) {}
+    });
+    _realtimeChannels = [];
+    _realtimeInitialized = false;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -340,8 +349,6 @@ export async function fn_transicionDiaria() {
         // ── CHECKOUT AUTOMÁTICO A LAS 22:00 (una vez por día) ──────────────
         const hora = new Date().getHours();
         if (hora >= 22 && _ultimoCheckout22 !== hoy) {
-            console.log('[Transición] 🕙 Checkout automático 22:00 para', hoy);
-
             const { data: paraCheckout } = await supabase
                 .from('v2_asignaciones')
                 .select('id, id_cama')
@@ -349,30 +356,33 @@ export async function fn_transicionDiaria() {
                 .is('fecha_checkout', null);
 
             if (paraCheckout?.length) {
-                const ids = paraCheckout.map(a => a.id);
+                const ids     = paraCheckout.map(a => a.id);
                 const camaIds = [...new Set(paraCheckout.map(a => a.id_cama))];
 
+                // Marcar asignaciones como checkout
                 await supabase
                     .from('v2_asignaciones')
                     .update({ fecha_checkout: hoy })
                     .in('id', ids);
 
-                for (const camaId of camaIds) {
-                    const { data: nuevaAsig } = await supabase
-                        .from('v2_asignaciones')
-                        .select('id')
-                        .eq('id_cama', camaId)
-                        .is('fecha_checkout', null)
-                        .limit(1);
-                    if (!nuevaAsig?.length) {
-                        await supabase.from('v2_camas')
-                            .update({ estado: 'Disponible' })
-                            .eq('id_cama', camaId)
-                            .neq('estado', 'Deshabilitada');
-                    }
+                // ✅ FIX N+1: Una sola query para saber qué camas aún tienen asignación activa
+                // (en lugar de hacer una query por cada camaId en un for-loop)
+                const { data: camasConActiva } = await supabase
+                    .from('v2_asignaciones')
+                    .select('id_cama')
+                    .in('id_cama', camaIds)
+                    .is('fecha_checkout', null);
+
+                const camasConActivaSet = new Set((camasConActiva || []).map(a => a.id_cama));
+                const camasALiberar = camaIds.filter(id => !camasConActivaSet.has(id));
+
+                if (camasALiberar.length > 0) {
+                    await supabase.from('v2_camas')
+                        .update({ estado: 'Disponible' })
+                        .in('id_cama', camasALiberar)
+                        .neq('estado', 'Deshabilitada');
                 }
 
-                console.log(`[Transición] 🏁 Checkout 22:00: ${ids.length} persona(s) → Historial`);
                 window.dispatchEvent(new CustomEvent('v2:refresh'));
             }
             _ultimoCheckout22 = hoy;
@@ -679,9 +689,13 @@ export async function seedDemoData() {
     const tx = db.transaction('buildings', 'readwrite');
     buildingDefs.forEach(b => tx.objectStore('buildings').put(b));
 
-    await put('users', { username: 'juan-1154@hotmail.es', password: '2417', name: 'Juan G.', role: 'superadmin' });
-    await put('users', { username: 'Administracion', password: 'viosimcam', name: 'Administración', role: 'admin' });
-    await put('users', { username: 'Anglo', password: 'anglo2024', name: 'Administrador Anglo', role: 'admin', empresa: 'Anglo American', createdAt: new Date().toISOString() });
+    // ✅ SEGURIDAD: Las contraseñas de producción se gestionan exclusivamente
+    // en Supabase Auth (supabase.auth.signInWithPassword). Esta tabla IndexedDB
+    // es un vestigio del sistema legacy y NO se usa para autenticar usuarios reales.
+    // Los campos de contraseña se omiten intencionalmente aquí.
+    await put('users', { username: 'juan-1154@hotmail.es', name: 'Juan G.', role: 'superadmin' });
+    await put('users', { username: 'Administracion', name: 'Administración', role: 'admin' });
+    await put('users', { username: 'Anglo', name: 'Administrador Anglo', role: 'admin', empresa: 'Anglo American', createdAt: new Date().toISOString() });
 }
 
 /**
@@ -692,10 +706,11 @@ export async function ensureDefaultUsers() {
     const existing = await getAll('users');
     const usernames = existing.map(u => u.username);
 
+    // ✅ SEGURIDAD: Sin contraseñas en texto plano. Auth real → Supabase Auth.
     const defaults = [
-        { username: 'juan-1154@hotmail.es', password: '2417', name: 'Juan G.', role: 'superadmin' },
-        { username: 'Administracion', password: 'viosimcam', name: 'Administración', role: 'admin', empresa: 'Aramark' },
-        { username: 'Anglo', password: 'anglo2024', name: 'Administrador Anglo', role: 'admin', empresa: 'Anglo American' },
+        { username: 'juan-1154@hotmail.es', name: 'Juan G.', role: 'superadmin' },
+        { username: 'Administracion', name: 'Administración', role: 'admin', empresa: 'Aramark' },
+        { username: 'Anglo', name: 'Administrador Anglo', role: 'admin', empresa: 'Anglo American' },
     ];
 
     for (const u of defaults) {

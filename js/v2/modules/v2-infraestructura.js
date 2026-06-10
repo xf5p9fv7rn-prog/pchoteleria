@@ -17,10 +17,10 @@ let _selEdificio = null, _selPabellon = null;
 let _camaData  = {};
 let _busqueda  = '';
 let _filtEmpresa = '', _filtNombre = '', _filtGerencia = '';
-// ⚡ Caché en memoria para no re-consultar Supabase tras cada acción
-let _camasCache   = null; // Array<Array<cama>> paralelo a _habitaciones
-let _habTagCache  = null; // { habId: { tipo, etiqueta } }
-let _solicCache   = null; // { numero_hab: [{nombre, empresa, fecha_llegada}] }
+// ⚡ Caché por pabellón: evita re-descargar al cambiar entre pabellones visitados
+// Cada entrada: { camasArr, habTagMap, solicCache, ts }
+const _cachePorPab = {};     // { [pabId]: { camasArr, habTagMap, solicCache } }
+const CACHE_MAX_MS = 5 * 60 * 1000; // 5 minutos: refresco automático si la info es vieja
 
 export async function renderV2Infraestructura(container) {
     container.innerHTML = `
@@ -136,7 +136,7 @@ export async function renderV2Infraestructura(container) {
         if (!window._v2iRotListener) {
             window._v2iRotListener = async () => {
                 if (!_selPabellon) return;
-                _camasCache = null; _habTagCache = null; _solicCache = null;
+                delete _cachePorPab[_selPabellon]; // fuerza re-descarga al cambiar pab
                 const scrollY = window.scrollY;
                 await selectPabellon(_selPabellon);
                 requestAnimationFrame(() => window.scrollTo({ top: scrollY, behavior: 'instant' }));
@@ -148,7 +148,10 @@ export async function renderV2Infraestructura(container) {
         document.getElementById('v2i-loading').innerHTML = `<div style="color:#ef4444">❌ ${e.message}</div>`;
     }
 
-    const refilter = () => renderGrid();
+    const refilter = () => {
+        const cached = _cachePorPab[_selPabellon];
+        renderGrid(cached?.camasArr||null, cached?.habTagMap||null, cached?.solicCache||null);
+    };
     document.getElementById('v2i-search')   ?.addEventListener('input', e => { _busqueda    = e.target.value; refilter(); });
     document.getElementById('v2i-f-empresa') ?.addEventListener('input', e => { _filtEmpresa = e.target.value; refilter(); });
     document.getElementById('v2i-f-nombre')  ?.addEventListener('input', e => { _filtNombre  = e.target.value; refilter(); });
@@ -314,10 +317,6 @@ function renderPabellones() {
 
 async function selectPabellon(id) {
     _selPabellon = id;
-    // Limpiar caché al cambiar de pabellon — fuerza nueva descarga
-    _camasCache  = null;
-    _habTagCache = null;
-    _solicCache  = null;
     _busqueda = ''; _filtEmpresa = ''; _filtNombre = ''; _filtGerencia = '';
     const filters = document.getElementById('v2i-filters');
     if (filters) {
@@ -328,18 +327,32 @@ async function selectPabellon(id) {
         });
     }
     markSel('v2i-p', _pabellones, id, '#6366f1');
-    document.getElementById('v2i-grid').innerHTML =
-        `<div style="grid-column:1/-1;text-align:center;padding:30px;color:var(--text-muted)">Cargando habitaciones…</div>`;
-    try {
-        _habitaciones = await getHabitaciones(id);
-        await renderGrid();
-    } catch(e) {
-        document.getElementById('v2i-grid').innerHTML = `<div style="color:#ef4444">${e.message}</div>`;
+
+    const cached = _cachePorPab[id];
+    const ahora  = Date.now();
+    const cacheValida = cached && (ahora - cached.ts) < CACHE_MAX_MS;
+
+    if (cacheValida) {
+        // ⚡ Render instantáneo desde caché — sin spinner
+        _habitaciones = cached.habs;
+        document.getElementById('v2i-grid').innerHTML = '';
+        await renderGrid(cached.camasArr, cached.habTagMap, cached.solicCache);
+    } else {
+        document.getElementById('v2i-grid').innerHTML =
+            `<div style="grid-column:1/-1;text-align:center;padding:30px;color:var(--text-muted)">Cargando habitaciones…</div>`;
+        try {
+            _habitaciones = await getHabitaciones(id);
+            await renderGrid(null, null, null, id);
+        } catch(e) {
+            document.getElementById('v2i-grid').innerHTML = `<div style="color:#ef4444">${e.message}</div>`;
+        }
     }
 }
 
 // ─── GRID ───────────────────────────────────────────────────────────────────
-async function renderGrid() {
+// camasArrIn / habTagMapIn / solicCacheIn: si se pasan, se usan directamente (desde caché)
+// saveToPabId: si se pasa, guarda el resultado en _cachePorPab tras descargar
+async function renderGrid(camasArrIn = null, habTagMapIn = null, solicCacheIn = null, saveToPabId = null) {
     const grid  = document.getElementById('v2i-grid');
     const stats = document.getElementById('v2i-stats');
     const q  = _busqueda.toLowerCase().trim();
@@ -347,7 +360,6 @@ async function renderGrid() {
     const qN = _filtNombre.toLowerCase().trim();
     const qG = _filtGerencia.toLowerCase().trim();
 
-    // Filtro por número/ID hab (sin necesitar datos de cama)
     let habs = q
         ? _habitaciones.filter(h => (h.numero_hab||'').toLowerCase().includes(q) || h.id_custom.toLowerCase().includes(q))
         : _habitaciones;
@@ -357,20 +369,18 @@ async function renderGrid() {
         stats.style.display = 'none'; return;
     }
 
-    grid.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:20px;color:var(--text-muted)">Cargando camas…</div>`;
-
-    // ⚡ Usar caché si existe (evita re-consultar Supabase tras checkout/checkin)
-    let camasArr, habTagMap;
-    if (_camasCache && _habTagCache) {
-        // Usar datos en memoria — render instantáneo
-        camasArr  = _camasCache;
-        habTagMap = _habTagCache;
-        // Limpiar el mensaje de carga de inmediato
+    // ⚡ Si se pasan datos directamente (caché) — render inmediato, sin spinner
+    let camasArr, habTagMap, solicCache;
+    if (camasArrIn && habTagMapIn && solicCacheIn) {
+        camasArr  = camasArrIn;
+        habTagMap = habTagMapIn;
+        solicCache = solicCacheIn;
         grid.innerHTML = '';
     } else {
-        // Primera carga o cambio de pabellón — descargar desde Supabase
+        // Primera carga — descargar desde Supabase
+        grid.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:20px;color:var(--text-muted)">Cargando camas…</div>`;
+
         camasArr = await Promise.all(habs.map(h => getCamas(h.id_custom)));
-        _camasCache = camasArr;
 
         // Etiquetas de distribucion
         habTagMap = {};
@@ -389,17 +399,12 @@ async function renderGrid() {
                 }
             });
         }
-        _habTagCache = habTagMap;
 
-        // 📅 Solicitudes B2B aceptadas — incluye HOY y futuros
-        // Usamos gte (>=) para que los trabajadores de HOY que no tienen asignación
-        // formal en v2_asignaciones también sean visibles en el panel (pueden ser
-        // asignados con ⚡ Asignar). Deduplicamos con los RUTs ya asignados activamente.
-        _solicCache = {};
+        // 📅 Solicitudes B2B aceptadas
+        solicCache = {};
         const hoy2 = new Date().toISOString().split('T')[0];
         const numHabsSet = new Set(habs.map(h => String(h.numero_hab)));
 
-        // Obtener RUTs que ya tienen asignación activa (evita duplicar en panel)
         const rutsConAsignacion = new Set();
         try {
             const { data: asigActivas } = await supabase
@@ -416,26 +421,41 @@ async function renderGrid() {
             .from('v2_solicitudes_b2b')
             .select('id, nombre_trabajador, rut_trabajador, empresa, fecha_llegada, fecha_salida, hab_solicitada')
             .in('status', ['aceptada', 'aceptada_asignada'])
-            .gte('fecha_llegada', hoy2)  // ✅ incluye HOY y futuro
+            .gte('fecha_llegada', hoy2)
             .order('fecha_llegada')
             .limit(500);
         (solics || []).forEach(s => {
             const k = String(s.hab_solicitada);
-            if (!numHabsSet.has(k)) return; // solo habs del pabellon actual
-            // Excluir si ya tiene asignación activa formal (evita duplicado)
+            if (!numHabsSet.has(k)) return;
             const rutNorm = String(s.rut_trabajador || '').toUpperCase().replace(/\./g, '');
             if (rutsConAsignacion.has(rutNorm)) return;
-            if (!_solicCache[k]) _solicCache[k] = [];
-            _solicCache[k].push(s);
+            if (!solicCache[k]) solicCache[k] = [];
+            solicCache[k].push(s);
         });
     }
-
+        // 💾 Guardar en caché de pabellón
+        if (saveToPabId) {
+            _cachePorPab[saveToPabId] = {
+                habs: _habitaciones,
+                camasArr,
+                habTagMap,
+                solicCache,
+                ts: Date.now(),
+            };
+            // ⚡ Pre-carga silenciosa del pabellón adyacente
+            const pabIdx  = _pabellones.findIndex(p => p.id === saveToPabId);
+            const nextPab = _pabellones[pabIdx + 1];
+            if (nextPab && !_cachePorPab[nextPab.id]) {
+                setTimeout(() => _prefetchPabellon(nextPab.id), 1500);
+            }
+        }
+    }
 
     habs.forEach((h, i) => camasArr[i].forEach(c => { _camaData[c.id_cama] = { estado: c.estado, habitacion_id: c.habitacion_id }; }));
 
     // ⚡ Asignación rápida de pre-asignado a cama libre
     window._v2iAsignarPreAsig = async (numHab, idxSol, btnEl) => {
-        const sol = (_solicCache || {})[String(numHab)]?.[idxSol];
+        const sol = (solicCache || {})[String(numHab)]?.[idxSol];
         if (!sol) return;
         btnEl.textContent = '⏳'; btnEl.disabled = true;
 
@@ -493,7 +513,7 @@ async function renderGrid() {
 
         // 6. Refrescar vista
         setTimeout(async () => {
-            _camasCache = null; _solicCache = null;
+            delete _cachePorPab[_selPabellon]; // Invalidar caché de este pabellón
             if (_selPabellon) {
                 const scrollY = window.scrollY;
                 await selectPabellon(_selPabellon);
@@ -741,6 +761,31 @@ async function renderGrid() {
       }).join('')}`;
 }
 
+// ⚡ Pre-carga silenciosa de un pabellón sin tocar la UI
+async function _prefetchPabellon(pabId) {
+    if (_cachePorPab[pabId]) return; // ya cacheado
+    try {
+        const habs = await getHabitaciones(pabId);
+        if (!habs?.length) return;
+        const camasArr  = await Promise.all(habs.map(h => getCamas(h.id_custom)));
+        const habTagMap = {};
+        const allCamaIds = habs.flatMap((h,i) => camasArr[i].map(c => c.id_cama)).slice(0,1000);
+        if (allCamaIds.length) {
+            const { data: distTags } = await supabase
+                .from('v2_distribucion_camas').select('id_cama,tipo,etiqueta').in('id_cama', allCamaIds);
+            (distTags||[]).forEach(d => {
+                for (let i=0;i<habs.length;i++) {
+                    if (camasArr[i].some(c=>c.id_cama===d.id_cama)) {
+                        if (!habTagMap[habs[i].id_custom]) habTagMap[habs[i].id_custom]=d;
+                        break;
+                    }
+                }
+            });
+        }
+        _cachePorPab[pabId] = { habs, camasArr, habTagMap, solicCache: {}, ts: Date.now() };
+    } catch(_) { /* prefetch silencioso: si falla, se carga normal al visitar */ }
+}
+
 // ─── MODAL: delega todo al nuevo CheckinPopoverV2 ───────────────────────────
 async function openCamaModal(ev, idCama) {
     const card = ev.target.closest('[data-cama-card]');
@@ -748,8 +793,9 @@ async function openCamaModal(ev, idCama) {
     const info   = _camaData[idCama] || {};
     const estado = info.estado || 'Disponible';
     await abrirPopover(card, idCama, estado, async (tipo) => {
-        // Refresca la vista después de check-in o checkout SIN perder posición
+        // Invalidar caché del pabellón actual y refrescar vista
         if (_selPabellon) {
+            delete _cachePorPab[_selPabellon];
             const scrollY = window.scrollY;
             await selectPabellon(_selPabellon);
             requestAnimationFrame(() => window.scrollTo({ top: scrollY, behavior: 'instant' }));

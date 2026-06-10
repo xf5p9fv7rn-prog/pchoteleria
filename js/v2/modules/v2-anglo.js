@@ -583,20 +583,36 @@ async function _cargarTodos() {
             const {data:habs}=await supabase.from('v2_habitaciones').select('id_custom').ilike('numero_hab',item.hab);
             if (!habs?.length) { err.push(`${item.nombre}: HAB ${item.hab} no encontrada`); continue; }
             const habId=habs[0].id_custom;
-            // Camas en orden: el primero que llega a la HAB → cama 1, el segundo → cama 2
-            // Se obtienen ordenadas por id_cama, y se toma la primera DISPONIBLE
+
+            // ── REGLA CRÍTICA: Habitaciones Anglo — C1=Día, C2=Noche ──────────────
+            // NO hay fallback. Si la cama del turno correspondiente ya está ocupada,
+            // rechazar con error claro en lugar de asignar la cama del otro turno.
             const {data:camas}=await supabase.from('v2_camas').select('id_cama,estado,numero_cama').eq('habitacion_id',habId).order('numero_cama');
-            if (!camas?.length) { err.push(`${item.nombre}: Sin camas en HAB ${item.hab}`); continue; }
-            // Seleccionar cama según modo: día→cama 1, noche→cama 2; si no existe esa cama, tomar la primera disponible
+            if (!camas?.length) { err.push(`${item.nombre}: Sin camas configuradas en HAB ${item.hab}`); continue; }
+
             let camaDisp = null;
             if (item.modo === 'dia') {
                 camaDisp = camas.find(c => Number(c.numero_cama) === 1 && c.estado === 'Disponible');
+                if (!camaDisp) {
+                    const c1 = camas.find(c => Number(c.numero_cama) === 1);
+                    const motivo = c1
+                        ? `la cama de día (C1) ya está Ocupada en HAB ${item.hab}`
+                        : `HAB ${item.hab} no tiene cama C1 configurada`;
+                    err.push(`${item.nombre}: ☀️ ${motivo} — solo 1 persona de día por habitación`);
+                    continue;
+                }
             } else {
                 camaDisp = camas.find(c => Number(c.numero_cama) === 2 && c.estado === 'Disponible');
+                if (!camaDisp) {
+                    const c2 = camas.find(c => Number(c.numero_cama) === 2);
+                    const motivo = c2
+                        ? `la cama de noche (C2) ya está Ocupada en HAB ${item.hab}`
+                        : `HAB ${item.hab} no tiene cama C2 configurada`;
+                    err.push(`${item.nombre}: 🌙 ${motivo} — solo 1 persona de noche por habitación`);
+                    continue;
+                }
             }
-            if (!camaDisp) camaDisp = camas.find(c => c.estado === 'Disponible'); // fallback
-            if (!camaDisp) { err.push(`${item.nombre}: HAB ${item.hab} sin camas disponibles (modo ${item.modo})`); continue; }
-            const camaId=camaDisp.id_cama;
+            const camaId = camaDisp.id_cama;
 
             // ─ REGLA 1: Sin RUT duplicado en fechas solapadas ─
             const dupRut = await checkRutDuplicado(item.rut, hoy, item.salida || null);

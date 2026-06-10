@@ -3,7 +3,7 @@
  * Sistema V2 — Todas las rutas conectadas a tablas v2_
  */
 
-import { openDB, getAll, getById, put, remove, seedDemoData, cleanupExpiredAssignments, getExpiredBeds, confirmCheckout, ensureDefaultUsers, ensureAramarkReservations, ensureAllRooms, freeAllRoomRestrictions, procesarColaDeSincronizacion, preloadAllData, initRealtimeSync, startPeriodicCloudRefresh, autoPromoteNextOccupants, purgeSyncQueue } from './db.js';
+import { openDB, getAll, getById, put, remove, seedDemoData, cleanupExpiredAssignments, getExpiredBeds, confirmCheckout, ensureDefaultUsers, ensureAramarkReservations, ensureAllRooms, freeAllRoomRestrictions, procesarColaDeSincronizacion, preloadAllData, initRealtimeSync, cleanupRealtimeSync, startPeriodicCloudRefresh, autoPromoteNextOccupants, purgeSyncQueue } from './db.js';
 import { showToast, watchOnlineStatus } from './utils.js';
 import { renderV2Infraestructura } from './v2/modules/v2-infraestructura.js';
 import { renderV2Anglo }          from './v2/modules/v2-anglo.js';
@@ -90,33 +90,17 @@ async function boot() {
         status.parentElement.style.opacity = '1';
     }
 
-    // ── CRITICAL: Maintenance & Data Setup ───────────
+    // ── PASO 1: Abrir la BD primero — garantiza que el schema esté listo ──────
+    // CRÍTICO: openDB() DEBE completar antes de cualquier otra operación.
+    // Si corre en paralelo con checkSession() pueden ocurrir race conditions
+    // donde las tareas de mantenimiento intentan leer una BD que aún no está lista.
     try {
         await openDB();
+    } catch (e) {
+        console.warn('[Boot] Error abriendo IndexedDB:', e);
+    }
 
-        // 👇 PASO PARA QUITAR LETRAS ROJAS 👇
-        // Esta línea borrará la etiqueta "ARA" de todas las habitaciones.
-        // await freeAllRoomRestrictions(); 
-        // 👆 CUANDO TERMINE, PONLE BARRAS // A LA LÍNEA DE ARRIBA 👆
-
-        // 👇 PASO 1: Quita las // de la línea de abajo para crear los Edificios
-        // await seedDemoData(); 
-
-        // ⚠️ Revisar camas vencidas (ya NO borra — solo notifica)
-        cleanupExpiredAssignments().then(count => {
-            if (count > 0) {
-                showToast(`⚠️ Hay ${count} cama${count !== 1 ? 's' : ''} con salida pendiente de confirmación`, 'warn', 6000);
-            }
-        });
-
-        // 🔄 MODO ROTATIVO: promover nextOccupant → occupant cuando la fecha ya llegó
-        autoPromoteNextOccupants().then(n => {
-            if (n > 0) showToast(`🔄 ${n} trabajador${n !== 1 ? 'es' : ''} del turno entrante promovidos automáticamente`, 'success', 5000);
-        }).catch(() => { });
-
-    } catch (e) { console.warn('[Boot] Maintenance failed', e); }
-
-    // ── SEGURIDAD: VERIFICACIÓN CON SUPABASE ──────────
+    // ── PASO 2: Verificar sesión (sin importar el estado de la BD) ────────────
     const userSession = await checkSession();
 
     if (!userSession) {
@@ -243,7 +227,6 @@ async function initApp() {
     await openDB();
     preloadAllData(); // 🚀 Pre-cargar rooms, buildings y reservas en memoria (fire & forget)
     ensureDefaultUsers(); // 👤 Garantizar usuarios base (Anglo, Admin) — fire & forget
-    console.log("¡ALERTA JUAN: EL MOTOR SÍ SE ENCENDIÓ!");
 
     // ☁️ Sincronización Realtime — Cambios de otros dispositivos llegan automáticamente
     if (navigator.onLine) {
@@ -608,6 +591,7 @@ window.navigate = navigate;
 
 window.handleLogout = async () => {
     if (confirm('¿Seguro que deseas cerrar sesión?')) {
+        cleanupRealtimeSync(); // Cerrar canales Realtime antes de desconectar
         await logoutApp();
     }
 };

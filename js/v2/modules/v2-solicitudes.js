@@ -1937,9 +1937,13 @@ export async function renderV2Solicitudes(container) {
         if(!file) return;
 
         if(!window.XLSX) {
-            const s = document.createElement('script');
-            s.src = 'https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js';
-            await new Promise((res,rej) => { s.onload=res; s.onerror=rej; document.head.appendChild(s); });
+            await new Promise((res, rej) => {
+                const s = document.createElement('script');
+                s.src = '/js/xlsx.full.min.js';  // copia local — sin dependencia de red
+                s.onload = res;
+                s.onerror = () => rej(new Error('No se pudo cargar la librería Excel. Verifica que el archivo /js/xlsx.full.min.js exista en el proyecto.'));
+                document.head.appendChild(s);
+            });
         }
 
         const ov = document.createElement('div');

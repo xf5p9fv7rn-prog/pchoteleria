@@ -732,7 +732,8 @@ let _limpiezaHoy = {}; // habitacion_id → 'limpia' | 'sucia' | 'proceso'
 function draftKey()        { return `censo_draft_${_pabellonId}_${todayISO()}`; }
 function limpiezaKey(hId)  { return `censo_limp_${_pabellonId}_${hId}_${todayISO()}`; }
 
-// ── Auto-guardado del borrador �// ── Exportar PDF del Censo (con fallback offline) ───────────────────────
+// ── Auto-guardado del borrador ─
+// ── Exportar PDF del Censo (con fallback offline) ───────────────────────
 window.exportarPDF = async function() {
   const btn = document.getElementById('btn-pdf');
   if (!_habitaciones.length) { toast('⚠️ No hay habitaciones cargadas', 2000); return; }

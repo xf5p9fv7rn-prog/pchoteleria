@@ -26,8 +26,8 @@
             caches.keys().then(keys => keys.forEach(k => caches.delete(k)));
         }
     </script>
-    <!-- SheetJS para LEER archivos subidos -->
-    <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+    <!-- SheetJS para LEER archivos subidos — CDN principal: cdnjs (confiable), fallback dinámico si falla -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" crossorigin="anonymous"></script>
 
     <style>
         /* ═══════════════════════════════════════════════════
@@ -1305,13 +1305,35 @@
         });
         // ─────────────────────────────────────────────────────────────────────
 
-        window.handleFileUpload = (e) => {
+        window.handleFileUpload = async (e) => {
             const file = e.target.files[0];
             if (!file) return;
             if (!file.name.match(/\.(xlsx|xls|csv)$/i)) {
                 alert('Formato no soportado. Use .xlsx, .xls o .csv');
                 return;
             }
+
+            // ── Asegurar que XLSX esté cargado (fallback si CDN falló) ─────────
+            if (typeof XLSX === 'undefined') {
+                const dropZone = document.getElementById('drop-zone') || document.querySelector('[onclick*="csv-upload"]');
+                const origText = dropZone?.innerHTML;
+                if (dropZone) dropZone.innerHTML = '<p style="color:#6366f1;font-weight:700">⏳ Cargando lector de Excel...</p>';
+                try {
+                    await new Promise((resolve, reject) => {
+                        const s = document.createElement('script');
+                        s.src = 'https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js';
+                        s.onload = resolve;
+                        s.onerror = () => reject(new Error('No se pudo cargar la librería Excel'));
+                        document.head.appendChild(s);
+                    });
+                } catch(err) {
+                    if (dropZone && origText) dropZone.innerHTML = origText;
+                    alert('❌ Sin conexión a internet. No se puede leer el archivo Excel.\n\nConéctate a internet e intenta de nuevo.');
+                    return;
+                }
+                if (dropZone && origText) dropZone.innerHTML = origText;
+            }
+
             const reader = new FileReader();
             reader.onload = (ev) => {
                 try {

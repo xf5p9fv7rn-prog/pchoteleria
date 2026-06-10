@@ -54,12 +54,38 @@ export async function renderV2Anglo(container) {
       </button>
     </div>
 
-    <!-- Buscador por pabellón/piso -->
-    <div style="margin-top:8px;display:flex;align-items:center;gap:8px">
+    <!-- Buscador por pabellón/piso + Carga Masiva -->
+    <div style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
       <button onclick="window._aBuscarHab()" id="btn-buscar-hab"
         style="padding:7px 14px;border-radius:8px;border:1.5px dashed #6366f1;background:rgba(99,102,241,.07);color:#6366f1;font-weight:700;font-size:12px;cursor:pointer;white-space:nowrap">
         🔍 Sin habitación? Buscar por pabellón/piso
       </button>
+      <button onclick="window._aToggleCargaMasiva()" id="btn-carga-masiva"
+        style="padding:7px 14px;border-radius:8px;border:1.5px dashed #22c55e;background:rgba(34,197,94,.07);color:#15803d;font-weight:700;font-size:12px;cursor:pointer;white-space:nowrap">
+        📤 Carga Masiva por Excel
+      </button>
+    </div>
+
+    <!-- Panel Carga Masiva (oculto por defecto) -->
+    <div id="a-carga-masiva" style="display:none;margin-top:12px;padding:16px;background:rgba(34,197,94,.05);border:1.5px solid #22c55e;border-radius:12px">
+      <div style="font-size:13px;font-weight:800;color:#15803d;margin-bottom:6px">📤 Carga Masiva — Asignación desde Excel</div>
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:12px;line-height:1.5">
+        Descarga la plantilla, complétala con <b>RUT</b>, <b>N° HAB</b> y <b>TURNO</b> (escribe DIA o NOCHE),
+        luego súbela. El sistema buscará cada trabajador y lo agregará a la cola de carga.
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+        <button onclick="window._aDescargarPlantilla()"
+          style="padding:9px 18px;border-radius:9px;border:none;background:#6366f1;color:#fff;font-weight:800;font-size:13px;cursor:pointer">
+          📥 Descargar Plantilla
+        </button>
+        <label for="excel-masivo"
+          style="padding:9px 18px;border-radius:9px;background:#22c55e;color:#fff;font-weight:800;font-size:13px;cursor:pointer;display:inline-flex;align-items:center;gap:6px">
+          📂 Subir Excel completado
+          <input id="excel-masivo" type="file" accept=".xlsx,.xls,.csv" style="display:none"
+            onchange="window._aProcesarExcelMasivo(this)">
+        </label>
+      </div>
+      <div id="a-masivo-preview" style="margin-top:12px"></div>
     </div>
 
     <!-- Panel de búsqueda (oculto por defecto) -->
@@ -240,6 +266,9 @@ function _bindGlobals() {
     window._aBuscarHab = _buscarHab;
     window._aBuscarDisponibles = _buscarDisponibles;
     window._aSeleccionarHab = _seleccionarHab;
+    window._aToggleCargaMasiva = _toggleCargaMasiva;
+    window._aDescargarPlantilla = _descargarPlantilla;
+    window._aProcesarExcelMasivo = _procesarExcelMasivo;
 
 
     window._aTab     = _switchTab;
@@ -490,7 +519,7 @@ async function _descargarExcel() {
     if (!window.XLSX) {
         await new Promise((res, rej) => {
             const s = document.createElement('script');
-            s.src = 'https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js';
+            s.src = '/js/xlsx.full.min.js';
             s.onload = res; s.onerror = rej;
             document.head.appendChild(s);
         });
@@ -529,6 +558,175 @@ async function _descargarExcel() {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Asignacion Anglo');
     XLSX.writeFile(wb, `Asignacion_Anglo_${hoy}.xlsx`);
+}
+
+// ── TOGGLE PANEL CARGA MASIVA ─────────────────────────────────────────────────
+function _toggleCargaMasiva() {
+    const panel = document.getElementById('a-carga-masiva');
+    if (!panel) return;
+    const visible = panel.style.display !== 'none';
+    panel.style.display = visible ? 'none' : 'block';
+}
+
+// ── DESCARGAR PLANTILLA EXCEL ─────────────────────────────────────────────────
+async function _descargarPlantilla() {
+    if (!window.XLSX) {
+        await new Promise((res, rej) => {
+            const s = document.createElement('script');
+            s.src = '/js/xlsx.full.min.js';
+            s.onload = res; s.onerror = rej;
+            document.head.appendChild(s);
+        });
+    }
+    const XL = window.XLSX;
+    const hoy = new Date().toISOString().split('T')[0];
+
+    // Cabeceras + filas de ejemplo (en gris para que se noten)
+    const data = [
+        ['RUT', 'N° HAB', 'TURNO', 'FECHA SALIDA (opcional)'],
+        ['12345678',  '1301', 'DIA',   F4()],
+        ['87654321',  '1302', 'NOCHE', F4()],
+        ['11223344K', '1303', 'DIA',   F4()],
+    ];
+
+    const ws = XL.utils.aoa_to_sheet(data);
+
+    // Estilo cabecera verde
+    const range = XL.utils.decode_range(ws['!ref']);
+    for (let C = range.s.c; C <= range.e.c; C++) {
+        const cell = ws[XL.utils.encode_cell({ r: 0, c: C })];
+        if (cell) cell.s = {
+            font: { bold: true, color: { rgb: 'FFFFFF' } },
+            fill: { fgColor: { rgb: '22c55e' } },
+            alignment: { horizontal: 'center' }
+        };
+    }
+    // Ancho columnas
+    ws['!cols'] = [{ wch: 14 }, { wch: 12 }, { wch: 10 }, { wch: 24 }];
+
+    const wb = XL.utils.book_new();
+    XL.utils.book_append_sheet(wb, ws, 'Plantilla Anglo');
+    XL.writeFile(wb, `Plantilla_Asignacion_Anglo_${hoy}.xlsx`);
+}
+
+// ── PROCESAR EXCEL MASIVO ─────────────────────────────────────────────────────
+async function _procesarExcelMasivo(input) {
+    const file = input.files[0];
+    if (!file) return;
+
+    const preview = document.getElementById('a-masivo-preview');
+    preview.innerHTML = '<p style="color:#6366f1;font-weight:700">⏳ Procesando Excel...</p>';
+
+    if (!window.XLSX) {
+        await new Promise((res, rej) => {
+            const s = document.createElement('script');
+            s.src = '/js/xlsx.full.min.js';
+            s.onload = res; s.onerror = rej;
+            document.head.appendChild(s);
+        });
+    }
+
+    // Leer archivo
+    const buffer = await file.arrayBuffer();
+    const wb = window.XLSX.read(new Uint8Array(buffer), { type: 'array' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const rows = window.XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+
+    if (!rows || rows.length < 2) {
+        preview.innerHTML = '<p style="color:#991b1b;font-weight:700">⚠️ El archivo está vacío o no tiene el formato correcto.</p>';
+        input.value = '';
+        return;
+    }
+
+    // Detectar columnas (fila 0 = cabecera)
+    const header = rows[0].map(h => String(h).toLowerCase().trim());
+    const colRut  = header.findIndex(h => h.includes('rut'));
+    const colHab  = header.findIndex(h => h.includes('hab') || h.includes('hab') || h.includes('nro') || h.includes('n°') || h.includes('numero'));
+    const colTurno = header.findIndex(h => h.includes('turno') || h.includes('modo'));
+    const colSalida = header.findIndex(h => h.includes('salida') || h.includes('fecha'));
+
+    if (colRut < 0 || colHab < 0 || colTurno < 0) {
+        preview.innerHTML = `<p style="color:#991b1b;font-weight:700">❌ No se encontraron las columnas RUT, N° HAB y TURNO.<br>
+            Descarga la plantilla y úsala como base.</p>`;
+        input.value = '';
+        return;
+    }
+
+    const dataRows = rows.slice(1).filter(r => r[colRut] && String(r[colRut]).trim());
+    if (!dataRows.length) {
+        preview.innerHTML = '<p style="color:#991b1b">⚠️ No hay filas con datos.</p>';
+        input.value = '';
+        return;
+    }
+
+    preview.innerHTML = `<p style="color:#6366f1;font-weight:700">🔍 Buscando ${dataRows.length} trabajadores en el sistema...</p>`;
+
+    const salidaDef = F4();
+    const resultados = [];
+    let nuevos = 0, noEncontrados = [];
+
+    for (const row of dataRows) {
+        const rutRaw  = String(row[colRut]).trim();
+        const hab     = String(row[colHab]).trim();
+        const turnoRaw = String(row[colTurno]).trim().toUpperCase();
+        const salida  = colSalida >= 0 && row[colSalida] ? String(row[colSalida]).trim() : salidaDef;
+
+        // Normalizar RUT
+        const rut = window._normRut ? window._normRut(rutRaw) : rutRaw.replace(/[.\s-]/g,'').toUpperCase();
+        // Determinar modo
+        const modo = turnoRaw.startsWith('N') ? 'noche' : 'dia';
+
+        // Buscar en base de datos
+        const body = rut.replace(/[^0-9]/g, '');
+        const { data: usuario } = await supabase.from('v2_usuarios_anglo').select('rut,nombre,cargo,turno')
+            .or(`rut.eq.${rut},rut.ilike.%${body}%`).limit(1).maybeSingle();
+
+        if (!usuario) {
+            noEncontrados.push({ rut, hab, modo });
+            resultados.push({ estado: 'no_encontrado', rut, hab, modo, salida });
+        } else {
+            // Verificar que no esté ya en la cola
+            const yaEnCola = _cola.find(c => c.rut === usuario.rut);
+            if (yaEnCola) {
+                resultados.push({ estado: 'duplicado', rut: usuario.rut, nombre: usuario.nombre, hab, modo, salida });
+            } else {
+                const llave = modo === 'dia' ? 'verde' : 'rojo';
+                _cola.push({ rut: usuario.rut, nombre: usuario.nombre, turno: usuario.turno || '', llave, modo, hab, salida });
+                nuevos++;
+                resultados.push({ estado: 'ok', rut: usuario.rut, nombre: usuario.nombre, hab, modo, salida });
+            }
+        }
+    }
+
+    // Mostrar preview
+    const okRows    = resultados.filter(r => r.estado === 'ok');
+    const dupRows   = resultados.filter(r => r.estado === 'duplicado');
+    const errRows   = resultados.filter(r => r.estado === 'no_encontrado');
+
+    preview.innerHTML = `
+        <div style="margin-bottom:10px;font-size:13px;font-weight:800;color:var(--text-primary)">
+            ✅ ${okRows.length} agregados a la cola
+            ${dupRows.length ? ` · ⚠️ ${dupRows.length} ya en cola` : ''}
+            ${errRows.length ? ` · ❌ ${errRows.length} no encontrados` : ''}
+        </div>
+        ${okRows.map(r => `
+            <div style="display:flex;align-items:center;gap:10px;padding:7px 10px;background:rgba(34,197,94,.08);border-left:3px solid #22c55e;border-radius:0 8px 8px 0;margin-bottom:5px">
+                <span style="font-size:12px;font-weight:700;flex:1">${r.nombre}</span>
+                <span style="font-size:11px;color:var(--text-muted)">${r.rut}</span>
+                <span style="font-size:11px;font-weight:700">HAB ${r.hab}</span>
+                ${r.modo === 'dia'
+                    ? '<span style="background:#dcfce7;color:#166534;border-radius:6px;padding:1px 8px;font-size:11px;font-weight:800">☀️ Día</span>'
+                    : '<span style="background:#e0e7ff;color:#3730a3;border-radius:6px;padding:1px 8px;font-size:11px;font-weight:800">🌙 Noche</span>'}
+            </div>`).join('')}
+        ${errRows.map(r => `
+            <div style="display:flex;align-items:center;gap:10px;padding:7px 10px;background:rgba(239,68,68,.08);border-left:3px solid #ef4444;border-radius:0 8px 8px 0;margin-bottom:5px">
+                <span style="font-size:12px;font-weight:700;flex:1;color:#991b1b">❌ RUT ${r.rut} no encontrado en el sistema</span>
+                <span style="font-size:11px;font-weight:700">HAB ${r.hab}</span>
+            </div>`).join('')}
+        ${nuevos > 0 ? `<button onclick="window._aCargarTodos()" style="margin-top:10px;padding:10px 20px;border-radius:10px;border:none;background:#22c55e;color:#fff;font-weight:800;font-size:13px;cursor:pointer;width:100%">✅ Confirmar y cargar ${nuevos} trabajador${nuevos>1?'es':''}</button>` : ''}`;
+
+    if (nuevos > 0) _renderCola();
+    input.value = ''; // reset input
 }
 
 

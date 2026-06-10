@@ -17,6 +17,8 @@ let _selEdificio = null, _selPabellon = null;
 let _camaData  = {};
 let _busqueda  = '';
 let _filtEmpresa = '', _filtNombre = '', _filtGerencia = '';
+// Variables de estado del pabellón activo (usadas en renderizado de tarjetas)
+let _camasCache = null, _habTagCache = null, _solicCache = {};
 // ⚡ Caché por pabellón: evita re-descargar al cambiar entre pabellones visitados
 // Cada entrada: { camasArr, habTagMap, solicCache, ts }
 const _cachePorPab = {};     // { [pabId]: { camasArr, habTagMap, solicCache } }
@@ -456,6 +458,9 @@ async function renderGrid(camasArrIn = null, habTagMapIn = null, solicCacheIn = 
             }
         }
     }
+
+    // Sincronizar _solicCache al nivel de módulo para que el render de tarjetas pueda leerla
+    _solicCache = solicCache || {};
 
     habs.forEach((h, i) => camasArr[i].forEach(c => { _camaData[c.id_cama] = { estado: c.estado, habitacion_id: c.habitacion_id }; }));
 

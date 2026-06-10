@@ -594,9 +594,10 @@ async function renderGrid(camasArrIn = null, habTagMapIn = null, solicCacheIn = 
         const hp  = cs.filter(c=>c.preAsignado).length;
         const hm  = cs.filter(c=>c.estado==='Mantencion').length;
         const hdis = cs.filter(c=>c.estado==='Deshabilitada').length;
-        return `<div data-cama-card style="background:var(--bg-card);border:1px solid var(--border);border-radius:14px;padding:14px;position:relative;overflow:visible">
+        return `<div data-cama-card style="background:${h.en_mantencion?'#fffbeb':'var(--bg-card)'};border:${h.en_mantencion?'2px solid #f59e0b':'1px solid var(--border)'};border-radius:14px;padding:14px;position:relative;overflow:visible">
           <div style="font-size:18px;font-weight:800;color:var(--text-primary)">${h.numero_hab}</div>
-          <div style="font-size:10px;font-family:monospace;color:var(--text-muted);margin-bottom:10px">${h.id_custom}</div>
+          <div style="font-size:10px;font-family:monospace;color:var(--text-muted);margin-bottom:${h.en_mantencion?'6':'10'}px">${h.id_custom}</div>
+          ${h.en_mantencion?`<div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:5px 10px;margin-bottom:8px;font-size:11px;font-weight:800;color:#92400e;display:flex;align-items:center;gap:6px"><span>🔧</span> EN MANTENCI\u00d3N — bloqueada</div>`:''}
           ${h.nivel?`<div style="position:absolute;top:10px;right:10px;background:var(--bg);border-radius:6px;padding:2px 7px;font-size:10px;font-weight:700;color:var(--text-muted)">${h.nivel}</div>`:''}
           ${(() => {
             const tag = habTagMap[h.id_custom];
@@ -672,6 +673,11 @@ async function renderGrid(camasArrIn = null, habTagMapIn = null, solicCacheIn = 
                       // Deshabilitada
                       return `<button disabled title="${tip}"
                         style="width:30px;height:30px;border-radius:7px;border:2px dashed #94a3b8;background:#f1f5f9;color:#94a3b8;font-size:10px;font-weight:800;cursor:not-allowed;flex-shrink:0">D</button>`;
+                    }
+                    // 🔧 Habitación en mantención: bloquear todos los botones de camas
+                    if (h.en_mantencion) {
+                      return `<button disabled title="Habitaci\u00f3n en manten\u00f3n"
+                        style="width:30px;height:30px;border-radius:7px;border:2px dashed #f59e0b;background:#fef3c7;color:#d97706;font-size:10px;font-weight:800;cursor:not-allowed;flex-shrink:0">M</button>`;
                     }
                     return `<button onclick="window._v2iOpenCama(event,'${c.id_cama}')" title="${tip}"
                       style="width:30px;height:30px;border-radius:7px;border:none;background:${bg};color:#fff;font-size:11px;font-weight:800;cursor:pointer;transition:transform .1s;flex-shrink:0"
@@ -767,6 +773,12 @@ async function renderGrid(camasArrIn = null, habTagMapIn = null, solicCacheIn = 
               </div>
             </div>`;
           })()}
+          <div style="margin-top:10px;border-top:1px solid ${h.en_mantencion?'#f59e0b':'var(--border)'};padding-top:8px;text-align:right">
+            <button onclick="event.stopPropagation();window._v2iToggleMantencionHab('${h.id_custom}',${!h.en_mantencion})"
+              style="background:${h.en_mantencion?'linear-gradient(135deg,#10b981,#059669)':'linear-gradient(135deg,#f59e0b,#d97706)'};color:white;border:none;border-radius:8px;padding:5px 12px;font-size:11px;font-weight:800;cursor:pointer">
+              ${h.en_mantencion?'✅ Reparar habitaci\u00f3n':'🔧 Poner en manten\u00f3n'}
+            </button>
+          </div>
         </div>`;
 
       }).join('')}`;
@@ -801,7 +813,20 @@ async function _prefetchPabellon(pabId) {
 async function openCamaModal(ev, idCama) {
     const card = ev.target.closest('[data-cama-card]');
     if (!card) return;
-    const info   = _camaData[idCama] || {};
+    const info = _camaData[idCama] || {};
+
+    // 🔧 Bloqueo por habitación en mantención
+    const hab = _habitaciones.find(h => h.id_custom === info.habitacion_id);
+    if (hab?.en_mantencion) {
+        const t = Object.assign(document.createElement('div'), {
+            textContent: '🔧 Habitación en Mantención — no disponible para check-in',
+        });
+        t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:99999;padding:12px 24px;border-radius:12px;font-weight:700;font-size:13px;background:#f59e0b;color:#fff;box-shadow:0 4px 20px rgba(0,0,0,.3);white-space:nowrap';
+        document.body.appendChild(t);
+        setTimeout(() => { t.style.opacity='0'; t.style.transition='opacity .5s'; setTimeout(() => t.remove(), 500); }, 2500);
+        return;
+    }
+
     const estado = info.estado || 'Disponible';
     await abrirPopover(card, idCama, estado, async (tipo) => {
         // Invalidar caché del pabellón actual y refrescar vista
@@ -815,6 +840,55 @@ async function openCamaModal(ev, idCama) {
 }
 
 function closeModal() { cerrarPopover(); }
+
+// ─── MANTENIMIENTO DE HABITACIÓN ─────────────────────────────────────────────
+window._v2iToggleMantencionHab = async function(habId, poner) {
+    // Confirmación cuando se pone en mantención
+    if (poner) {
+        const hab = _habitaciones.find(h => h.id_custom === habId);
+        const numHab = hab?.numero_hab || habId;
+        // Verificar si hay huéspedes activos
+        const tieneOcupantes = Object.values(_camaData)
+            .filter(c => c.habitacion_id === habId)
+            .some(c => c.estado === 'Ocupada');
+        if (tieneOcupantes) {
+            if (!confirm(`⚠️ La habitación ${numHab} tiene camas ocupadas.\n\n¿Poner igual en mantención? Las camas seguirán ocupadas en el sistema.`)) return;
+        } else {
+            if (!confirm(`¿Poner habitación ${numHab} en mantención?\n\nQuedará bloqueada para nuevos check-ins.`)) return;
+        }
+    }
+
+    try {
+        const { error } = await supabase
+            .from('v2_habitaciones')
+            .update({ en_mantencion: poner })
+            .eq('id_custom', habId);
+
+        if (error) throw error;
+
+        // Actualizar en memoria para reflejo inmediato
+        const hab = _habitaciones.find(h => h.id_custom === habId);
+        if (hab) hab.en_mantencion = poner;
+
+        // Invalidar caché de este pabellón y refrescar
+        if (_selPabellon) {
+            delete _cachePorPab[_selPabellon];
+            const scrollY = window.scrollY;
+            await selectPabellon(_selPabellon);
+            requestAnimationFrame(() => window.scrollTo({ top: scrollY, behavior: 'instant' }));
+        }
+
+        // Toast de confirmación
+        const msg = poner ? '🔧 Habitación en mantención' : '✅ Habitación reactivada';
+        const t = Object.assign(document.createElement('div'), { textContent: msg });
+        t.style.cssText = `position:fixed;bottom:24px;right:24px;z-index:99999;padding:12px 20px;border-radius:12px;font-weight:700;font-size:13px;background:${poner?'#f59e0b':'#10b981'};color:#fff;box-shadow:0 4px 20px rgba(0,0,0,.25);transition:opacity .5s`;
+        document.body.appendChild(t);
+        setTimeout(() => { t.style.opacity='0'; setTimeout(() => t.remove(), 500); }, 3000);
+
+    } catch(e) {
+        alert('Error al cambiar estado de habitación: ' + e.message);
+    }
+};
 
 
 async function handleCheckin(idCama) {

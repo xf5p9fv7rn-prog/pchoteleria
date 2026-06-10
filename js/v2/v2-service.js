@@ -45,7 +45,7 @@ export async function getPabellones(edificioId) {
 export async function getHabitaciones(pabellonId) {
     const { data, error } = await supabase
         .from('v2_habitaciones')
-        .select('id_custom,numero_hab,nivel,cantidad_camas,pabellon_id')
+        .select('id_custom,numero_hab,nivel,cantidad_camas,pabellon_id,en_mantencion')
         .eq('pabellon_id', pabellonId)
         .order('numero_hab');
     if (error) throw new Error('[v2-service] v2_habitaciones: ' + error.message);

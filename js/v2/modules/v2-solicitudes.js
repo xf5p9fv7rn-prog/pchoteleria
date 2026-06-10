@@ -2017,7 +2017,7 @@ export async function renderV2Solicitudes(container) {
             const cApeMat      = fc('apellidomat','apellidom','apemat','materno','apellido2','segundoape');
             const cApeSolo     = fc('apellido'); // si hay solo una col de apellido
             // RUT — puede venir como PT, RUT, RUN, DNI, CEDULA, ID, EMPLOYEE...
-            const cRut = fc('rut','run','dni','cedula','identificacion','id trabajador','pt','employee','empid','cod trab','num trab','id trab','nro trab','numero trab');
+            const cRut = fc('rut','run','dni','cedula','identificacion','id trabajador','pt','employee','empid','cod trab','num trab','id trab','nro trab','numero trab','ut','folio','nro trabajador','num trabajador');
             // Empresa
             const cEmp = fc('empresa','company','contratista','razon social','razon_social','cliente');
             // Gerencia

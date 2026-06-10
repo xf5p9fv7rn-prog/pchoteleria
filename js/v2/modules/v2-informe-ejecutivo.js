@@ -258,6 +258,40 @@ export async function renderV2InformeEjecutivo(container) {
 
         const totalEmpresas = new Set(asigActivas.map(a => a.empresa_id).filter(Boolean)).size;
 
+        // ── Contratistas (camas que NO son Anglo, noche ni colaborador) ───────
+        const angloOcupTotal  = angloOcupDia + angloOcupNoche;
+        const angloDispTotal  = angloDispDia + angloDispNoche;
+        const angloTotal      = angloTotalDia + angloTotalNoche;
+
+        // Camas contratistas = total - anglo - noche_eecc - colaboradores
+        const contratTotalCamas = totalCamas - angloTotal - nocheTotalReg - colabTotal;
+        const contratOcup       = ocupadas   - angloOcupTotal - nocheOcupReg - colabOcup;
+        const contratDisp       = Math.max(0, contratTotalCamas - contratOcup);
+
+        // Ocupadas por sector y tipo (para Llegadas/Salidas son aproximaciones)
+        const angloLlegHoy  = asigActivas.filter(a => (a.fecha_checkin||'').slice(0,10)===hoy && angloSetIE.has(String(a.id_cama))).length;
+        const contratLlegHoy = llegadasHoy - angloLlegHoy;  // resto
+
+        const angloSal7d    = asigActivas.filter(a => enRng(a) && angloSetIE.has(String(a.id_cama))).length;
+        const contratSal7d  = salidasProximas - angloSal7d;
+
+        // ── Helper: fila de desglose estándar ──────────────────────────────────
+        const desgRow = (icon, label, val, color, borderBottom = true) =>
+            `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;${
+                borderBottom?'border-bottom:1px solid #f1f5f9':''}">` +
+            `<span style="font-size:12px;font-weight:700;color:#334155">${icon} ${label}</span>` +
+            `<span style="font-size:16px;font-weight:900;color:${color}">${typeof val==='number'?val.toLocaleString('es-CL'):val}</span>` +
+            `</div>`;
+
+        const desgSep = (label) =>
+            `<div style="font-size:10px;font-weight:800;color:#94a3b8;text-transform:uppercase;letter-spacing:.5px;margin:8px 0 4px">${label}</div>`;
+
+        const desgTotal = (label, val, color) =>
+            `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 10px;background:#f8fafc;border-radius:8px;margin-top:8px">` +
+            `<span style="font-size:12px;font-weight:800;color:#1e293b">= ${label}</span>` +
+            `<span style="font-size:17px;font-weight:900;color:${color}">${typeof val==='number'?val.toLocaleString('es-CL'):val}</span>` +
+            `</div>`;
+
         // ── Render ───────────────────────────────────────────────────────────
         container.innerHTML = `
         <div id="informe-root" style="padding:0;min-height:100vh;background:var(--bg)">
@@ -283,131 +317,94 @@ export async function renderV2InformeEjecutivo(container) {
           <div id="informe-body" style="padding:24px 28px;max-width:1400px;margin:0 auto">
             <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:12px;margin-bottom:24px">
 
-              ${kpiCard('🛏️','Total Camas',totalCamas.toLocaleString('es-CL'),'#6366f1', `
-                <div style="font-size:10px;font-weight:800;color:#94a3b8;margin-bottom:8px;text-transform:uppercase">Desglose sector</div>
-                <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #f1f5f9">
-                  <span style="font-size:12px;font-weight:700">🏢 COPC</span>
-                  <span style="font-size:17px;font-weight:900;color:#6366f1">${camasCopc.toLocaleString('es-CL')}</span>
-                </div>
-                <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #f1f5f9">
-                  <span style="font-size:12px;font-weight:700">🏗️ REF 220</span>
-                  <span style="font-size:17px;font-weight:900;color:#0ea5e9">${camasR220.toLocaleString('es-CL')}</span>
-                </div>
-                ${angloTotalDia>0||angloTotalNoche>0?`
-                <div style="font-size:10px;font-weight:800;color:#94a3b8;margin:8px 0 5px;text-transform:uppercase">Anglo</div>
-                <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #f1f5f9">
-                  <span style="font-size:12px;font-weight:700">☀️ Día (cama 1)</span>
-                  <span style="font-size:15px;font-weight:900;color:#d97706">${angloTotalDia}</span>
-                </div>
-                <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #f1f5f9">
-                  <span style="font-size:12px;font-weight:700">🌙 Noche (cama 2)</span>
-                  <span style="font-size:15px;font-weight:900;color:#4338ca">${angloTotalNoche}</span>
-                </div>`:``}
-                ${nocheTotalReg>0?`
-                <div style="font-size:10px;font-weight:800;color:#94a3b8;margin:8px 0 5px;text-transform:uppercase">Noche EECC</div>
-                <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #f1f5f9">
-                  <span style="font-size:12px;font-weight:700">🌙 Noche EECC</span>
-                  <span style="font-size:15px;font-weight:900;color:#4338ca">${nocheTotalReg}</span>
-                </div>`:``}
-                ${colabTotal>0?`
-                <div style="display:flex;justify-content:space-between;padding:4px 0">
-                  <span style="font-size:12px;font-weight:700">👥 Colaboradores (Pab.7)</span>
-                  <span style="font-size:15px;font-weight:900;color:#0891b2">${colabTotal}</span>
-                </div>`:``}
-              `)}
+              ${kpiCard('🛏️','Total Camas',totalCamas.toLocaleString('es-CL'),'#6366f1',
+                desgSep('Por tipo de cama') +
+                desgRow('🤝','Anglo (día + noche)', angloTotal,'#d97706') +
+                desgRow('🏢','Contratistas', contratTotalCamas,'#6366f1') +
+                desgRow('🌙','Noche EECC', nocheTotalReg,'#4338ca') +
+                (colabTotal>0 ? desgRow('👥','Colaboradores (Pab.7)', colabTotal,'#0891b2') : '') +
+                desgSep('Por sector') +
+                desgRow('🏢','COPC', camasCopc,'#6366f1') +
+                desgRow('🏗️','REF 220', camasR220,'#0ea5e9',false) +
+                desgTotal('TOTAL',totalCamas,'#6366f1')
+              )}
 
-              ${kpiCard('🔴','Ocupadas',ocupadas.toLocaleString('es-CL'),'#ef4444', `
-                <div style="font-size:10px;font-weight:800;color:#94a3b8;margin-bottom:8px;text-transform:uppercase">Por sector</div>
-                <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #f1f5f9">
-                  <span style="font-size:12px;font-weight:700">🏢 COPC</span>
-                  <span style="font-size:17px;font-weight:900;color:#ef4444">${ocupCOPC.toLocaleString('es-CL')}</span>
-                </div>
-                <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #f1f5f9">
-                  <span style="font-size:12px;font-weight:700">🏗️ REF 220</span>
-                  <span style="font-size:17px;font-weight:900;color:#f97316">${ocupR220.toLocaleString('es-CL')}</span>
-                </div>
-                ${angloTotalDia>0?`
-                <div style="font-size:10px;font-weight:800;color:#94a3b8;margin:8px 0 5px;text-transform:uppercase">Anglo Ocupadas</div>
-                <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #f1f5f9">
-                  <span style="font-size:12px;font-weight:700">☀️ Día ocup.</span><span style="font-size:15px;font-weight:900;color:#d97706">${angloOcupDia}</span>
-                </div>
-                <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #f1f5f9">
-                  <span style="font-size:12px;font-weight:700">🌙 Noche ocup.</span><span style="font-size:15px;font-weight:900;color:#4338ca">${angloOcupNoche}</span>
-                </div>`:``}
-                ${colabOcup>0?`
-                <div style="font-size:10px;font-weight:800;color:#94a3b8;margin:8px 0 5px;text-transform:uppercase">Colaboradores</div>
-                <div style="display:flex;justify-content:space-between;padding:4px 0">
-                  <span style="font-size:12px;font-weight:700">👥 Pab. 7 ocup.</span><span style="font-size:15px;font-weight:900;color:#0891b2">${colabOcup}</span>
-                </div>`:``}
-              `)}
+              ${kpiCard('🔴','Ocupadas',ocupadas.toLocaleString('es-CL'),'#ef4444',
+                desgSep('Por tipo de cama') +
+                desgRow('🤝','Anglo ocup.', angloOcupTotal,'#d97706') +
+                desgRow('  ↳☀️','Día ocup.', angloOcupDia,'#d97706') +
+                desgRow('  ↳🌙','Noche ocup.', angloOcupNoche,'#4338ca') +
+                desgRow('🏢','Contratistas ocup.', contratOcup,'#6366f1') +
+                (nocheOcupReg>0 ? desgRow('🌙','Noche EECC ocup.', nocheOcupReg,'#4338ca') : '') +
+                (colabOcup>0 ? desgRow('👥','Colaboradores ocup.', colabOcup,'#0891b2') : '') +
+                desgSep('Por sector') +
+                desgRow('🏢','COPC', ocupCOPC,'#ef4444') +
+                desgRow('🏗️','REF 220', ocupR220,'#f97316',false) +
+                desgTotal('TOTAL OCUPADAS',ocupadas,'#ef4444')
+              )}
 
-              ${kpiCard('✅','Disponibles',disponibles.toLocaleString('es-CL'),'#10b981', `
-                <div style="font-size:10px;font-weight:800;color:#94a3b8;margin-bottom:8px;text-transform:uppercase">Por sector</div>
-                <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #f1f5f9">
-                  <span style="font-size:12px;font-weight:700">🏢 COPC</span>
-                  <span style="font-size:17px;font-weight:900;color:#10b981">${dispCOPC.toLocaleString('es-CL')}</span>
-                </div>
-                <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #f1f5f9">
-                  <span style="font-size:12px;font-weight:700">🏗️ REF 220</span>
-                  <span style="font-size:17px;font-weight:900;color:#0ea5e9">${dispR220.toLocaleString('es-CL')}</span>
-                </div>
-                ${angloTotalDia>0?`
-                <div style="font-size:10px;font-weight:800;color:#94a3b8;margin:8px 0 5px;text-transform:uppercase">Anglo Disponibles</div>
-                <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #f1f5f9">
-                  <span style="font-size:12px;font-weight:700">☀️ Día libres</span><span style="font-size:15px;font-weight:900;color:#d97706">${angloDispDia}</span>
-                </div>
-                <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #f1f5f9">
-                  <span style="font-size:12px;font-weight:700">🌙 Noche libres</span><span style="font-size:15px;font-weight:900;color:#4338ca">${angloDispNoche}</span>
-                </div>`:``}
-                ${nocheDispReg>0?`
-                <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #f1f5f9">
-                  <span style="font-size:12px;font-weight:700">🌙 Noche EECC libres</span><span style="font-size:15px;font-weight:900;color:#4338ca">${nocheDispReg}</span>
-                </div>`:``}
-                ${colabDisp>0?`
-                <div style="display:flex;justify-content:space-between;padding:4px 0">
-                  <span style="font-size:12px;font-weight:700">👥 Colaboradores libres</span><span style="font-size:15px;font-weight:900;color:#0891b2">${colabDisp}</span>
-                </div>`:``}
-              `)}
+              ${kpiCard('✅','Disponibles',disponibles.toLocaleString('es-CL'),'#10b981',
+                desgSep('Por tipo de cama') +
+                desgRow('🤝','Anglo disp.', angloDispTotal,'#d97706') +
+                desgRow('  ↳☀️','Día libres', angloDispDia,'#d97706') +
+                desgRow('  ↳🌙','Noche libres', angloDispNoche,'#4338ca') +
+                desgRow('🏢','Contratistas disp.', contratDisp,'#6366f1') +
+                (nocheDispReg>0 ? desgRow('🌙','Noche EECC libres', nocheDispReg,'#4338ca') : '') +
+                (colabDisp>0 ? desgRow('👥','Colaboradores libres', colabDisp,'#0891b2') : '') +
+                desgSep('Por sector') +
+                desgRow('🏢','COPC', dispCOPC,'#10b981') +
+                desgRow('🏗️','REF 220', dispR220,'#0ea5e9',false) +
+                desgTotal('TOTAL DISPONIBLES',disponibles,'#10b981')
+              )}
 
-              ${kpiCard('📊','Ocupación',pctOcup+'%', pctOcup>80?'#ef4444':pctOcup>50?'#f59e0b':'#10b981', `
-                <div style="font-size:10px;font-weight:800;color:#94a3b8;margin-bottom:8px;text-transform:uppercase">Por sector</div>
-                <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #f1f5f9">
-                  <span style="font-size:12px;font-weight:700">🏢 COPC</span>
-                  <span style="font-size:17px;font-weight:900;color:${pctCOPC>80?'#ef4444':pctCOPC>50?'#f59e0b':'#10b981'}">${pctCOPC}%</span>
-                </div>
-                <div style="display:flex;justify-content:space-between;padding:5px 0">
-                  <span style="font-size:12px;font-weight:700">🏗️ REF 220</span>
-                  <span style="font-size:17px;font-weight:900;color:${pctR220>80?'#ef4444':pctR220>50?'#f59e0b':'#10b981'}">${pctR220}%</span>
-                </div>
-              `)}
+              ${kpiCard('📊','Ocupación',pctOcup+'%', pctOcup>80?'#ef4444':pctOcup>50?'#f59e0b':'#10b981',
+                desgSep('Por tipo') +
+                desgRow('🤝','Anglo', `${angloTotal>0?Math.round(angloOcupTotal/angloTotal*100):0}%`,'#d97706') +
+                desgRow('🏢','Contratistas', `${contratTotalCamas>0?Math.round(contratOcup/contratTotalCamas*100):0}%`,'#6366f1') +
+                desgSep('Por sector') +
+                desgRow('🏢','COPC', `${pctCOPC}%`, pctCOPC>80?'#ef4444':pctCOPC>50?'#f59e0b':'#10b981') +
+                desgRow('🏗️','REF 220', `${pctR220}%`, pctR220>80?'#ef4444':pctR220>50?'#f59e0b':'#10b981',false) +
+                desgTotal('GLOBAL',`${pctOcup}%`, pctOcup>80?'#ef4444':pctOcup>50?'#f59e0b':'#10b981')
+              )}
 
-              ${kpiCard('🏢','Empresas Activas',totalEmpresas,'#8b5cf6')}
+              ${kpiCard('🏢','Empresas Activas',totalEmpresas,'#8b5cf6',
+                desgSep('Trabajadores por tipo') +
+                desgRow('🤝','Anglo (ocup.)', angloOcupTotal,'#d97706') +
+                desgRow('🏢','Contratistas (ocup.)', contratOcup,'#6366f1') +
+                (nocheOcupReg>0 ? desgRow('🌙','Noche EECC', nocheOcupReg,'#4338ca') : '') +
+                (colabOcup>0 ? desgRow('👥','Colaboradores', colabOcup,'#0891b2') : '') +
+                desgSep('Por sector') +
+                desgRow('🏢','COPC', ocupCOPC,'#6366f1') +
+                desgRow('🏗️','REF 220', ocupR220,'#0ea5e9',false) +
+                desgTotal('TOTAL ACTIVOS',ocupadas,'#8b5cf6')
+              )}
 
-              ${kpiCard('🚀','Llegadas Hoy',llegadasHoy,'#0ea5e9', `
-                <div style="font-size:10px;font-weight:800;color:#94a3b8;margin-bottom:8px;text-transform:uppercase">Por sector</div>
-                <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #f1f5f9">
-                  <span style="font-size:12px;font-weight:700">🏢 COPC</span>
-                  <span style="font-size:17px;font-weight:900;color:#0ea5e9">${llegadasCOPC}</span>
-                </div>
-                <div style="display:flex;justify-content:space-between;padding:5px 0">
-                  <span style="font-size:12px;font-weight:700">🏗️ REF 220</span>
-                  <span style="font-size:17px;font-weight:900;color:#6366f1">${llegadasR220}</span>
-                </div>
-              `)}
+              ${kpiCard('🚀','Llegadas Hoy',llegadasHoy,'#0ea5e9',
+                desgSep('Por tipo') +
+                desgRow('🤝','Anglo', angloLlegHoy,'#d97706') +
+                desgRow('🏢','Contratistas', contratLlegHoy,'#6366f1',false) +
+                desgSep('Por sector') +
+                desgRow('🏢','COPC', llegadasCOPC,'#0ea5e9') +
+                desgRow('🏗️','REF 220', llegadasR220,'#6366f1',false) +
+                desgTotal('LLEGADAS HOY',llegadasHoy,'#0ea5e9')
+              )}
 
-              ${kpiCard('🚪','Salidas 7 días',salidasProximas,'#f97316', `
-                <div style="font-size:10px;font-weight:800;color:#94a3b8;margin-bottom:8px;text-transform:uppercase">Por sector</div>
-                <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #f1f5f9">
-                  <span style="font-size:12px;font-weight:700">🏢 COPC</span>
-                  <span style="font-size:17px;font-weight:900;color:#f97316">${salidasCOPC}</span>
-                </div>
-                <div style="display:flex;justify-content:space-between;padding:5px 0">
-                  <span style="font-size:12px;font-weight:700">🏗️ REF 220</span>
-                  <span style="font-size:17px;font-weight:900;color:#ef4444">${salidasR220}</span>
-                </div>
-              `)}
+              ${kpiCard('🚪','Salidas 7 días',salidasProximas,'#f97316',
+                desgSep('Por tipo') +
+                desgRow('🤝','Anglo', angloSal7d,'#d97706') +
+                desgRow('🏢','Contratistas', contratSal7d,'#6366f1',false) +
+                desgSep('Por sector') +
+                desgRow('🏢','COPC', salidasCOPC,'#f97316') +
+                desgRow('🏗️','REF 220', salidasR220,'#ef4444',false) +
+                desgTotal('SALIDAS PRÓX. 7d',salidasProximas,'#f97316')
+              )}
 
-              ${mantencion>0?kpiCard('🟡','En Mantención',mantencion,'#f59e0b'):''}
+              ${mantencion>0?kpiCard('🟡','En Mantención',mantencion,'#f59e0b',
+                desgSep('Camas en mantención') +
+                desgRow('🏢','COPC', camas.filter(c=>c.estado==='Mantencion'&&!isR220id(c.id_cama)).length,'#6366f1') +
+                desgRow('🏗️','REF 220', camas.filter(c=>c.estado==='Mantencion'&&isR220id(c.id_cama)).length,'#0ea5e9',false) +
+                desgTotal('TOTAL MANT.',mantencion,'#f59e0b')
+              ):''}
             </div>
 
             <!-- Barra ocupación global -->

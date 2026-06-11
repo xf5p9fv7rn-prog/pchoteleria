@@ -319,8 +319,8 @@ function _actualizarBannerPeriodo() {
   if (p === 'dia') { dl.setHours(12, 0, 0, 0); }
   else { dl.setDate(dl.getDate() + 1); dl.setHours(0, 0, 0, 0); }
   const ms = dl - now;
-  const hh = Math.floor(ms / 3_600_000);
-  const mm = Math.floor((ms % 3_600_000) / 60_000);
+  const hh = Math.floor(ms / 3600000);
+  const mm = Math.floor((ms % 3600000) / 60000);
   const cntd = ms > 0 ? `Cierra en ${hh}h ${mm}m` : '¡Período cerrado!';
 
   const banner = document.getElementById('period-banner');

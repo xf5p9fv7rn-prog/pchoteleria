@@ -165,6 +165,20 @@
       background:rgba(255,255,255,.2); border:none; color:white;
       border-radius:99px; padding:3px 10px; font-size:11px; font-weight:700; cursor:pointer;
     }
+
+    /* ── Banner de Período (Día / Noche) ──────────────────── */
+    .period-banner {
+      padding: 12px 18px;
+      display: flex; align-items: center; justify-content: space-between;
+      font-family: 'Inter', sans-serif;
+      position: sticky; top: 66px; z-index: 95;
+      border-bottom: 1px solid rgba(255,255,255,.15);
+    }
+    .period-banner.dia   { background: linear-gradient(135deg, #1e40af, #2563eb); color: white; }
+    .period-banner.noche { background: linear-gradient(135deg, #4c1d95, #7c3aed); color: white; }
+    .pb-title    { font-size: 14px; font-weight: 900; line-height: 1.2; }
+    .pb-deadline { font-size: 11px; opacity: .85; font-weight: 600; margin-top: 2px; }
+    .pb-clock    { font-size: 26px; }
   </style>
 </head>
 <body>
@@ -180,6 +194,15 @@
     <div class="h-date" id="hdr-date"></div>
   </div>
 </header>
+
+<!-- ══ BANNER PERÍODO DÍA / NOCHE ══ -->
+<div id="period-banner" class="period-banner dia">
+  <div>
+    <div class="pb-title" id="pb-title">🌞 Período Día</div>
+    <div class="pb-deadline" id="pb-deadline">Registrar antes de las 12:00</div>
+  </div>
+  <div class="pb-clock">⏰</div>
+</div>
 
 <main class="main">
 
@@ -243,7 +266,7 @@
 
     <!-- Tabs: Censo / Bajadas -->
     <div class="tabs">
-      <button class="tab active" id="tab-censo"  onclick="showTab('censo')">📋 Censo del Día</button>
+      <button class="tab active" id="tab-censo"  onclick="showTab('censo')">📋 Censo del Período</button>
       <button class="tab"        id="tab-bajadas" onclick="showTab('bajadas')">📤 Bajadas por Empresa</button>
     </div>
 
@@ -283,13 +306,37 @@ let _edificioId = null;
 let _pabellonId = null;
 let _pabNombre  = '';
 let _habitaciones = [];
-let _censoHoy   = {}; // habitacion_id → estado
+let _censoHoy   = {}; // habitacion_id → estado del período activo
 let _activeTab  = 'censo';
+
+// ── Período según hora del día ──────────────────────────────────────────
+function getPeriodo() { return new Date().getHours() < 12 ? 'dia' : 'noche'; }
+
+function _actualizarBannerPeriodo() {
+  const p   = getPeriodo();
+  const now = new Date();
+  let dl = new Date(now);
+  if (p === 'dia') { dl.setHours(12, 0, 0, 0); }
+  else { dl.setDate(dl.getDate() + 1); dl.setHours(0, 0, 0, 0); }
+  const ms = dl - now;
+  const hh = Math.floor(ms / 3_600_000);
+  const mm = Math.floor((ms % 3_600_000) / 60_000);
+  const cntd = ms > 0 ? `Cierra en ${hh}h ${mm}m` : '¡Período cerrado!';
+
+  const banner = document.getElementById('period-banner');
+  if (!banner) return;
+  banner.className = `period-banner ${p}`;
+  document.getElementById('pb-title').textContent    = p === 'dia' ? '🌞 Período Día' : '🌙 Período Noche';
+  document.getElementById('pb-deadline').textContent = p === 'dia'
+    ? `Turno diurno · Registrar antes de las 12:00 · ${cntd}`
+    : `Turno nocturno · Registrar antes de las 00:00 · ${cntd}`;
+}
+_actualizarBannerPeriodo();
+setInterval(_actualizarBannerPeriodo, 60_000);
 
 // ── Header date ────────────────────────────────────────────────────────
 (function() {
   const now = new Date();
-  const d   = now.toLocaleDateString('es-CL', { weekday:'short', day:'2-digit', month:'short' });
   const el  = document.getElementById('hdr-date');
   el.innerHTML = `<div class="h-day">${now.getDate().toString().padStart(2,'0')}</div>
                   <div class="h-mon">${now.toLocaleDateString('es-CL',{month:'short',year:'numeric'})}</div>`;
@@ -447,14 +494,16 @@ window.cargarHabitaciones = async function() {
     .order('numero_hab');
   if (nivelFil) habQ = habQ.eq('nivel', nivelFil);
 
-  // ── Cargar hab, censo existente y camas-3 activas en paralelo ──────────
+  // ── Cargar hab, censo existente (filtrado por período) y camas-3 ────────
+  const periodoActual = getPeriodo();
   const [{ data: habs }, censoRes, cama3Res] = await Promise.all([
     habQ,
     supabase.from('v2_censo_registros')
       .select('habitacion_id,estado')
       .eq('fecha', todayISO())
-      .eq('pabellon_id', _pabellonId),
-    // Camas con numero_cama=3 que NO están Deshabilitadas en este pabellón
+      .eq('pabellon_id', _pabellonId)
+      .eq('periodo', periodoActual),   // ← solo el período activo
+    // Camas con numero_cama=3 que NO están Deshabilitadas
     supabase.from('v2_camas')
       .select('habitacion_id, estado')
       .eq('numero_cama', 3)
@@ -474,7 +523,7 @@ window.cargarHabitaciones = async function() {
     panel.innerHTML = `
       <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:12px;padding:14px;margin-bottom:12px;font-size:12px;color:#92400e">
         <strong>⚠️ Tabla v2_censo_registros no encontrada.</strong><br>
-        Ejecuta el archivo <code>sql/create_censo_registros.sql</code> en Supabase para habilitar el guardado del censo.
+        Ejecuta el archivo <code>sql/censo_periodos_migration.sql</code> en Supabase para habilitar el guardado.
       </div>`;
   } else {
     (censoRes.data || []).forEach(r => { _censoHoy[r.habitacion_id] = r.estado; });
@@ -496,32 +545,43 @@ window.cargarHabitaciones = async function() {
   actualizarContadorLimpieza();
 };
 
-// ── Render room cards ───────────────────────────────────────────────────
-const OPCIONES_BASE = [
-  { val: 'sin_ocupar', lbl: 'Sin Ocupar' },
-  { val: 'dia',        lbl: 'Día'        },
-  { val: 'noche',      lbl: 'Noche'      },
-  { val: '2_dia',      lbl: '2 Día'      },
-  { val: '2_noche',   lbl: '2 Noche'    },
+// ── Opciones según período activo ───────────────────────────────────────
+// Período Día (antes de las 12:00) → solo opciones de turno día
+// Período Noche (después de las 12:00) → solo opciones de turno noche
+const OPCIONES_DIA   = [
+  { val: 'sin_ocupar', lbl: '🚫 Sin Ocupar'   },
+  { val: 'dia',        lbl: '☀️ 1 Persona Día' },
+  { val: '2_dia',      lbl: '☀️ 2 Personas'    },
 ];
-const OPCIONES_C3 = [
-  { val: '3_dia',      lbl: '3 Día'      },
-  { val: '3_noche',   lbl: '3 Noche'    },
+const OPCIONES_NOCHE = [
+  { val: 'sin_ocupar', lbl: '🚫 Sin Ocupar'     },
+  { val: 'noche',      lbl: '🌙 1 Persona Noche' },
+  { val: '2_noche',    lbl: '🌙 2 Personas'      },
 ];
+const OPCIONES_C3_DIA   = [{ val: '3_dia',   lbl: '☀️ 3 Personas' }];
+const OPCIONES_C3_NOCHE = [{ val: '3_noche', lbl: '🌙 3 Personas' }];
 
 function opcionesHab(h) {
-  return (window._habsCon3?.has(h.id_custom))
-    ? [...OPCIONES_BASE, ...OPCIONES_C3]
-    : OPCIONES_BASE;
+  const p      = getPeriodo();
+  const tieneC3 = window._habsCon3?.has(h.id_custom);
+  if (p === 'dia') {
+    return tieneC3 ? [...OPCIONES_DIA, ...OPCIONES_C3_DIA] : OPCIONES_DIA;
+  } else {
+    return tieneC3 ? [...OPCIONES_NOCHE, ...OPCIONES_C3_NOCHE] : OPCIONES_NOCHE;
+  }
 }
 
 function renderHabitaciones(panel) {
   const hoy = todayISO();
+  const p   = getPeriodo();
+  const pLabel = p === 'dia' ? '🌞 Turno Día' : '🌙 Turno Noche';
+  const pColor = p === 'dia' ? '#1d4ed8' : '#7c3aed';
   panel.innerHTML = `
-    <div class="sec-title">
+    <div class="sec-title" style="flex-wrap:wrap;gap:8px">
       🏠 <span>${_pabNombre}</span>
       <span class="badge">${_habitaciones.length} hab.</span>
-      <span style="font-size:11px;color:var(--gray-500);margin-left:4px;font-weight:400">${hoy}</span>
+      <span style="font-size:11px;color:var(--gray-500);font-weight:400">${hoy}</span>
+      <span style="background:${pColor};color:#fff;border-radius:99px;font-size:11px;font-weight:800;padding:2px 10px;margin-left:auto">${pLabel}</span>
     </div>` +
     _habitaciones.map(h => {
       const est  = _censoHoy[h.id_custom] || '';
@@ -575,30 +635,34 @@ function actualizarContador() {
 
 // ── Save censo ─────────────────────────────────────────────────────────
 window.guardarCenso = async function() {
-  const btn = document.getElementById('btn-guardar');
-  btn.disabled = true; btn.textContent = '⏳ Guardando…';
+  const btn    = document.getElementById('btn-guardar');
+  const periodo = getPeriodo();
+  btn.disabled = true;
+  btn.textContent = '⏳ Guardando…';
   const fecha = todayISO();
   const rows = Object.entries(_censoHoy)
     .filter(([id]) => _habitaciones.find(h => h.id_custom === id))
     .map(([habitacion_id, estado]) => ({
-      fecha, habitacion_id, estado,
-      pabellon_id:  _pabellonId,
-      edificio_id:  _edificioId,
+      fecha, habitacion_id, estado, periodo,
+      pabellon_id:   _pabellonId,
+      edificio_id:   _edificioId,
       registrado_por: _nombre
     }));
 
   const { error } = await supabase.from('v2_censo_registros')
-    .upsert(rows, { onConflict: 'fecha,habitacion_id' });
+    .upsert(rows, { onConflict: 'habitacion_id,fecha,periodo' });
 
   if (error) {
     toast('❌ Error: ' + error.message, 4000);
-    btn.disabled = false; btn.textContent = '💾 Guardar Censo del Piso';
+    btn.disabled = false;
+    btn.textContent = '💾 Guardar Censo del Piso';
     return;
   }
-  toast(`✅ ${rows.length} habitaciones guardadas`);
+  const pLabel = periodo === 'dia' ? 'Turno Día' : 'Turno Noche';
+  toast(`✅ ${rows.length} hab. guardadas (${pLabel})`);
   btn.textContent = '💾 Guardar Censo del Piso';
   btn.disabled = false;
-  clearDraft(); // 🗑️ Borrador cumplió su función, limpiar
+  clearDraft();
 };
 
 // ── Bajadas — próximos 3 días (para que se preparen) ──────────────────

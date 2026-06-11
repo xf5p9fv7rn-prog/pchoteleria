@@ -311,14 +311,18 @@ async function renderGrid() {
         };
     });
 
-    // Registros censo
+    // Registros censo (incluye periodo dia + noche)
     const { data: regs } = await supabase.from('v2_censo_registros')
-        .select('habitacion_id,fecha,estado')
+        .select('habitacion_id,fecha,estado,periodo')
         .gte('fecha', fmtISO(_periodo.ini))
         .lte('fecha', fmtISO(_periodo.fin));
 
-    const regMap = {}; // habitacion_id+fecha → estado
-    (regs || []).forEach(r => { regMap[r.habitacion_id + '|' + r.fecha] = r.estado; });
+    // regMap: habitacion_id|fecha|periodo → estado
+    const regMap = {};
+    (regs || []).forEach(r => {
+        const key = r.habitacion_id + '|' + r.fecha + '|' + (r.periodo || 'dia');
+        regMap[key] = r.estado;
+    });
 
     const dias = _periodo.dias;
 
@@ -338,11 +342,18 @@ async function renderGrid() {
         const edif = h.v2_pabellones?.v2_edificios?.nombre || '—';
         const pab  = h.v2_pabellones?.nombre || '—';
         const celdas = dias.map(d => {
-            const iso   = fmtISO(d);
-            const est   = regMap[h.id_custom + '|' + iso] || '';
-            const cfg   = ESTADO_CONF[est] || { lbl: '', bg: 'var(--bg)', c: 'transparent' };
-            return `<td style="padding:2px;text-align:center">
-              <div title="${est}" style="width:28px;height:22px;border-radius:4px;background:${cfg.bg};color:${cfg.c};font-size:9px;font-weight:800;display:flex;align-items:center;justify-content:center;margin:auto">${cfg.lbl}</div>
+            const iso = fmtISO(d);
+            // Leer ambos períodos para esta habitación en este día
+            const estD = regMap[h.id_custom + '|' + iso + '|dia']   || '';
+            const estN = regMap[h.id_custom + '|' + iso + '|noche'] || '';
+            const cfgD = ESTADO_CONF[estD] || { lbl: '', bg: 'transparent', c: 'transparent' };
+            const cfgN = ESTADO_CONF[estN] || { lbl: '', bg: 'transparent', c: 'transparent' };
+            const hoyCell = fmtISO(new Date()) === iso;
+            return `<td style="padding:2px;text-align:center;${hoyCell ? 'background:#f0f4ff;' : ''}">
+              <div style="display:flex;flex-direction:column;gap:1px;align-items:center">
+                ${estD ? `<div title="Día: ${estD}" style="width:28px;height:10px;border-radius:3px;background:${cfgD.bg};color:${cfgD.c};font-size:7px;font-weight:800;display:flex;align-items:center;justify-content:center">${cfgD.lbl}</div>` : '<div style="width:28px;height:10px"></div>'}
+                ${estN ? `<div title="Noche: ${estN}" style="width:28px;height:10px;border-radius:3px;background:${cfgN.bg};color:${cfgN.c};font-size:7px;font-weight:800;display:flex;align-items:center;justify-content:center">${cfgN.lbl}</div>` : '<div style="width:28px;height:10px"></div>'}
+              </div>
             </td>`;
         }).join('');
         const ai = asigMap[h.id_custom];
@@ -646,9 +657,12 @@ async function renderBajadas() {
 // ── Excel export ────────────────────────────────────────────────────────
 async function exportExcel() {
     if (!window.XLSX) {
-        const s = document.createElement('script');
-        s.src = 'https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js';
-        await new Promise((res, rej) => { s.onload = res; s.onerror = rej; document.head.appendChild(s); });
+        await new Promise((res, rej) => {
+            const s = document.createElement('script');
+            s.src = '/js/xlsx.full.min.js';
+            s.onload = res; s.onerror = rej;
+            document.head.appendChild(s);
+        });
     }
     const { data: regs } = await supabase.from('v2_censo_registros')
         .select('habitacion_id,fecha,estado,registrado_por,pabellon_id')

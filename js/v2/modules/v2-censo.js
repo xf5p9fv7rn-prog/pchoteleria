@@ -297,17 +297,18 @@ async function renderGrid() {
 
     // Asignaciones activas en el período para mostrar empresa en el grid
     const { data: asigActivas } = await supabase.from('v2_asignaciones')
-        .select('id_cama,numero_contrato,v2_empresas(nombre,v2_gerencias(nombre)),v2_camas(habitacion_id)')
+        .select('id_cama,numero_contrato,fecha_salida_programada,v2_empresas(nombre,v2_gerencias(nombre)),v2_camas(habitacion_id)')
         .lte('fecha_checkin', fmtISO(_periodo.fin))
         .or(`fecha_checkout.is.null,fecha_checkout.gte.${fmtISO(_periodo.ini)}`);
-    // Map: habitacion_id → {empresa, gerencia, contrato}
+    // Map: habitacion_id → {empresa, gerencia, contrato, fecha_sal}
     const asigMap = {};
     (asigActivas || []).forEach(a => {
         const hid = a.v2_camas?.habitacion_id;
         if (hid && !asigMap[hid]) asigMap[hid] = {
-            emp:  a.v2_empresas?.nombre || '—',
-            ger:  a.v2_empresas?.v2_gerencias?.nombre || '—',
-            cont: a.numero_contrato || '—'
+            emp:      a.v2_empresas?.nombre || '—',
+            ger:      a.v2_empresas?.v2_gerencias?.nombre || '—',
+            cont:     a.numero_contrato || '—',
+            fecha_sal: a.fecha_salida_programada || null
         };
     });
 
@@ -365,6 +366,9 @@ async function renderGrid() {
           <td style="padding:6px 8px;font-size:11px;font-weight:600;color:#6366f1;white-space:nowrap">${ai?.emp || ''}</td>
           <td style="padding:6px 8px;font-size:10px;color:var(--text-muted);white-space:nowrap">${ai?.ger || ''}</td>
           <td style="padding:6px 8px;font-size:10px;color:#10b981;font-family:monospace">${ai?.cont || ''}</td>
+          <td style="padding:6px 8px;font-size:10px;white-space:nowrap;${ai?.fecha_sal ? 'color:#ef4444;font-weight:700' : 'color:#94a3b8'}">
+            ${ai?.fecha_sal ? '📅 ' + new Date(ai.fecha_sal + 'T12:00:00').toLocaleDateString('es-CL',{day:'2-digit',month:'short',year:'numeric'}) : '—'}
+          </td>
           ${celdas}
         </tr>`;
     }).join('');
@@ -373,8 +377,23 @@ async function renderGrid() {
       <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">
         ${habList.length} habitaciones · ${dias.length} días · Período ${_periodo.label}
       </div>
-      <div style="font-size:11px;display:flex;gap:12px;margin-bottom:10px;flex-wrap:wrap">
-        ${Object.entries(ESTADO_CONF).map(([k,v]) => `<span style="display:flex;align-items:center;gap:4px"><span style="width:18px;height:14px;border-radius:3px;background:${v.bg};color:${v.c};font-size:9px;font-weight:800;display:inline-flex;align-items:center;justify-content:center">${v.lbl||'—'}</span><span style="color:var(--text-muted)">${k.replace('_',' ')}</span></span>`).join('')}
+      <div style="font-size:11px;display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center">
+        <span style="font-weight:700;color:var(--text-muted)">Referencia:</span>
+        <span style="display:inline-flex;align-items:center;gap:4px">
+          <span style="width:14px;height:10px;border-radius:2px;background:#dbeafe;display:inline-block"></span> D = 1 persona día
+        </span>
+        <span style="display:inline-flex;align-items:center;gap:4px">
+          <span style="width:14px;height:10px;border-radius:2px;background:#ede9fe;display:inline-block"></span> N = 1 persona noche
+        </span>
+        <span style="display:inline-flex;align-items:center;gap:4px">
+          <span style="width:14px;height:10px;border-radius:2px;background:#fef3c7;display:inline-block"></span> 2D / 2N = 2 personas
+        </span>
+        <span style="display:inline-flex;align-items:center;gap:4px">
+          <span style="width:14px;height:10px;border-radius:2px;background:#cffafe;display:inline-block"></span> 3D / 3N = 3 personas
+        </span>
+        <span style="display:inline-flex;align-items:center;gap:4px">
+          <span style="width:14px;height:10px;border-radius:2px;background:#f8fafc;border:1px solid #e2e8f0;display:inline-block"></span> — = sin censar
+        </span>
       </div>
       <table style="border-collapse:collapse;font-size:12px">
         <thead><tr style="background:var(--bg-card)">
@@ -385,6 +404,7 @@ async function renderGrid() {
           <th style="padding:6px 8px;text-align:left;font-size:10px;color:#94a3b8;font-weight:700;text-transform:uppercase">Empresa</th>
           <th style="padding:6px 8px;text-align:left;font-size:10px;color:#94a3b8;font-weight:700;text-transform:uppercase">Gerencia</th>
           <th style="padding:6px 8px;text-align:left;font-size:10px;color:#94a3b8;font-weight:700;text-transform:uppercase">Contrato</th>
+          <th style="padding:6px 8px;text-align:left;font-size:10px;color:#ef4444;font-weight:700;text-transform:uppercase;white-space:nowrap">📅 Fecha Salida</th>
           ${thDias}
         </tr></thead>
         <tbody>${rows}</tbody>

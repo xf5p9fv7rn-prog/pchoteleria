@@ -99,13 +99,13 @@ function fmtD(d) { return d.toLocaleDateString('es-CL', { day:'2-digit', month:'
 function fmtISO(d) { return d.toLocaleDateString('en-CA'); }
 
 const ESTADO_CONF = {
-    sin_ocupar: { lbl: '—',  bg: '#f8fafc', c: '#94a3b8' },
-    dia:        { lbl: 'D',  bg: '#dbeafe', c: '#1d4ed8' },
-    noche:      { lbl: 'N',  bg: '#ede9fe', c: '#7c3aed' },
-    '2_dia':    { lbl: '2D', bg: '#fef3c7', c: '#d97706' },
-    '2_noche':  { lbl: '2N', bg: '#fee2e2', c: '#dc2626' },
-    '3_dia':    { lbl: '3D', bg: '#cffafe', c: '#0e7490' },  // teal — cama 3 día
-    '3_noche':  { lbl: '3N', bg: '#ede9fe', c: '#4a1d96' },  // violeta oscuro — cama 3 noche
+    sin_ocupar: { lbl: '—',  bg: '#f8fafc', c: '#94a3b8', txt: 'Sin Ocupar'   },
+    dia:        { lbl: '1D', bg: '#dbeafe', c: '#1d4ed8', txt: '1 Día'         },
+    noche:      { lbl: '1N', bg: '#ede9fe', c: '#7c3aed', txt: '1 Nochero'     },
+    '2_dia':    { lbl: '2D', bg: '#fef3c7', c: '#d97706', txt: '2 Día'         },
+    '2_noche':  { lbl: '2N', bg: '#fee2e2', c: '#dc2626', txt: '2 Nocheros'    },
+    '3_dia':    { lbl: '3D', bg: '#cffafe', c: '#0e7490', txt: '3 Día'         },
+    '3_noche':  { lbl: '3N', bg: '#ede9fe', c: '#4a1d96', txt: '3 Nocheros'    },
 };
 
 let _periodoOffset = 0;
@@ -367,8 +367,8 @@ async function renderGrid() {
             const hoyCell = fmtISO(new Date()) === iso;
             return `<td style="padding:2px;text-align:center;${hoyCell ? 'background:#f0f4ff;' : ''}">
               <div style="display:flex;flex-direction:column;gap:1px;align-items:center">
-                ${estD ? `<div title="Día: ${estD}" style="width:28px;height:10px;border-radius:3px;background:${cfgD.bg};color:${cfgD.c};font-size:7px;font-weight:800;display:flex;align-items:center;justify-content:center">${cfgD.lbl}</div>` : '<div style="width:28px;height:10px"></div>'}
-                ${estN ? `<div title="Noche: ${estN}" style="width:28px;height:10px;border-radius:3px;background:${cfgN.bg};color:${cfgN.c};font-size:7px;font-weight:800;display:flex;align-items:center;justify-content:center">${cfgN.lbl}</div>` : '<div style="width:28px;height:10px"></div>'}
+                ${estD ? `<div title="Censo Día: ${cfgD.txt}" style="width:28px;height:10px;border-radius:3px;background:${cfgD.bg};color:${cfgD.c};font-size:7px;font-weight:800;display:flex;align-items:center;justify-content:center">${cfgD.lbl}</div>` : '<div style="width:28px;height:10px"></div>'}
+                ${estN ? `<div title="Censo Noche: ${cfgN.txt}" style="width:28px;height:10px;border-radius:3px;background:${cfgN.bg};color:${cfgN.c};font-size:7px;font-weight:800;display:flex;align-items:center;justify-content:center">${cfgN.lbl}</div>` : '<div style="width:28px;height:10px"></div>'}
               </div>
             </td>`;
         }).join('');
@@ -395,20 +395,28 @@ async function renderGrid() {
       <div style="font-size:11px;display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center">
         <span style="font-weight:700;color:var(--text-muted)">Referencia:</span>
         <span style="display:inline-flex;align-items:center;gap:4px">
-          <span style="width:14px;height:10px;border-radius:2px;background:#dbeafe;display:inline-block"></span> D = 1 persona día
+          <span style="width:14px;height:10px;border-radius:2px;background:#dbeafe;display:inline-block"></span> <b>1D</b>&nbsp;= 1 Día
         </span>
         <span style="display:inline-flex;align-items:center;gap:4px">
-          <span style="width:14px;height:10px;border-radius:2px;background:#ede9fe;display:inline-block"></span> N = 1 persona noche
+          <span style="width:14px;height:10px;border-radius:2px;background:#fef3c7;display:inline-block"></span> <b>2D</b>&nbsp;= 2 Día
         </span>
         <span style="display:inline-flex;align-items:center;gap:4px">
-          <span style="width:14px;height:10px;border-radius:2px;background:#fef3c7;display:inline-block"></span> 2D / 2N = 2 personas
+          <span style="width:14px;height:10px;border-radius:2px;background:#cffafe;display:inline-block"></span> <b>3D</b>&nbsp;= 3 Día
+        </span>
+        <span style="color:var(--text-muted)">·</span>
+        <span style="display:inline-flex;align-items:center;gap:4px">
+          <span style="width:14px;height:10px;border-radius:2px;background:#ede9fe;display:inline-block"></span> <b>1N</b>&nbsp;= 1 Nochero
         </span>
         <span style="display:inline-flex;align-items:center;gap:4px">
-          <span style="width:14px;height:10px;border-radius:2px;background:#cffafe;display:inline-block"></span> 3D / 3N = 3 personas
+          <span style="width:14px;height:10px;border-radius:2px;background:#fee2e2;display:inline-block"></span> <b>2N</b>&nbsp;= 2 Nocheros
+        </span>
+        <span style="display:inline-flex;align-items:center;gap:4px">
+          <span style="width:14px;height:10px;border-radius:2px;background:#ede9fe;border:1px solid #4a1d96;display:inline-block"></span> <b>3N</b>&nbsp;= 3 Nocheros
         </span>
         <span style="display:inline-flex;align-items:center;gap:4px">
           <span style="width:14px;height:10px;border-radius:2px;background:#f8fafc;border:1px solid #e2e8f0;display:inline-block"></span> — = sin censar
         </span>
+        <span style="font-size:10px;color:var(--text-muted);margin-left:4px">· Cada celda: <b>arriba=censo día</b> · <b>abajo=censo noche</b></span>
       </div>
       <table style="border-collapse:collapse;font-size:12px">
         <thead><tr style="background:var(--bg-card)">

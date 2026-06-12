@@ -206,33 +206,11 @@
 
 <main class="main">
 
-  <!-- ══ SCREEN 1: Identificación con RUT ══ -->
-  <div class="screen active" id="s-ident">
-    <div class="card" style="margin-top:16px">
-      <div style="text-align:center;margin-bottom:20px">
-        <div style="font-size:48px;margin-bottom:8px">🔐</div>
-        <div style="font-size:18px;font-weight:800;color:var(--gray-900)">Identificación</div>
-        <div style="font-size:13px;color:var(--gray-500);margin-top:4px">Ingresa tu RUT para acceder al censo</div>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr auto;gap:10px;margin-bottom:14px;align-items:end">
-        <div>
-          <label class="lbl">RUT (sin puntos)</label>
-          <input type="text" id="inp-rut" placeholder="12345678" maxlength="9" autocomplete="off"
-            style="letter-spacing:2px;font-family:monospace;font-size:16px">
-        </div>
-        <div>
-          <label class="lbl">DV</label>
-          <input type="text" id="inp-dv" placeholder="K" maxlength="1" autocomplete="off"
-            style="width:64px;text-align:center;text-transform:uppercase;font-family:monospace;font-size:18px;font-weight:800">
-        </div>
-      </div>
-      <div id="rut-error" style="display:none;background:#fee2e2;color:#b91c1c;border-radius:9px;padding:10px 14px;font-size:13px;font-weight:600;margin-bottom:12px"></div>
-      <button class="btn btn-primary" id="btn-ingresar" onclick="irASeleccion()">Verificar e ingresar →</button>
-    </div>
-  </div>
+  <!-- ══ SCREEN 1: acceso directo (sin identificador) ══ -->
+  <!-- SCREEN s-ident ya no se usa, se salta directo a s-select -->
 
   <!-- ══ SCREEN 2: Selección Edificio / Pabellón ══ -->
-  <div class="screen" id="s-select">
+  <div class="screen active" id="s-select">
     <div class="card">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
         <div style="font-size:15px;font-weight:800;color:var(--gray-900)">Seleccionar Pabellón</div>
@@ -363,52 +341,10 @@ function toast(msg, dur = 2400) {
   setTimeout(() => t.classList.remove('show'), dur);
 }
 
-// ── Step 1: Validar RUT chileno ────────────────────────────────────────
-function calcularDV(rut) {
-  let suma = 0, mul = 2, n = parseInt(rut, 10);
-  while (n > 0) { suma += (n % 10) * mul; n = Math.floor(n / 10); mul = mul < 7 ? mul + 1 : 2; }
-  const r = 11 - (suma % 11);
-  return r === 11 ? '0' : r === 10 ? 'K' : String(r);
-}
-
-window.irASeleccion = async function() {
-  const rutRaw = document.getElementById('inp-rut').value.trim().replace(/\./g,'');
-  const dvRaw  = document.getElementById('inp-dv').value.trim().toUpperCase();
-  const errEl  = document.getElementById('rut-error');
-  const btn    = document.getElementById('btn-ingresar');
-  errEl.style.display = 'none';
-
-  if (!rutRaw || !dvRaw) {
-    errEl.textContent = '⚠️ Ingresa RUT y dígito verificador';
-    errEl.style.display = 'block'; return;
-  }
-  if (!/^\d{7,9}$/.test(rutRaw)) {
-    errEl.textContent = '⚠️ RUT inválido (solo números, sin puntos)';
-    errEl.style.display = 'block'; return;
-  }
-  if (calcularDV(rutRaw) !== dvRaw) {
-    errEl.textContent = '❌ Dígito verificador incorrecto';
-    errEl.style.display = 'block'; return;
-  }
-
-  btn.disabled = true; btn.textContent = '⏳ Ingresando…';
-  const rutCompleto = rutRaw + '-' + dvRaw;
-
-  // Intentar obtener nombre desde v2_asignaciones (opcional, no bloquea el acceso)
-  let nombreMostrar = rutCompleto;
-  try {
-    const { data } = await supabase.from('v2_asignaciones')
-      .select('nombre_huesped').eq('rut_huesped', rutCompleto)
-      .is('fecha_checkout', null).limit(1);
-    if (data?.[0]?.nombre_huesped) nombreMostrar = data[0].nombre_huesped;
-  } catch(_) { /* sin problema, continúa igual */ }
-
-  _nombre = nombreMostrar;
-  document.getElementById('hola-nombre').textContent = '👤 ' + _nombre;
-  btn.disabled = false; btn.textContent = 'Verificar e ingresar →';
-  cargarEdificios();
-  showScreen('s-select');
-};
+// ── Inicio directo: sin identificador ──────────────────────────────────────
+// El portal arranca directamente en la selección de pabellón
+_nombre = 'Terreno';
+cargarEdificios();
 
 // ── Step 2a: Load edificios ─────────────────────────────────────────────
 async function cargarEdificios() {

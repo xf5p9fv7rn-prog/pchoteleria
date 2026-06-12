@@ -142,6 +142,7 @@ export async function renderV2Censo(container) {
           <option value="">Todos los pabellones</option>
         </select>
         <button onclick="window._censoExportExcel()" style="padding:9px 16px;border-radius:10px;border:none;background:#dcfce7;color:#15803d;font-weight:700;font-size:12px;cursor:pointer">📥 Excel</button>
+        <button onclick="window._censoReporteEmpresas && window._censoReporteEmpresas()" style="padding:9px 16px;border-radius:10px;border:none;background:#ede9fe;color:#7c3aed;font-weight:700;font-size:12px;cursor:pointer" title="Reporte de camas ocupadas por empresa con contrato y gerencia">📊 Reporte Empresas</button>
       </div>
 
       <!-- Tabs: Facturación, Bajadas e Historial solo para supervisores -->
@@ -200,6 +201,7 @@ export async function renderV2Censo(container) {
     window._censoTab = async (t) => { _activeTab = t; renderTab(); };
     window._censoExportExcel = exportExcel;
     window._censoGuardarPeriodo = censoGuardarPeriodo;
+    window._censoReporteEmpresas = reporteEmpresas;
 
     activarTab('grid');
     await renderTab();
@@ -294,23 +296,36 @@ async function renderGrid() {
     });
 
 
-
-    // Asignaciones activas en el período para mostrar empresa en el grid
+    // Asignaciones ACTIVAS (sin checkout) para mostrar empresa en el grid
+    // Se toman todas las activas, sin filtro de período, para cubrir
+    // habitaciones con carga masiva aunque el período no coincida exactamente.
     const { data: asigActivas } = await supabase.from('v2_asignaciones')
         .select('id_cama,numero_contrato,fecha_salida_programada,v2_empresas(nombre,v2_gerencias(nombre)),v2_camas(habitacion_id)')
-        .lte('fecha_checkin', fmtISO(_periodo.fin))
-        .or(`fecha_checkout.is.null,fecha_checkout.gte.${fmtISO(_periodo.ini)}`);
+        .is('fecha_checkout', null);
+
     // Map: habitacion_id → {empresa, gerencia, contrato, fecha_sal}
+    // Fallback: si el join v2_camas no resuelve, se parsea del id_cama (ej: "ABC-123-C1" → "ABC-123")
     const asigMap = {};
     (asigActivas || []).forEach(a => {
-        const hid = a.v2_camas?.habitacion_id;
+        // Obtener habitacion_id: primero del join, luego parseando id_cama
+        let hid = a.v2_camas?.habitacion_id;
+        if (!hid && a.id_cama) {
+            // id_cama tiene formato "HABITACION_ID-C1" o "HABITACION_ID-C2"
+            const partes = a.id_cama.split('-C');
+            if (partes.length > 1) {
+                hid = partes.slice(0, -1).join('-C');
+            } else {
+                hid = a.id_cama;
+            }
+        }
         if (hid && !asigMap[hid]) asigMap[hid] = {
-            emp:      a.v2_empresas?.nombre || '—',
-            ger:      a.v2_empresas?.v2_gerencias?.nombre || '—',
-            cont:     a.numero_contrato || '—',
+            emp:       a.v2_empresas?.nombre || '—',
+            ger:       a.v2_empresas?.v2_gerencias?.nombre || '—',
+            cont:      a.numero_contrato || '—',
             fecha_sal: a.fecha_salida_programada || null
         };
     });
+
 
     // Registros censo (incluye periodo dia + noche)
     const { data: regs } = await supabase.from('v2_censo_registros')
@@ -696,6 +711,108 @@ async function exportExcel() {
     const wb = window.XLSX.utils.book_new();
     window.XLSX.utils.book_append_sheet(wb, ws, 'Censo');
     window.XLSX.writeFile(wb, `Censo_${fmtISO(_periodo.ini)}_${fmtISO(_periodo.fin)}.xlsx`);
+}
+
+// ── Reporte de camas por empresa ─────────────────────────────────────────
+async function reporteEmpresas() {
+    // Cargar XLSX si no está
+    if (!window.XLSX) {
+        await new Promise((res, rej) => {
+            const s = document.createElement('script');
+            s.src = '/js/xlsx.full.min.js';
+            s.onload = res; s.onerror = rej;
+            document.head.appendChild(s);
+        });
+    }
+
+    // 1. Registros de censo del período
+    const { data: regs } = await supabase.from('v2_censo_registros')
+        .select('habitacion_id,fecha,estado,periodo')
+        .gte('fecha', fmtISO(_periodo.ini))
+        .lte('fecha', fmtISO(_periodo.fin));
+
+    // 2. Asignaciones activas (sin checkout) para mapear hab → empresa
+    const { data: asigs } = await supabase.from('v2_asignaciones')
+        .select('id_cama,numero_contrato,fecha_salida_programada,v2_empresas(nombre,v2_gerencias(nombre)),v2_camas(habitacion_id)')
+        .is('fecha_checkout', null);
+
+    // Construir mapa habitacion_id → empresa
+    const habEmpMap = {};
+    (asigs || []).forEach(a => {
+        let hid = a.v2_camas?.habitacion_id;
+        if (!hid && a.id_cama) {
+            const partes = a.id_cama.split('-C');
+            hid = partes.length > 1 ? partes.slice(0, -1).join('-C') : a.id_cama;
+        }
+        if (hid && !habEmpMap[hid]) habEmpMap[hid] = {
+            emp:      a.v2_empresas?.nombre || '(Sin empresa)',
+            ger:      a.v2_empresas?.v2_gerencias?.nombre || '—',
+            cont:     a.numero_contrato || '—',
+            fecha_sal: a.fecha_salida_programada || '—'
+        };
+    });
+
+    // 3. Agrupar registros de censo por empresa
+    // Claves que cuentan como ocupado (1 persona, 2 o 3 personas)
+    const estadosDia   = new Set(['dia', '2_dia', '3_dia']);
+    const estadosNoche = new Set(['noche', '2_noche', '3_noche']);
+
+    const porEmpresa = {}; // "emp|cont" → { emp, ger, cont, fecha_sal, diasSet, camasDia, camasNoche, detalle[] }
+
+    (regs || []).forEach(r => {
+        if (!r.estado || r.estado === 'sin_ocupar') return;
+        const info = habEmpMap[r.habitacion_id];
+        if (!info) return;
+
+        const key = `${info.emp}|||${info.cont}`;
+        if (!porEmpresa[key]) porEmpresa[key] = {
+            emp: info.emp, ger: info.ger, cont: info.cont,
+            fecha_sal: info.fecha_sal,
+            diasSet: new Set(), camasDia: 0, camasNoche: 0,
+            detalle: []
+        };
+        const g = porEmpresa[key];
+        g.diasSet.add(r.fecha);
+
+        // Contar camas según estado y período
+        const ocupantes = r.estado.startsWith('3') ? 3 : r.estado.startsWith('2') ? 2 : 1;
+        if (estadosDia.has(r.estado))   g.camasDia   += ocupantes;
+        if (estadosNoche.has(r.estado)) g.camasNoche += ocupantes;
+
+        g.detalle.push({ hab: r.habitacion_id, fecha: r.fecha, estado: r.estado, periodo: r.periodo || '—' });
+    });
+
+    // 4. Hoja resumen
+    const resumen = [
+        ['Empresa', 'Gerencia', 'Contrato', 'Fecha Salida', 'Días con registro', 'Camas Turno Día', 'Camas Turno Noche', 'Total Camas-Personas']
+    ];
+    Object.values(porEmpresa)
+        .sort((a, b) => a.emp.localeCompare(b.emp, 'es'))
+        .forEach(g => {
+            resumen.push([
+                g.emp, g.ger, g.cont,
+                g.fecha_sal instanceof Date ? fmtISO(g.fecha_sal) : (g.fecha_sal || '—'),
+                g.diasSet.size,
+                g.camasDia,
+                g.camasNoche,
+                g.camasDia + g.camasNoche
+            ]);
+        });
+
+    // 5. Hoja detalle
+    const detalle = [['Empresa', 'Contrato', 'Habitación', 'Fecha', 'Estado', 'Período']];
+    Object.values(porEmpresa)
+        .sort((a, b) => a.emp.localeCompare(b.emp, 'es'))
+        .forEach(g => {
+            g.detalle
+                .sort((a, b) => a.fecha.localeCompare(b.fecha))
+                .forEach(d => detalle.push([g.emp, g.cont, d.hab, d.fecha, d.estado, d.periodo]));
+        });
+
+    const wb = window.XLSX.utils.book_new();
+    window.XLSX.utils.book_append_sheet(wb, window.XLSX.utils.aoa_to_sheet(resumen),  'Resumen por Empresa');
+    window.XLSX.utils.book_append_sheet(wb, window.XLSX.utils.aoa_to_sheet(detalle),  'Detalle');
+    window.XLSX.writeFile(wb, `Reporte_Empresas_${fmtISO(_periodo.ini)}_${fmtISO(_periodo.fin)}.xlsx`);
 }
 
 // ── EXPORT BILLING EXCEL ────────────────────────────────────────────────

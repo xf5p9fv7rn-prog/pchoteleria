@@ -105,6 +105,9 @@
     /* Borde especial para opciones de cama 3 (sin seleccionar) */
     .radio-opt.opt-3_dia  .radio-pill,
     .radio-opt.opt-3_noche .radio-pill { border-color: #7c3aed; color: #7c3aed; font-weight:700; }
+    /* Separador visual entre grupo Día y grupo Noche */
+    .radio-opt.opt-noche { margin-left: 6px; }
+    .radio-opt.opt-noche .radio-pill { border-left: 3px solid #e9d5ff; }
 
     /* ── Bottom bar ────────────────────────────────── */
     .bottom-bar {
@@ -478,31 +481,31 @@ window.cargarHabitaciones = async function() {
   actualizarContador();
 };
 
-// ── Opciones según período activo ───────────────────────────────────────
-// Período Día (antes de las 12:00) → solo opciones de turno día
-// Período Noche (después de las 12:00) → solo opciones de turno noche
-const OPCIONES_DIA   = [
-  { val: 'sin_ocupar', lbl: '🚫 Sin Ocupar'   },
-  { val: 'dia',        lbl: '☀️ 1 Persona Día' },
-  { val: '2_dia',      lbl: '☀️ 2 Personas'    },
+// ── Opciones de censo: se muestran TODAS (día + noche) siempre ──────────
+// El período queda en el campo 'periodo' del registro guardado.
+const OPCIONES_TODAS = [
+  { val: 'sin_ocupar', lbl: '🚫 Sin Ocupar'    },
+  { val: 'dia',        lbl: '☀️ 1 Día'          },
+  { val: '2_dia',      lbl: '☀️ 2 Día'          },
+  { val: 'noche',      lbl: '🌙 1 Nochero'      },
+  { val: '2_noche',    lbl: '🌙 2 Nocheros'     },
 ];
-const OPCIONES_NOCHE = [
-  { val: 'sin_ocupar', lbl: '🚫 Sin Ocupar'     },
-  { val: 'noche',      lbl: '🌙 1 Persona Noche' },
-  { val: '2_noche',    lbl: '🌙 2 Personas'      },
-];
-const OPCIONES_C3_DIA   = [{ val: '3_dia',   lbl: '☀️ 3 Personas' }];
-const OPCIONES_C3_NOCHE = [{ val: '3_noche', lbl: '🌙 3 Personas' }];
+const OPCION_3_DIA   = { val: '3_dia',   lbl: '☀️ 3 Día'     };
+const OPCION_3_NOCHE = { val: '3_noche', lbl: '🌙 3 Nocheros' };
 
 function opcionesHab(h) {
-  const p      = getPeriodo();
   const tieneC3 = window._habsCon3?.has(h.id_custom);
-  if (p === 'dia') {
-    return tieneC3 ? [...OPCIONES_DIA, ...OPCIONES_C3_DIA] : OPCIONES_DIA;
-  } else {
-    return tieneC3 ? [...OPCIONES_NOCHE, ...OPCIONES_C3_NOCHE] : OPCIONES_NOCHE;
+  if (tieneC3) {
+    // Sin Ocupar · 1 Día · 2 Día · 3 Día · 1 Nochero · 2 Nocheros · 3 Nocheros
+    return [
+      OPCIONES_TODAS[0],
+      OPCIONES_TODAS[1], OPCIONES_TODAS[2], OPCION_3_DIA,
+      OPCIONES_TODAS[3], OPCIONES_TODAS[4], OPCION_3_NOCHE,
+    ];
   }
+  return OPCIONES_TODAS;
 }
+
 
 function renderHabitaciones(panel) {
   const hoy = todayISO();

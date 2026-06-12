@@ -259,7 +259,6 @@
   <div class="bottom-inner">
     <div style="display:flex;flex-direction:column;gap:2px;min-width:76px">
       <div class="counter-text" id="counter-text">0 / 0</div>
-      <div style="font-size:10px;color:var(--gray-500);font-weight:700" id="clean-counter-text"></div>
     </div>
     <button class="btn btn-success" id="btn-guardar" onclick="guardarCenso()" style="flex:1">
       💾 Guardar Censo del Piso
@@ -470,15 +469,13 @@ window.cargarHabitaciones = async function() {
     return;
   }
 
-  // 💾 Pre-cargar estados guardados (limpieza local + borrador de censo)
-  cargarLimpiezaLocal();
+  // 💾 Pre-cargar borrador de censo
   restaurarDraft();
 
   renderHabitaciones(panel);
 
   document.getElementById('bottom-bar').style.display = 'block';
   actualizarContador();
-  actualizarContadorLimpieza();
 };
 
 // ── Opciones según período activo ───────────────────────────────────────
@@ -544,7 +541,6 @@ function renderHabitaciones(panel) {
           </div>
           <div class="room-body">
             <div class="radio-grid">${rads}</div>
-            ${cleaningUI(h.id_custom)}
           </div>
         </div>`;
     }).join('');
@@ -722,15 +718,8 @@ function todayISO() {
   return new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// 🆕 MEJORAS: Auto-guardado · Limpieza · PDF
-// ═══════════════════════════════════════════════════════════════════════════
-
-let _limpiezaHoy = {}; // habitacion_id → 'limpia' | 'sucia' | 'proceso'
-
 // ── Claves de localStorage ────────────────────────────────────────────────
-function draftKey()        { return `censo_draft_${_pabellonId}_${todayISO()}`; }
-function limpiezaKey(hId)  { return `censo_limp_${_pabellonId}_${hId}_${todayISO()}`; }
+function draftKey() { return `censo_draft_${_pabellonId}_${todayISO()}`; }
 
 // ── Auto-guardado: guarda _censoHoy en localStorage cada cambio ──────────
 function autoGuardar() {
@@ -772,60 +761,6 @@ window.descartarDraft = function() {
   actualizarContador();
 };
 
-// ── Cargar estados de limpieza desde localStorage ─────────────────────────
-function cargarLimpiezaLocal() {
-  _limpiezaHoy = {};
-  _habitaciones.forEach(h => {
-    try {
-      const v = localStorage.getItem(limpiezaKey(h.id_custom));
-      if (v) _limpiezaHoy[h.id_custom] = v;
-    } catch(_) {}
-  });
-}
-
-// ── Actualizar contador de limpieza en la barra inferior ─────────────────
-function actualizarContadorLimpieza() {
-  const limpias = _habitaciones.filter(h => _limpiezaHoy[h.id_custom] === 'limpia').length;
-  const el = document.getElementById('clean-counter-text');
-  if (el) el.textContent = limpias > 0 ? `✅ ${limpias} limpias` : '';
-}
-
-// ── UI de limpieza por habitación ─────────────────────────────────────────
-function cleaningUI(habId) {
-  const cur = _limpiezaHoy[habId] || '';
-  const opts = [
-    { val: 'limpia',  lbl: '✅ Limpia',      col: '#10b981' },
-    { val: 'sucia',   lbl: '🔴 Sucia',       col: '#ef4444' },
-    { val: 'proceso', lbl: '⏳ En proceso',  col: '#f59e0b' },
-  ];
-  return `<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
-    ${opts.map(o => `
-      <button onclick="setLimpieza('${habId}','${o.val}')"
-        style="flex:1;min-width:70px;padding:5px 8px;border:none;border-radius:8px;
-               font-size:10px;font-weight:700;cursor:pointer;
-               background:${cur===o.val ? o.col : '#f1f5f9'};
-               color:${cur===o.val ? '#fff' : '#64748b'};
-               transition:all .2s">${o.lbl}</button>`).join('')}
-  </div>`;
-}
-
-// ── Guardar estado de limpieza ─────────────────────────────────────────────
-window.setLimpieza = function(habId, estado) {
-  _limpiezaHoy[habId] = estado;
-  try { localStorage.setItem(limpiezaKey(habId), estado); } catch(_) {}
-  // Refrescar solo los botones de limpieza de esa habitación
-  const card = document.getElementById('rc-' + habId);
-  if (card) {
-    const limp = card.querySelector('.limpieza-btns');
-    if (limp) limp.outerHTML = cleaningUI(habId);
-    else {
-      const rb = card.querySelector('.room-body');
-      if (rb) rb.insertAdjacentHTML('beforeend', `<div class="limpieza-btns">${cleaningUI(habId)}</div>`);
-    }
-  }
-  actualizarContadorLimpieza();
-};
-
 // ── Exportar PDF del Censo (con fallback offline) ───────────────────────
 window.exportarPDF = async function() {
   const btn = document.getElementById('btn-pdf');
@@ -835,21 +770,13 @@ window.exportarPDF = async function() {
   // ── Construir contenido HTML del census ──
   const fecha    = todayISO();
   const marcadas = Object.keys(_censoHoy).filter(k => _habitaciones.find(h => h.id_custom === k)).length;
-  const limpias  = _habitaciones.filter(h => _limpiezaHoy[h.id_custom] === 'limpia').length;
-  const sucias   = _habitaciones.filter(h => _limpiezaHoy[h.id_custom] === 'sucia').length;
-  const proceso  = _habitaciones.filter(h => _limpiezaHoy[h.id_custom] === 'proceso').length;
   const estadoLbl = { sin_ocupar:'Sin Ocupar', dia:'Día', noche:'Noche', '2_dia':'2 Día', '2_noche':'2 Noche', '3_dia':'3 Día', '3_noche':'3 Noche' };
-  const limpLbl   = { limpia:'✅ Limpia', sucia:'🔴 Sucia', proceso:'⏳ En proceso' };
-  const limpCol   = { limpia:'#10b981', sucia:'#ef4444', proceso:'#f59e0b' };
   const rows = _habitaciones.map((h,i) => {
-    const est  = _censoHoy[h.id_custom];
-    const limp = _limpiezaHoy[h.id_custom];
-    const bg   = i % 2 === 0 ? '#ffffff' : '#f8fafc';
+    const est = _censoHoy[h.id_custom];
+    const bg  = i % 2 === 0 ? '#ffffff' : '#f8fafc';
     return `<tr style="background:${bg}">
       <td style="padding:6px 10px;font-weight:700;border:1px solid #e2e8f0">${h.numero_hab}</td>
-      <td style="padding:6px 10px;font-family:monospace;font-size:11px;color:#6366f1;border:1px solid #e2e8f0">${h.id_custom}</td>
       <td style="padding:6px 10px;font-weight:600;color:${est?'#1e293b':'#94a3b8'};border:1px solid #e2e8f0">${estadoLbl[est]||'—'}</td>
-      <td style="padding:6px 10px;color:${limp?limpCol[limp]:'#94a3b8'};font-weight:700;border:1px solid #e2e8f0">${limp?limpLbl[limp]:'—'}</td>
     </tr>`;
   }).join('');
 
@@ -873,18 +800,14 @@ window.exportarPDF = async function() {
       <div style="font-size:10px;color:#64748b">habitaciones censadas</div>
     </div>
   </div>
-  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px">
+  <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:16px">
     <div style="background:#f1f5f9;border-radius:8px;padding:8px;text-align:center"><div style="font-size:18px;font-weight:900;color:#6366f1">${marcadas}</div><div style="font-size:9px;color:#64748b;text-transform:uppercase;font-weight:700">Censadas</div></div>
-    <div style="background:#ecfdf5;border-radius:8px;padding:8px;text-align:center"><div style="font-size:18px;font-weight:900;color:#10b981">${limpias}</div><div style="font-size:9px;color:#64748b;text-transform:uppercase;font-weight:700">Limpias</div></div>
-    <div style="background:#fef2f2;border-radius:8px;padding:8px;text-align:center"><div style="font-size:18px;font-weight:900;color:#ef4444">${sucias}</div><div style="font-size:9px;color:#64748b;text-transform:uppercase;font-weight:700">Sucias</div></div>
-    <div style="background:#fffbeb;border-radius:8px;padding:8px;text-align:center"><div style="font-size:18px;font-weight:900;color:#f59e0b">${proceso}</div><div style="font-size:9px;color:#64748b;text-transform:uppercase;font-weight:700">En proceso</div></div>
+    <div style="background:#f1f5f9;border-radius:8px;padding:8px;text-align:center"><div style="font-size:18px;font-weight:900;color:#64748b">${_habitaciones.length - marcadas}</div><div style="font-size:9px;color:#64748b;text-transform:uppercase;font-weight:700">Sin registrar</div></div>
   </div>
   <table style="width:100%;border-collapse:collapse;font-size:12px">
     <thead><tr style="background:#1e1b4b;color:white">
       <th style="padding:7px 10px;text-align:left;border:1px solid #312e81">Habitación</th>
-      <th style="padding:7px 10px;text-align:left;border:1px solid #312e81">ID</th>
       <th style="padding:7px 10px;text-align:left;border:1px solid #312e81">Estado Censo</th>
-      <th style="padding:7px 10px;text-align:left;border:1px solid #312e81">Limpieza</th>
     </tr></thead>
     <tbody>${rows}</tbody>
   ${'<' + '/table>'}

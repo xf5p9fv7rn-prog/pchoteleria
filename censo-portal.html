@@ -796,7 +796,100 @@ let _limpiezaHoy = {}; // habitacion_id → 'limpia' | 'sucia' | 'proceso'
 function draftKey()        { return `censo_draft_${_pabellonId}_${todayISO()}`; }
 function limpiezaKey(hId)  { return `censo_limp_${_pabellonId}_${hId}_${todayISO()}`; }
 
-// ── Auto-guardado del borrador ─
+// ── Auto-guardado: guarda _censoHoy en localStorage cada cambio ──────────
+function autoGuardar() {
+  try { localStorage.setItem(draftKey(), JSON.stringify(_censoHoy)); } catch(_) {}
+}
+
+// ── Restaurar borrador guardado al cargar el pabellón ────────────────────
+function restaurarDraft() {
+  try {
+    const raw = localStorage.getItem(draftKey());
+    if (!raw) return;
+    const saved = JSON.parse(raw);
+    let restored = 0;
+    Object.entries(saved).forEach(([hId, estado]) => {
+      if (_habitaciones.find(h => h.id_custom === hId)) {
+        _censoHoy[hId] = estado;
+        restored++;
+      }
+    });
+    if (restored > 0) {
+      document.getElementById('draft-banner').style.display = 'flex';
+    }
+  } catch(_) {}
+}
+
+// ── Limpiar borrador tras guardar en Supabase ─────────────────────────────
+function clearDraft() {
+  try { localStorage.removeItem(draftKey()); } catch(_) {}
+  const b = document.getElementById('draft-banner');
+  if (b) b.style.display = 'none';
+}
+
+// ── Descartar borrador manualmente ───────────────────────────────────────
+window.descartarDraft = function() {
+  clearDraft();
+  _censoHoy = {};
+  const panel = document.getElementById('panel-censo');
+  renderHabitaciones(panel);
+  actualizarContador();
+};
+
+// ── Cargar estados de limpieza desde localStorage ─────────────────────────
+function cargarLimpiezaLocal() {
+  _limpiezaHoy = {};
+  _habitaciones.forEach(h => {
+    try {
+      const v = localStorage.getItem(limpiezaKey(h.id_custom));
+      if (v) _limpiezaHoy[h.id_custom] = v;
+    } catch(_) {}
+  });
+}
+
+// ── Actualizar contador de limpieza en la barra inferior ─────────────────
+function actualizarContadorLimpieza() {
+  const limpias = _habitaciones.filter(h => _limpiezaHoy[h.id_custom] === 'limpia').length;
+  const el = document.getElementById('clean-counter-text');
+  if (el) el.textContent = limpias > 0 ? `✅ ${limpias} limpias` : '';
+}
+
+// ── UI de limpieza por habitación ─────────────────────────────────────────
+function cleaningUI(habId) {
+  const cur = _limpiezaHoy[habId] || '';
+  const opts = [
+    { val: 'limpia',  lbl: '✅ Limpia',      col: '#10b981' },
+    { val: 'sucia',   lbl: '🔴 Sucia',       col: '#ef4444' },
+    { val: 'proceso', lbl: '⏳ En proceso',  col: '#f59e0b' },
+  ];
+  return `<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
+    ${opts.map(o => `
+      <button onclick="setLimpieza('${habId}','${o.val}')"
+        style="flex:1;min-width:70px;padding:5px 8px;border:none;border-radius:8px;
+               font-size:10px;font-weight:700;cursor:pointer;
+               background:${cur===o.val ? o.col : '#f1f5f9'};
+               color:${cur===o.val ? '#fff' : '#64748b'};
+               transition:all .2s">${o.lbl}</button>`).join('')}
+  </div>`;
+}
+
+// ── Guardar estado de limpieza ─────────────────────────────────────────────
+window.setLimpieza = function(habId, estado) {
+  _limpiezaHoy[habId] = estado;
+  try { localStorage.setItem(limpiezaKey(habId), estado); } catch(_) {}
+  // Refrescar solo los botones de limpieza de esa habitación
+  const card = document.getElementById('rc-' + habId);
+  if (card) {
+    const limp = card.querySelector('.limpieza-btns');
+    if (limp) limp.outerHTML = cleaningUI(habId);
+    else {
+      const rb = card.querySelector('.room-body');
+      if (rb) rb.insertAdjacentHTML('beforeend', `<div class="limpieza-btns">${cleaningUI(habId)}</div>`);
+    }
+  }
+  actualizarContadorLimpieza();
+};
+
 // ── Exportar PDF del Censo (con fallback offline) ───────────────────────
 window.exportarPDF = async function() {
   const btn = document.getElementById('btn-pdf');

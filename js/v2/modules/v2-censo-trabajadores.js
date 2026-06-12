@@ -62,6 +62,7 @@ export async function renderCensoTrabajadores(container) {
           <option value="">Todos los pabellones</option>
         </select>
         <button onclick="window._ctExportExcel()" style="padding:9px 16px;border-radius:10px;border:none;background:#dcfce7;color:#15803d;font-weight:700;font-size:12px;cursor:pointer">📥 Excel</button>
+        <button onclick="window._ctReporteEmpresas && window._ctReporteEmpresas()" style="padding:9px 16px;border-radius:10px;border:none;background:#ede9fe;color:#7c3aed;font-weight:700;font-size:12px;cursor:pointer" title="Reporte QR por empresa, habitación y detalle">📊 Reporte</button>
       </div>
 
       <!-- Tabs -->
@@ -101,7 +102,8 @@ export async function renderCensoTrabajadores(container) {
     };
     window._ctFiltroPab  = () => { _pabFil = document.getElementById('ct-fil-pab').value; _ctRenderTab(); };
     window._ctTab        = (t) => { _activeTab = t; _ctRenderTab(); };
-    window._ctExportExcel = ctExportExcel;
+    window._ctExportExcel     = ctExportExcel;
+    window._ctReporteEmpresas  = ctReporteEmpresas;
 
     _ctActivarTab('grid');
     await _ctCargar();
@@ -493,7 +495,7 @@ function ctRenderDetalle() {
     </div>`;
 }
 
-// ── Excel export ──────────────────────────────────────────────────────────────
+// ── Excel export (CSV detalle básico) ───────────────────────────────────────
 async function ctExportExcel() {
     if (!_ctData.length) { alert('Sin datos para exportar.'); return; }
 
@@ -510,4 +512,104 @@ async function ctExportExcel() {
     const a    = document.createElement('a');
     a.href=url; a.download=`censo_trabajadores_${pIni}_${pFin}.csv`;
     a.click(); URL.revokeObjectURL(url);
+}
+
+// ── Reporte Excel multi-hoja (Por Empresa · Por Habitación · Detalle) ────────
+async function ctReporteEmpresas() {
+    if (!_ctData.length) { alert('Sin datos para exportar.'); return; }
+
+    // Cargar SheetJS si no está disponible
+    if (!window.XLSX) {
+        await new Promise((res, rej) => {
+            const s = document.createElement('script');
+            s.src = '/js/xlsx.full.min.js';
+            s.onload = res; s.onerror = rej;
+            document.head.appendChild(s);
+        });
+    }
+
+    const pIni = fmtISO(_periodo.ini);
+    const pFin = fmtISO(_periodo.fin);
+
+    // ── Hoja 1: Resumen por Empresa ──────────────────────────────────────
+    const byEmp = {};
+    _ctData.forEach(r => {
+        const emp = r.empresa || '(Sin empresa)';
+        if (!byEmp[emp]) byEmp[emp] = { conf: 0, personas: new Set(), habs: new Set(), dias: new Set() };
+        byEmp[emp].conf++;
+        if (r.rut_trabajador) byEmp[emp].personas.add(r.rut_trabajador);
+        byEmp[emp].habs.add(String(r.numero_hab));
+        if (r.fecha_scan) byEmp[emp].dias.add(r.fecha_scan);
+    });
+
+    const hojaEmp = [
+        ['Empresa', 'Confirmaciones QR', 'Personas distintas', 'Habitaciones activas', 'Días activos']
+    ];
+    Object.entries(byEmp)
+        .sort(([a], [b]) => a.localeCompare(b, 'es'))
+        .forEach(([emp, d]) => {
+            hojaEmp.push([emp, d.conf, d.personas.size, d.habs.size, d.dias.size]);
+        });
+    hojaEmp.push([]);
+    hojaEmp.push([
+        'TOTAL',
+        _ctData.length,
+        new Set(_ctData.map(r => r.rut_trabajador)).size,
+        new Set(_ctData.map(r => String(r.numero_hab))).size,
+        new Set(_ctData.map(r => r.fecha_scan)).size
+    ]);
+
+    // ── Hoja 2: Por Habitación ───────────────────────────────────────────
+    const byHab = {};
+    _ctData.forEach(r => {
+        const k = String(r.numero_hab);
+        if (!byHab[k]) byHab[k] = { conf: 0, personas: new Set(), dias: new Set() };
+        byHab[k].conf++;
+        if (r.rut_trabajador) byHab[k].personas.add(r.rut_trabajador);
+        if (r.fecha_scan) byHab[k].dias.add(r.fecha_scan);
+    });
+
+    // Mapa numero_hab → datos de habitación
+    const habNumMap = {};
+    _habData.forEach(h => { habNumMap[String(h.numero_hab)] = h; });
+
+    const hojaHab = [
+        ['Habitación','Edificio','Pabellón','Piso','Empresa','Gerencia','Contrato','Confirmaciones','Personas distintas','Días activos']
+    ];
+    Object.entries(byHab)
+        .sort(([a], [b]) => parseInt(a) - parseInt(b))
+        .forEach(([hab, d]) => {
+            const hd = habNumMap[hab];
+            const ai = hd ? (_asigMap[hd.id_custom] || {}) : {};
+            hojaHab.push([
+                hab,
+                hd?.v2_pabellones?.v2_edificios?.nombre || '—',
+                hd?.v2_pabellones?.nombre || '—',
+                hd?.nivel || '—',
+                ai.emp  || '—',
+                ai.ger  || '—',
+                ai.cont || '—',
+                d.conf,
+                d.personas.size,
+                d.dias.size
+            ]);
+        });
+
+    // ── Hoja 3: Detalle completo ──────────────────────────────────────────
+    const hojaDetalle = [['Habitación','Nombre','RUT','Empresa','Fecha','Hora']];
+    [..._ctData]
+        .sort((a, b) => String(a.numero_hab).localeCompare(String(b.numero_hab)) || (a.fecha_scan||'').localeCompare(b.fecha_scan||''))
+        .forEach(r => {
+            const hora = r.hora_scan
+                ? new Date(r.hora_scan).toLocaleTimeString('es-CL', {hour:'2-digit', minute:'2-digit'})
+                : '—';
+            hojaDetalle.push([r.numero_hab, r.nombre_trabajador||'—', r.rut_trabajador, r.empresa||'—', r.fecha_scan||'—', hora]);
+        });
+
+    // ── Armar libro ──────────────────────────────────────────────────────
+    const wb = window.XLSX.utils.book_new();
+    window.XLSX.utils.book_append_sheet(wb, window.XLSX.utils.aoa_to_sheet(hojaEmp),     'Por Empresa');
+    window.XLSX.utils.book_append_sheet(wb, window.XLSX.utils.aoa_to_sheet(hojaHab),     'Por Habitación');
+    window.XLSX.utils.book_append_sheet(wb, window.XLSX.utils.aoa_to_sheet(hojaDetalle), 'Detalle');
+    window.XLSX.writeFile(wb, `Reporte_QR_${pIni}_${pFin}.xlsx`);
 }

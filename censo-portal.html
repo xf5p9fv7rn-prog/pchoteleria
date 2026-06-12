@@ -245,7 +245,7 @@
     <!-- Tabs: Censo / Bajadas -->
     <div class="tabs">
       <button class="tab active" id="tab-censo"  onclick="showTab('censo')">📋 Censo del Período</button>
-      <button class="tab"        id="tab-bajadas" onclick="showTab('bajadas')">📤 Bajadas por Empresa</button>
+      <button class="tab"        id="tab-bajadas" onclick="showTab('bajadas')">🛏️ Cambio de Sábanas</button>
     </div>
 
     <div id="panel-censo"  class="screen active"></div>
@@ -597,7 +597,7 @@ window.guardarCenso = async function() {
   clearDraft();
 };
 
-// ── Bajadas — próximos 3 días (para que se preparen) ──────────────────
+// ── Cambio de Sábanas — próximos 7 días (agrupado por habitación) ─────────
 async function cargarBajadas() {
   const panel = document.getElementById('panel-bajadas');
   if (!_pabellonId) {
@@ -608,102 +608,102 @@ async function cargarBajadas() {
 
   const hoy      = new Date();
   const desde    = todayISO();
-  const hasta    = new Date(hoy); hasta.setDate(hoy.getDate() + 6); // próximos 7 días
+  const hasta    = new Date(hoy); hasta.setDate(hoy.getDate() + 6);
   const hastaISO = hasta.toLocaleDateString('en-CA');
   const nivelFil = document.getElementById('sel-nivel')?.value || '';
 
   try {
-    // ── PASO 1: habitaciones de este pabellón (+ nivel si aplica) ─────────
+    // PASO 1: habitaciones del pabellón (+ nivel si aplica)
     let qH = supabase.from('v2_habitaciones')
-      .select('id_custom, numero_hab, nivel')
+      .select('id_custom, numero_hab, nivel, cantidad_camas')
       .eq('pabellon_id', _pabellonId);
     if (nivelFil) qH = qH.eq('nivel', nivelFil);
     const { data: habs, error: eH } = await qH;
     if (eH) throw eH;
 
-    // Mapa id_custom → datos hab para lookup O(1)
     const habMap = {};
     (habs || []).forEach(h => { habMap[h.id_custom] = h; });
-    const habIds = new Set(Object.keys(habMap));
 
-    // ── PASO 2: asignaciones activas con salida en los próximos 7 días ────
-    // No filtramos por cama en la query — lo hacemos en JS con el id_cama
+    // PASO 2: asignaciones con salida en los próximos 7 días
     const { data: proximas, error: eA } = await supabase
       .from('v2_asignaciones')
-      .select('nombre_huesped, rut_huesped, fecha_salida_programada, id_cama, v2_empresas(nombre)')
+      .select('fecha_salida_programada, id_cama')
       .gte('fecha_salida_programada', desde)
       .lte('fecha_salida_programada', hastaISO)
       .is('fecha_checkout', null);
     if (eA) throw eA;
 
-    // Filtrar: extraer habitacion_id de id_cama ("COPC000449-C1" → "COPC000449")
+    // Filtrar y mapear a habitación
     const filtradas = (proximas || [])
       .map(b => {
         const partes = (b.id_cama || '').split('-');
         const habId  = partes.length > 1 ? partes.slice(0, -1).join('-') : b.id_cama;
-        return { ...b, _hab: habMap[habId] || null };
+        return { fecha: b.fecha_salida_programada, hab: habMap[habId] || null };
       })
-      .filter(b => b._hab !== null);
+      .filter(b => b.hab !== null);
 
     const nivelLabel = nivelFil ? ` · Piso ${nivelFil}` : '';
 
     if (!filtradas.length) {
       panel.innerHTML = `
         <div class="card" style="text-align:center">
-          <div style="font-size:36px;margin-bottom:8px">📭</div>
-          <div style="font-weight:700;color:var(--gray-700)">Sin bajadas próximas</div>
+          <div style="font-size:36px;margin-bottom:8px">🛏️</div>
+          <div style="font-weight:700;color:var(--gray-700)">Sin cambios próximos</div>
           <div style="font-size:12px;color:var(--gray-500);margin-top:4px">No hay salidas en los próximos 7 días para ${_pabNombre}${nivelLabel}</div>
         </div>`;
       return;
     }
 
-    // Agrupar por fecha → empresa
+    // Agrupar: fecha → habitacion_id → conteo de camas
     const porFecha = {};
     filtradas.forEach(b => {
-      const f   = b.fecha_salida_programada;
-      const emp = b.v2_empresas?.nombre || 'Sin empresa';
+      const f   = b.fecha;
+      const hid = b.hab.id_custom;
       if (!porFecha[f]) porFecha[f] = {};
-      if (!porFecha[f][emp]) porFecha[f][emp] = [];
-      porFecha[f][emp].push(b);
+      if (!porFecha[f][hid]) porFecha[f][hid] = { hab: b.hab, count: 0 };
+      porFecha[f][hid].count++;
     });
 
     const diasLabel = ['Hoy','Mañana','Pasado mañana','En 3 días','En 4 días','En 5 días','En 6 días'];
 
-    panel.innerHTML = `<div class="sec-title">📤 Próximas bajadas · ${_pabNombre}${nivelLabel} <span class="badge">${filtradas.length}</span></div>` +
-      Object.entries(porFecha).sort().map(([fecha, empresas]) => {
-        const diffMs = new Date(fecha+'T12:00:00') - new Date(desde+'T00:00:00');
-        const diffD  = Math.round(diffMs / 86400000);
-        const etiq   = diasLabel[diffD] || fecha;
+    const totalGeneral = filtradas.length;
+
+    panel.innerHTML =
+      `<div class="sec-title">🛏️ Cambio de sábanas · ${_pabNombre}${nivelLabel} <span class="badge">${totalGeneral} camas</span></div>` +
+      Object.entries(porFecha).sort().map(([fecha, habs]) => {
+        const diffMs   = new Date(fecha+'T12:00:00') - new Date(desde+'T00:00:00');
+        const diffD    = Math.round(diffMs / 86400000);
+        const etiq     = diasLabel[diffD] || `En ${diffD} días`;
         const fmtFecha = new Date(fecha+'T12:00:00').toLocaleDateString('es-CL',{weekday:'long',day:'numeric',month:'long'});
-        const totalDia = Object.values(empresas).reduce((s,a) => s+a.length, 0);
-        const col = diffD === 0 ? '#ef4444' : diffD === 1 ? '#f59e0b' : '#6366f1';
+        const totalDia = Object.values(habs).reduce((s,h) => s + h.count, 0);
+        const col      = diffD === 0 ? '#ef4444' : diffD === 1 ? '#f59e0b' : '#6366f1';
+
+        // Ordenar habitaciones por número
+        const habsOrdenadas = Object.values(habs).sort((a,b) => a.hab.numero_hab.localeCompare(b.hab.numero_hab, 'es', {numeric:true}));
+
         return `
-          <div style="margin-bottom:6px">
+          <div style="margin-bottom:14px">
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
               <span style="background:${col};color:white;border-radius:8px;padding:4px 12px;font-size:12px;font-weight:800">${etiq}</span>
               <span style="font-size:12px;color:var(--gray-500)">${fmtFecha}</span>
-              <span style="margin-left:auto;font-size:13px;font-weight:800;color:#ef4444">${totalDia} camas</span>
+              <span style="margin-left:auto;font-size:14px;font-weight:900;color:${col}">🛏️ ${totalDia} cambios</span>
             </div>
-            ${Object.entries(empresas).map(([emp, rows]) => `
-              <div class="card" style="margin-bottom:8px">
-                <div style="display:flex;justify-content:space-between;align-items:flex-start">
-                  <div>
-                    <div class="dep-emp">${emp}</div>
-                    <div class="dep-sub">${_pabNombre}${nivelLabel}</div>
-                  </div>
-                  <div>
-                    <div class="dep-num">${rows.length}</div>
-                    <div class="dep-lbl">camas</div>
-                  </div>
-                </div>
-                <div style="margin-top:8px;border-top:1px solid var(--gray-100);padding-top:8px">
-                  ${rows.map(r => `
-                    <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:11px">
-                      <span style="font-weight:600;color:var(--gray-700)">${r.nombre_huesped}</span>
-                      <span style="color:var(--gray-500);font-family:monospace">${r.rut_huesped}</span>
-                    </div>`).join('')}
-                </div>
-              </div>`).join('')}
+            <div class="card" style="padding:10px 14px">
+              <div style="display:grid;grid-template-columns:1fr auto auto;gap:6px 12px;align-items:center">
+                <div style="font-size:10px;font-weight:800;color:var(--gray-400);text-transform:uppercase">Habitación</div>
+                <div style="font-size:10px;font-weight:800;color:var(--gray-400);text-transform:uppercase">Piso</div>
+                <div style="font-size:10px;font-weight:800;color:var(--gray-400);text-transform:uppercase;text-align:right">Camas</div>
+                ${habsOrdenadas.map(({hab, count}) => `
+                  <div style="font-size:14px;font-weight:800;color:var(--gray-900)">${hab.numero_hab}</div>
+                  <div style="font-size:12px;color:var(--gray-500)">${hab.nivel || '—'}</div>
+                  <div style="font-size:15px;font-weight:900;color:${col};text-align:right">${count}</div>
+                `).join('')}
+              </div>
+              <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--gray-100);display:flex;justify-content:space-between;align-items:center">
+                <span style="font-size:11px;color:var(--gray-500)">${habsOrdenadas.length} habitaciones</span>
+                <span style="font-size:13px;font-weight:900;color:${col}">${totalDia} sábanas a cambiar</span>
+              </div>
+            </div>
           </div>`;
       }).join('');
 

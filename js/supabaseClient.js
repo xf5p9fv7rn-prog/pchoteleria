@@ -8,6 +8,36 @@ const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYm
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
+/**
+ * fetchAllRows — Lee TODAS las filas de una query paginando automáticamente.
+ *
+ * Supabase devuelve máximo 1.000 filas por defecto. Esta función hace un loop
+ * de páginas hasta obtener todos los registros, sin límite artificial.
+ *
+ * @param {Function} queryFactory  Función sin argumentos que devuelve una query
+ *                                 de Supabase SIN .range(). Se llama una vez por página.
+ * @param {number}   [pageSize=900] Filas por página (< 1000 para margen de seguridad).
+ * @returns {Promise<Array>}        Todos los registros concatenados.
+ *
+ * Ejemplo:
+ *   const rows = await fetchAllRows(() =>
+ *     supabase.from('v2_asignaciones').select('*').is('fecha_checkout', null)
+ *   );
+ */
+export async function fetchAllRows(queryFactory, pageSize = 900) {
+    let offset = 0;
+    const all = [];
+    while (true) {
+        const { data, error } = await queryFactory().range(offset, offset + pageSize - 1);
+        if (error) throw error;
+        if (!data || !data.length) break;
+        all.push(...data);
+        if (data.length < pageSize) break;
+        offset += pageSize;
+    }
+    return all;
+}
+
 
 // ── Keep-Alive: evita que Supabase pause el proyecto por inactividad ──────────
 // Supabase pausa proyectos gratuitos si no hay actividad por 7 días.

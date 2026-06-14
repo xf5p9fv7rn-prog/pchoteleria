@@ -53,9 +53,9 @@ export async function renderV2InformeEjecutivo(container) {
             fetchAll('v2_camas', 'id_cama, estado, numero_cama, habitacion_id'),
             fetchAll('v2_asignaciones', 'id_cama, empresa_id, fecha_checkin, fecha_salida_programada, huesped_confirmo',
                      q => q.is('fecha_checkout', null)),
-            supabase.from('v2_empresas').select('id, nombre, turno').limit(200),
-            supabase.from('v2_distribucion_camas').select('id_cama, tipo, etiqueta').limit(5000),
-            supabase.from('v2_habitaciones').select('id, numero, estado, pabellon, sector').limit(2000),
+            fetchAll('v2_empresas', 'id, nombre, turno'),
+            fetchAll('v2_distribucion_camas', 'id_cama, tipo, etiqueta'),
+            fetchAll('v2_habitaciones', 'id, numero, estado, pabellon, sector'),
         ]);
 
         // Excluir camas deshabilitadas del conteo real (igual que el Dashboard)
@@ -63,7 +63,7 @@ export async function renderV2InformeEjecutivo(container) {
             c.estado !== 'Deshabilitada' && c.estado !== 'deshabilitada');
 
         const empMap = {};
-        (empresasDB.data || []).forEach(e => { empMap[e.id] = e; });
+        (empresasDB || []).forEach(e => { empMap[e.id] = e; });
 
         // ── KPIs globales ────────────────────────────────────────────────────
         // Capacidad física desde v2_camas
@@ -76,7 +76,7 @@ export async function renderV2InformeEjecutivo(container) {
         const pctOcup     = totalCamas > 0 ? Math.round(ocupadas / totalCamas * 100) : 0;
 
         // ── Habitaciones en Mantención / Reparación ─────────────────────────────
-        const habsDB = habitacionesDB.data || [];
+        const habsDB = habitacionesDB || [];
         const isMantEstado = e => /manten|reparac/i.test(e || '');
         const habsTotal   = habsDB.length;
         const habsMant    = habsDB.filter(h => isMantEstado(h.estado));
@@ -118,7 +118,7 @@ export async function renderV2InformeEjecutivo(container) {
         const pctR220   = camasR220 > 0 ? Math.round(ocupR220 / camasR220 * 100) : 0;
 
         // ── Anglo / Noche / Colaboradores splits ───────────
-        const distCamas      = distDataRaw.data || [];
+        const distCamas      = distDataRaw || [];
         const angloSetIE     = new Set(distCamas.filter(d => d.tipo === 'anglo').map(d => String(d.id_cama)));
         const nocheSetIE     = new Set(distCamas.filter(d => d.tipo === 'noche').map(d => String(d.id_cama)));
         const colaborSetIE   = new Set(distCamas.filter(d => d.tipo === 'colaborador').map(d => String(d.id_cama)));

@@ -2,7 +2,7 @@
  * v2-censo.js — Censo Administrativo (21→20 de cada mes)
  * Vista cuadrícula: habitaciones × días + resumen de facturación
  */
-import { supabase } from '../../supabaseClient.js';
+import { supabase, fetchAllRows } from '../../supabaseClient.js';
 
 // ── Período activo (21 del mes pasado → 20 del mes actual) ──────────────
 function calcularPeriodo(offset = 0) {
@@ -33,13 +33,14 @@ async function _autoSnapshotPeriodo() {
         const pFin = fmtISO(_periodo.fin);
 
         // Traer asignaciones activas del período
-        const { data: asigs, error } = await supabase.from('v2_asignaciones')
-            .select('id_cama,fecha_checkin,fecha_salida_programada,fecha_checkout,v2_camas(numero_cama,habitacion_id)')
-            .lte('fecha_checkin', pFin)
-            .or(`fecha_checkout.is.null,fecha_checkout.gte.${pIni}`)
-            .not('estado_asignacion', 'eq', 'sin_checkout');
-
-        if (error || !asigs?.length) return;
+        const asigs = await fetchAllRows(() =>
+            supabase.from('v2_asignaciones')
+                .select('id_cama,fecha_checkin,fecha_salida_programada,fecha_checkout,v2_camas(numero_cama,habitacion_id)')
+                .lte('fecha_checkin', pFin)
+                .or(`fecha_checkout.is.null,fecha_checkout.gte.${pIni}`)
+                .not('estado_asignacion', 'eq', 'sin_checkout')
+        );
+        if (!asigs.length) return;
 
         // Construir mapa: habitacion_id + fecha → estado (dia / noche)
         const registros = [];
@@ -299,9 +300,11 @@ async function renderGrid() {
     // Asignaciones ACTIVAS (sin checkout) para mostrar empresa en el grid
     // Se toman todas las activas, sin filtro de período, para cubrir
     // habitaciones con carga masiva aunque el período no coincida exactamente.
-    const { data: asigActivas } = await supabase.from('v2_asignaciones')
-        .select('id_cama,numero_contrato,fecha_salida_programada,v2_empresas(nombre,v2_gerencias(nombre)),v2_camas(habitacion_id)')
-        .is('fecha_checkout', null);
+    const asigActivas = await fetchAllRows(() =>
+        supabase.from('v2_asignaciones')
+            .select('id_cama,numero_contrato,fecha_salida_programada,v2_empresas(nombre,v2_gerencias(nombre)),v2_camas(habitacion_id)')
+            .is('fecha_checkout', null)
+    );
 
     // Map: habitacion_id → {empresa, gerencia, contrato, fecha_sal}
     // Fallback: si el join v2_camas no resuelve, se parsea del id_cama (ej: "ABC-123-C1" → "ABC-123")
@@ -328,10 +331,12 @@ async function renderGrid() {
 
 
     // Registros censo (incluye periodo dia + noche)
-    const { data: regs } = await supabase.from('v2_censo_registros')
-        .select('habitacion_id,fecha,estado,periodo')
-        .gte('fecha', fmtISO(_periodo.ini))
-        .lte('fecha', fmtISO(_periodo.fin));
+    const regs = await fetchAllRows(() =>
+        supabase.from('v2_censo_registros')
+            .select('habitacion_id,fecha,estado,periodo')
+            .gte('fecha', fmtISO(_periodo.ini))
+            .lte('fecha', fmtISO(_periodo.fin))
+    );
 
     // regMap: habitacion_id|fecha|periodo → estado
     const regMap = {};
@@ -443,13 +448,19 @@ async function renderBilling() {
     const pFin = fmtISO(_periodo.fin);
 
     // ── 1. Registros del censo (fuente: hoteleras) ────────────────────────
-    const { data: registros, error: errReg } = await supabase
-        .from('v2_censo_registros')
-        .select('habitacion_id, fecha, estado')
-        .gte('fecha', pIni)
-        .lte('fecha', pFin)
-        .neq('estado', 'sin_ocupar');
-    if (errReg) { body.innerHTML = `<div style="color:#ef4444;padding:20px">❌ ${errReg.message}</div>`; return; }
+    let registros;
+    try {
+        registros = await fetchAllRows(() =>
+            supabase.from('v2_censo_registros')
+                .select('habitacion_id, fecha, estado')
+                .gte('fecha', pIni)
+                .lte('fecha', pFin)
+                .neq('estado', 'sin_ocupar')
+        );
+    } catch(errReg) {
+        body.innerHTML = `<div style="color:#ef4444;padding:20px">❌ ${errReg.message}</div>`;
+        return;
+    }
 
     if (!registros?.length) {
         body.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-muted)">⚠️ Sin registros de censo en este período.<br><span style="font-size:12px">Las hoteleras deben registrar el censo diario desde el portal de terreno.</span></div>';
@@ -638,14 +649,14 @@ async function renderBajadas() {
     body.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-muted)">⏳ Cargando…</div>';
 
     const hoy = fmtISO(new Date());
-    let q = supabase.from('v2_asignaciones')
-        .select('nombre_huesped,rut_huesped,fecha_checkout,numero_contrato,v2_empresas(nombre,v2_gerencias(nombre)),v2_camas(v2_habitaciones(numero_hab,nivel,v2_pabellones(nombre,v2_edificios(nombre))))')
-        .gte('fecha_checkout', fmtISO(_periodo.ini))
-        .lte('fecha_checkout', fmtISO(_periodo.fin))
-        .not('fecha_checkout', 'is', null)
-        .order('fecha_checkout', { ascending: false });
-
-    const { data: bajadas } = await q;
+    const bajadas = await fetchAllRows(() =>
+        supabase.from('v2_asignaciones')
+            .select('nombre_huesped,rut_huesped,fecha_checkout,numero_contrato,v2_empresas(nombre,v2_gerencias(nombre)),v2_camas(v2_habitaciones(numero_hab,nivel,v2_pabellones(nombre,v2_edificios(nombre))))')
+            .gte('fecha_checkout', fmtISO(_periodo.ini))
+            .lte('fecha_checkout', fmtISO(_periodo.fin))
+            .not('fecha_checkout', 'is', null)
+            .order('fecha_checkout', { ascending: false })
+    );
 
     if (!(bajadas?.length)) {
         body.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-muted)">Sin bajadas en este período</div>';
@@ -707,11 +718,13 @@ async function exportExcel() {
             document.head.appendChild(s);
         });
     }
-    const { data: regs } = await supabase.from('v2_censo_registros')
-        .select('habitacion_id,fecha,estado,registrado_por,pabellon_id')
-        .gte('fecha', fmtISO(_periodo.ini))
-        .lte('fecha', fmtISO(_periodo.fin))
-        .order('fecha');
+    const regs = await fetchAllRows(() =>
+        supabase.from('v2_censo_registros')
+            .select('habitacion_id,fecha,estado,registrado_por,pabellon_id')
+            .gte('fecha', fmtISO(_periodo.ini))
+            .lte('fecha', fmtISO(_periodo.fin))
+            .order('fecha')
+    );
 
     const header = [['Habitación','Fecha','Estado','Registrado por']];
     const rows   = (regs || []).map(r => [r.habitacion_id, r.fecha, r.estado, r.registrado_por]);
@@ -734,15 +747,19 @@ async function reporteEmpresas() {
     }
 
     // 1. Registros de censo del período
-    const { data: regs } = await supabase.from('v2_censo_registros')
-        .select('habitacion_id,fecha,estado,periodo')
-        .gte('fecha', fmtISO(_periodo.ini))
-        .lte('fecha', fmtISO(_periodo.fin));
+    const regs = await fetchAllRows(() =>
+        supabase.from('v2_censo_registros')
+            .select('habitacion_id,fecha,estado,periodo')
+            .gte('fecha', fmtISO(_periodo.ini))
+            .lte('fecha', fmtISO(_periodo.fin))
+    );
 
     // 2. Asignaciones activas (sin checkout) para mapear hab → empresa
-    const { data: asigs } = await supabase.from('v2_asignaciones')
-        .select('id_cama,numero_contrato,fecha_salida_programada,v2_empresas(nombre,v2_gerencias(nombre)),v2_camas(habitacion_id)')
-        .is('fecha_checkout', null);
+    const asigs = await fetchAllRows(() =>
+        supabase.from('v2_asignaciones')
+            .select('id_cama,numero_contrato,fecha_salida_programada,v2_empresas(nombre,v2_gerencias(nombre)),v2_camas(habitacion_id)')
+            .is('fecha_checkout', null)
+    );
 
     // Construir mapa habitacion_id → empresa
     const habEmpMap = {};
@@ -838,13 +855,13 @@ window._censoExportBilling = async () => {
             await new Promise((res, rej) => { s.onload = res; s.onerror = rej; document.head.appendChild(s); });
         }
 
-        const { data: asigs, error } = await supabase.from('v2_asignaciones')
-            .select('id_cama,rut_huesped,nombre_huesped,numero_contrato,fecha_checkin,fecha_salida_programada,fecha_checkout,v2_empresas(nombre,turno,v2_gerencias(nombre)),v2_camas(numero_cama,v2_habitaciones(numero_hab))')
-            .lte('fecha_checkin', hasta)
-            .or(`fecha_checkout.is.null,fecha_checkout.gte.${desde}`)
-            .not('estado_asignacion', 'eq', 'sin_checkout');
-
-        if (error) throw new Error(error.message);
+        const asigs = await fetchAllRows(() =>
+            supabase.from('v2_asignaciones')
+                .select('id_cama,rut_huesped,nombre_huesped,numero_contrato,fecha_checkin,fecha_salida_programada,fecha_checkout,v2_empresas(nombre,turno,v2_gerencias(nombre)),v2_camas(numero_cama,v2_habitaciones(numero_hab))')
+                .lte('fecha_checkin', hasta)
+                .or(`fecha_checkout.is.null,fecha_checkout.gte.${desde}`)
+                .not('estado_asignacion', 'eq', 'sin_checkout')
+        );
 
         // Construir datos por contrato
         const porContrato = {};
@@ -985,12 +1002,13 @@ window._censoExportEstadoPago = async () => {
         }
 
         // Traer datos
-        const { data: asigs, error } = await supabase.from('v2_asignaciones')
-            .select('rut_huesped,numero_contrato,fecha_checkin,fecha_salida_programada,fecha_checkout,v2_empresas(nombre,turno,v2_gerencias(nombre))')
-            .lte('fecha_checkin', hasta)
-            .or(`fecha_checkout.is.null,fecha_checkout.gte.${desde}`)
-            .not('estado_asignacion', 'eq', 'sin_checkout');
-        if (error) throw new Error(error.message);
+        const asigs = await fetchAllRows(() =>
+            supabase.from('v2_asignaciones')
+                .select('rut_huesped,numero_contrato,fecha_checkin,fecha_salida_programada,fecha_checkout,v2_empresas(nombre,turno,v2_gerencias(nombre))')
+                .lte('fecha_checkin', hasta)
+                .or(`fecha_checkout.is.null,fecha_checkout.gte.${desde}`)
+                .not('estado_asignacion', 'eq', 'sin_checkout')
+        );
 
         const porContrato = {};
         (asigs || []).forEach(a => {
@@ -1178,12 +1196,13 @@ async function censoGuardarPeriodo() {
     try {
         const pIni = fmtISO(_periodo.ini);
         const pFin = fmtISO(_periodo.fin);
-        const { data: asigs, error } = await supabase.from('v2_asignaciones')
-            .select('rut_huesped,nombre_huesped,numero_contrato,fecha_checkin,fecha_salida_programada,fecha_checkout,v2_empresas(nombre,turno,v2_gerencias(nombre)),v2_camas(numero_cama,v2_habitaciones(numero_hab))')
-            .lte('fecha_checkin', pFin)
-            .or(`fecha_checkout.is.null,fecha_checkout.gte.${pIni}`)
-            .not('estado_asignacion', 'eq', 'sin_checkout');
-        if (error) throw new Error(error.message);
+        const asigs = await fetchAllRows(() =>
+            supabase.from('v2_asignaciones')
+                .select('rut_huesped,nombre_huesped,numero_contrato,fecha_checkin,fecha_salida_programada,fecha_checkout,v2_empresas(nombre,turno,v2_gerencias(nombre)),v2_camas(numero_cama,v2_habitaciones(numero_hab))')
+                .lte('fecha_checkin', pFin)
+                .or(`fecha_checkout.is.null,fecha_checkout.gte.${pIni}`)
+                .not('estado_asignacion', 'eq', 'sin_checkout')
+        );
         const porContrato = {};
         (asigs || []).forEach(a => {
             const cont = a.numero_contrato || '(sin contrato)';

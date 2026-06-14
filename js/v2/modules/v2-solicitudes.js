@@ -2232,10 +2232,37 @@ async function renderTab(tab) {
     body.innerHTML=`<div style="text-align:center;padding:40px;color:#94a3b8"><div style="font-size:36px">⏳</div><div>Cargando…</div></div>`;
 
     try {
-        let q=supabase.from('v2_solicitudes_b2b').select('*').order('empresa').order('created_at',{ascending:false});
-        if(tab==='pending') q=q.eq('status','pendiente'); else q=q.neq('status','pendiente').limit(5000);
-        const {data:reqs,error}=await q;
-        if(error) throw error;
+        let reqs;
+        if (tab === 'pending') {
+            const { data, error } = await supabase
+                .from('v2_solicitudes_b2b')
+                .select('*')
+                .eq('status', 'pendiente')
+                .order('empresa')
+                .order('created_at', { ascending: false });
+            if (error) throw error;
+            reqs = data || [];
+        } else {
+            // Historial: paginación completa sin límite
+            const PAGE = 900;
+            let offset = 0;
+            reqs = [];
+            while (true) {
+                const { data, error } = await supabase
+                    .from('v2_solicitudes_b2b')
+                    .select('*')
+                    .neq('status', 'pendiente')
+                    .order('created_at', { ascending: false })
+                    .range(offset, offset + PAGE - 1);
+                if (error) throw error;
+                if (!data || !data.length) break;
+                reqs = reqs.concat(data);
+                if (data.length < PAGE) break;
+                offset += PAGE;
+            }
+        }
+        const error = null; // compat
+
 
         // KPIs solo en pestaña pendientes
         if(tab==='pending') {
@@ -2332,9 +2359,9 @@ async function renderTab(tab) {
                 g.rows = Object.values(uniqueRows);
             }
 
-            // ── Guardar todos los grupos para filtrado ──
+            // Guardar todos los grupos, orden por defecto: más reciente
             window._histGrupos = Object.values(grupos);
-            window._histSortAsc = true;
+            window._histSortAsc = false; // más reciente primero por defecto
 
             const empresasUnicas = [...new Set(window._histGrupos.map(g=>g.empresa))].sort();
             body.innerHTML = `
@@ -2372,7 +2399,7 @@ async function renderTab(tab) {
                 <div style="font-size:11px;font-weight:700;color:#64748b;margin-bottom:5px;text-transform:uppercase">🔃 Orden</div>
                 <button id="hf-sort-btn" onclick="window._toggleSortHist()"
                   style="width:100%;padding:9px 12px;border:1.5px solid #6366f1;border-radius:10px;font-size:12px;font-weight:700;color:#6366f1;background:#eff6ff;cursor:pointer;box-sizing:border-box">
-                  ⬆️ Más antigua
+                  ⬇️ Más reciente
                 </button>
               </div>
               <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
@@ -2398,11 +2425,17 @@ async function renderTab(tab) {
                     if (status && g.status !== status)                    return false;
                     return true;
                 });
-                filtered.sort((a,b)=>{
-                    const ec = a.empresa.localeCompare(b.empresa);
-                    if (ec !== 0) return ec;
-                    const cmp = (a.fechaIn||'').localeCompare(b.fechaIn||'');
-                    return asc ? cmp : -cmp;
+                filtered.sort((a, b) => {
+                    // Orden por fecha (asc o desc), luego empresa, luego contrato
+                    const cmpFecha = (a.fechaIn || '').localeCompare(b.fechaIn || '');
+                    const fecha    = asc ? cmpFecha : -cmpFecha;
+                    if (fecha !== 0) return fecha;
+                    // Segunda clave: fecha_salida
+                    const cmpFin = (a.fechaOut || '').localeCompare(b.fechaOut || '');
+                    const fin    = asc ? cmpFin : -cmpFin;
+                    if (fin !== 0) return fin;
+                    // Tercera clave: empresa
+                    return a.empresa.localeCompare(b.empresa);
                 });
                 const cnt = document.getElementById('hf-count');
                 if (cnt) cnt.textContent = `${filtered.length} carga${filtered.length!==1?'s':''}`;

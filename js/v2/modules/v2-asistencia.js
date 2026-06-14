@@ -153,12 +153,26 @@ async function cargarDatos() {
         const _normR = r => String(r||'').replace(/[.\-\s]/g,'').toUpperCase();
         const rutsConAsig = new Set(all.map(a => _normR(a.rut_huesped)));
 
-        const { data: sols } = await supabase
-            .from('v2_solicitudes_b2b')
-            .select('id, nombre_trabajador, rut_trabajador, empresa, hab_solicitada, fecha_llegada, fecha_salida, status')
-            .in('status', ['aceptada', 'aceptada_asignada', 'pendiente']);
-            // Incluye 'pendiente': trabajadores cargados que el motor no pudo asignar
-            // (hab. solicitada llena) → deben aparecer en Asistencia como SIN CAMA
+        // ⭐ Paginación completa — sin límite de 1000 filas
+        const SOL_PAGE = 900;
+        let solOffset = 0;
+        const solsAll = [];
+        while (true) {
+            const { data: solPage, error: solErr } = await supabase
+                .from('v2_solicitudes_b2b')
+                .select('id, nombre_trabajador, rut_trabajador, empresa, hab_solicitada, fecha_llegada, fecha_salida, status')
+                .in('status', ['aceptada', 'aceptada_asignada', 'pendiente'])
+                .order('created_at', { ascending: false })
+                .range(solOffset, solOffset + SOL_PAGE - 1);
+            if (solErr) { console.warn('[Asistencia] Error solicitudes pag:', solErr.message); break; }
+            if (!solPage || !solPage.length) break;
+            solsAll.push(...solPage);
+            if (solPage.length < SOL_PAGE) break;
+            solOffset += SOL_PAGE;
+        }
+        const sols = solsAll;
+        // Incluye 'pendiente': trabajadores cargados que el motor no pudo asignar
+        // (hab. solicitada llena) → deben aparecer en Asistencia como SIN CAMA
 
         // Solo los que NO tienen asignación formal en el turno activo
         _solicPend = (sols || []).filter(s => {

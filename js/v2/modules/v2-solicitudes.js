@@ -878,9 +878,10 @@ function grupoCardHTML(empresa, rows) {
                  : generos[0]==='F' ? '♀ Femenino' : generos[0]==='M' ? '♂ Masculino' : '';
     const gColor = generos[0]==='F'?'#fce7f3':'#dbeafe';
     const gTextColor = generos[0]==='F'?'#9d174d':'#1e40af';
-    const contrato = rows[0]?.n_contrato||'—';
-    const fechaLlegada = rows[0]?.fecha_llegada||null;
-    const fechaSalida  = rows[0]?.fecha_salida||null;
+    const contrato  = rows[0]?.n_contrato  || '—';
+    const gerencia  = rows[0]?.gerencia    || null;
+    const fechaLlegada = rows[0]?.fecha_llegada || null;
+    const fechaSalida  = rows[0]?.fecha_salida  || null;
     const conHab = rows.filter(r=>r.hab_solicitada).length;
     const sinHab = rows.length - conHab;
 
@@ -954,6 +955,7 @@ function grupoCardHTML(empresa, rows) {
                     <div style="font-weight:900;font-size:16px">${empresa}</div>
                     <div style="font-size:12px;color:#64748b;margin-top:2px">
                         Contrato: <b>${contrato}</b> &nbsp;·&nbsp;
+                        ${gerencia ? `Gerencia: <b>${gerencia}</b> &nbsp;·&nbsp;` : ''}
                         Período: <b>${fmt(fechaLlegada)} → ${fmt(fechaSalida)}</b>
                     </div>
                 </div>
@@ -2335,12 +2337,12 @@ async function renderTab(tab) {
         }
 
         if(tab==='pending') {
-            // ── Agrupar por CARGA: empresa + contrato + fecha_llegada + fecha_salida
-            // Regla: misma empresa con mismo contrato Y mismas fechas = misma lista.
-            // Misma empresa con distinto contrato O distintas fechas = listas separadas.
+            // ── Agrupar por CARGA: empresa + contrato + gerencia + fecha_llegada + fecha_salida
+            // Regla: misma empresa con mismo contrato Y gerencia Y mismas fechas = misma lista.
+            // Distinto contrato, gerencia o fechas = listas separadas.
             const grupos={};
             for(const r of reqs) {
-                const key=(r.empresa||'Sin empresa')+'||'+(r.n_contrato||'')+'||'+(r.fecha_llegada||'')+'||'+(r.fecha_salida||'');
+                const key=(r.empresa||'Sin empresa')+'||'+(r.n_contrato||'')+'||'+(r.gerencia||'')+'||'+(r.fecha_llegada||'')+'||'+(r.fecha_salida||'');
                 if(!grupos[key]) grupos[key]=[];
                 grupos[key].push(r);
             }
@@ -2358,10 +2360,11 @@ async function renderTab(tab) {
             const hoy2 = new Date().toISOString().split('T')[0];
             const grupos={};
             for(const r of reqs) {
-                const key=(r.empresa||'Sin empresa')+'||'+(r.n_contrato||'')+'||'+(r.fecha_llegada||'sin-llegada')+'||'+(r.fecha_salida||'sin-salida');
+                const key=(r.empresa||'Sin empresa')+'||'+(r.n_contrato||'')+'||'+(r.gerencia||'')+'||'+(r.fecha_llegada||'sin-llegada')+'||'+(r.fecha_salida||'sin-salida');
                 if(!grupos[key]) grupos[key]={
                     empresa:  r.empresa||'Sin empresa',
                     contrato: r.n_contrato||null,
+                    gerencia: r.gerencia||null,
                     fechaIn:  r.fecha_llegada||null,
                     fechaOut: r.fecha_salida||null,
                     status:   r.status,

@@ -2242,6 +2242,50 @@ async function renderTab(tab) {
                 .order('created_at', { ascending: false });
             if (error) throw error;
             reqs = data || [];
+
+            // ── Filtrar trabajadores que YA tienen asignación activa ───────────
+            // Si un rut tiene cama en v2_asignaciones (fecha_checkout null),
+            // ya no debe aparecer en Pendientes → actualizar status y excluirlo.
+            if (reqs.length > 0) {
+                const normRut = r => String(r || '').replace(/[.\-\s]/g, '').toUpperCase();
+                const rutsPend = [...new Set(reqs.map(r => normRut(r.rut_trabajador)).filter(Boolean))];
+
+                // Consultar en lotes de 200 para no exceder URL length
+                const LOTE = 200;
+                const rutsAsignados = new Set();
+                for (let i = 0; i < rutsPend.length; i += LOTE) {
+                    const lote = rutsPend.slice(i, i + LOTE);
+                    const { data: asigs } = await supabase
+                        .from('v2_asignaciones')
+                        .select('rut_huesped')
+                        .in('rut_huesped', lote)
+                        .is('fecha_checkout', null)
+                        .in('estado_asignacion', ['activa', 'pre_asignado']);
+                    (asigs || []).forEach(a => rutsAsignados.add(normRut(a.rut_huesped)));
+                }
+
+                if (rutsAsignados.size > 0) {
+                    // IDs a actualizar en DB (silencioso, en background)
+                    const idsActualizar = reqs
+                        .filter(r => rutsAsignados.has(normRut(r.rut_trabajador)))
+                        .map(r => r.id);
+
+                    if (idsActualizar.length > 0) {
+                        // Actualizar en lotes de 200
+                        for (let i = 0; i < idsActualizar.length; i += 200) {
+                            supabase.from('v2_solicitudes_b2b')
+                                .update({ status: 'aceptada_asignada' })
+                                .in('id', idsActualizar.slice(i, i + 200))
+                                .then(() => {});  // sin await — no bloquear UI
+                        }
+                        console.log(`[Pendientes] ✅ ${idsActualizar.length} solicitudes ya asignadas → actualizadas a 'aceptada_asignada'`);
+                    }
+
+                    // Excluir del display inmediatamente
+                    reqs = reqs.filter(r => !rutsAsignados.has(normRut(r.rut_trabajador)));
+                }
+            }
+
         } else {
             // Historial: paginación completa sin límite
             const PAGE = 900;

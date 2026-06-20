@@ -29,6 +29,42 @@ const isR220 = (id) => /^R[.\-]?220/i.test(String(id || ''));
 // Turnos disponibles para filtros (todos los del sistema)
 const TURNOS = ['4x3', '4x4', '5x2', '7x7', '8x6', '10x10', '14x14'];
 
+/**
+ * resolveHabNum(asig, habMap)
+ * Resuelve el número de habitación REAL para mostrar al usuario.
+ *
+ * Estrategia de prioridad:
+ *  1. a.v2_camas?.v2_habitaciones?.numero_hab  (join anidado en asignaciones)
+ *  2. habMap[a.v2_camas?.habitacion_id]?.numero_hab  (habMap por el habitacion_id de la cama)
+ *  3. habMap[a.id_cama stripped]?.numero_hab  (id_cama sin sufijo -C1/-C2)
+ *  4. Fallback legible: strip prefijo COPC/R-220 del id_cama
+ */
+function resolveHabNum(asig, habMap) {
+  // 1º prioridad: join embebido en asignaciones (v2_camas.v2_habitaciones.numero_hab)
+  const n1 = asig?.v2_camas?.v2_habitaciones?.numero_hab;
+  if (n1) return String(n1);
+
+  // 2º prioridad: habitacion_id de la cama embebida → habMap
+  const habIdFromCama = asig?.v2_camas?.habitacion_id;
+  if (habIdFromCama && habMap[String(habIdFromCama)]?.numero_hab)
+    return String(habMap[String(habIdFromCama)].numero_hab);
+
+  // 3º prioridad: id_cama propio stripeado de sufijo (-C1, -C2, etc.)
+  const rawId = String(asig?.id_cama || '');
+  const habIdStripped = rawId.replace(/-C\d+$/i, '').replace(/_\d+$/, '');
+  if (habIdStripped && habMap[habIdStripped]?.numero_hab)
+    return String(habMap[habIdStripped].numero_hab);
+
+  // 4º fallback: limpiar el id para mostrar algo útil
+  // COPC000396 → 396 | R-220000010 → 10
+  const stripped = rawId
+    .replace(/-C\d+$/i, '')  // quitar sufijo cama
+    .replace(/^COPC0*/i, '') // quitar prefijo COPC + ceros
+    .replace(/^R[.-]?220/i, '') // quitar prefijo R-220
+    .replace(/^0+/, '');         // quitar ceros liderantes
+  return stripped || rawId || '—';
+}
+
 // ── Chart.js loader singleton ─────────────────────────────────────────────────
 let _chartLoaded = false;
 async function loadChart() {
@@ -661,7 +697,7 @@ function renderOcupadas() {
         </tr></thead>
         <tbody>
           ${rows.map((a, i) => {
-    const habNum = a.v2_camas?.v2_habitaciones?.numero_hab || '—';
+    const habNum = resolveHabNum(a, _data.habMap);
     const isNoche = camaNocheSet?.has(String(a.id_cama));
     const camLbl = isNoche ? '🌙 Noche' : '☀️ Día';
     const conf = a.huesped_confirmo;
@@ -893,7 +929,7 @@ function renderReserva() {
         </tr></thead>
         <tbody>
           ${rows.map((a, i) => {
-    const habNum = a.v2_camas?.v2_habitaciones?.numero_hab || '—';
+    const habNum = resolveHabNum(a, _data.habMap);
     const rowBg = 'rgba(139,92,246,.05)';
     const rowBord = '3px solid #8b5cf6';
     return `<tr style="background:${rowBg};border-left:${rowBord}">
@@ -1040,43 +1076,41 @@ function renderLibre() {
     }
   });
 
-  // ─ Helper: extraer número de habitación legible desde id_cama R-220 ────────
-  // id_cama ejemplo: "R-220000010" → extraemos los últimos dígitos útiles
-  // La lógica de naming: R-220[pabellon][piso][hab] pero como son IDs de BD
-  // simplemente mostramos el número de habitación que viene de numero_hab en habMap.
-  // Si no está disponible, limpiamos el ID para no mostrar el raw de BD.
+  // ─ Helper: extraer número de habitación legible ──────────────────────────────
+  // 1º: numero_hab del habRecord (habMap)
+  // 2º: strip prefijos COPC/R-220 del id de la cama/habitacion
   const _numHabLegible = (hab, idCama) => {
     if (hab?.numero_hab) return String(hab.numero_hab);
-    // Fallback: limpiar el id_cama para mostrar algo útil
-    // R-220000010 → 220000010 → intentar extraer últimos dígitos como número de hab
-    const raw = String(idCama || '').replace(/^R[.-]?/i, '').trim();
-    // Si son puros dígitos, mostrar como número de hab
-    if (/^\d+$/.test(raw)) {
-      // Quitar ceros a la izquierda excesivos pero preservar el número
-      return raw.replace(/^0+/, '') || raw;
-    }
-    return raw || '—';
+    const raw = String(idCama || '')
+      .replace(/-C\d+$/i, '')   // quitar sufijo cama (-C1, -C2)
+      .replace(/^COPC0*/i, '')  // quitar COPC + ceros
+      .replace(/^R[.-]?220/i, '') // quitar R-220
+      .replace(/^0+/, '');       // quitar ceros restantes
+    return raw || String(idCama || '') || '—';
   };
 
   // ─ Construir mapa enriquecido habitacion_id → {numHab, pabellon, piso, camas, empresa} ─
-  // La fuente preferida de numero_hab es c.v2_habitaciones (join directo en el fetch).
-  // Si no está disponible, se busca en habMap. Si tampoco, se limpia el id_cama.
+  // REGLA ANGULAR/NOCHE (invariante del sistema):
+  //   Hab con etiqueta 'anglo': C1 = cama Día (numero_cama=1), C2 = cama Noche (numero_cama=2)
+  //   Hab con etiqueta 'noche': TODAS las camas = Noche
   const grupoHabs = {};
   [...libresCOPC, ...libresR220].forEach(c => {
-    const hid = String(c.habitacion_id || c.id_cama || 'sin-hab');
+    // Normalizar habitacion_id: si es null, extraer stripeando sufijo -C1/-C2 del id_cama
+    const habIdRaw = c.habitacion_id
+      || String(c.id_cama || '').replace(/-C\d+$/i, '').replace(/_\d+$/, '');
+    const hid = String(habIdRaw || c.id_cama || 'sin-hab');
+
     if (!grupoHabs[hid]) {
-      // 1º prioridad: join embebido en el fetch de camas
-      const habEmbed = c.v2_habitaciones || null;
-      // 2º prioridad: habMap por habitacion_id o id_cama
+      // Buscar en habMap usando el hid normalizado (sin sufijo)
       const habFallback = habMap[hid] || habMap[String(c.id_cama)] || null;
-      const hab = habEmbed || habFallback;
+      const hab = habFallback; // c.v2_habitaciones ya no existe (join removido)
 
       // Número de habitación: lo que esté en numero_hab, si no limpiamos el id
       const numHab = hab?.numero_hab
         ? String(hab.numero_hab)
-        : _numHabLegible(null, c.id_cama);
+        : _numHabLegible(null, hid);
 
-      // Pabellón y piso: extraer de numero_hab (formato PPFF, ej: 1302 → P1, Piso 3)
+      // Pbellón y piso: extraer de numero_hab (formato PPFF, ej: 1302 → P1, Piso 3)
       const pabellon = _extraerPabellon(numHab);
       const piso     = _extraerPiso(numHab);
 
@@ -1318,8 +1352,8 @@ function tablaAsignaciones(data, modo) {
             </tr></thead>
             <tbody>
               ${arr.map((a, i) => {
-          // Número de habitación — priorizar join de camas
-          const habNum = a.v2_camas?.v2_habitaciones?.numero_hab || '—';
+          // Número de habitación — usar resolveHabNum con habMap
+          const habNum = resolveHabNum(a, _data.habMap);
           const numCam = a.v2_camas?.numero_cama;
           const camLbl = numCam === 1 ? '☀️ Día' : numCam === 2 ? '🌙 Noche' : numCam === 3 ? '➕ Extra' : '—';
           const checkin = a.fecha_checkin ? new Date(a.fecha_checkin).toLocaleDateString('es-CL') : '—';

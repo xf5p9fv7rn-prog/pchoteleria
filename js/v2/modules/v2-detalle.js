@@ -281,22 +281,33 @@ export async function renderV2Detalle(container) {
     const habsR220 = habitacionesAll.filter(h => habIdsR220.has(String(h.id_custom ?? h.id ?? '')));
 
     // ── Calcular camas Noche desde distribución de camas ────────────────
+    // REGLA SISTEMA (invariante):
+    //   Hab etiqueta 'anglo': C1 (numero_cama=1) = Día, C2 (numero_cama=2) = Noche disponible para Anglo
+    //   Hab etiqueta 'noche': TODAS sus camas = Noche
     const camaById = {};
     camas.forEach(c => { camaById[String(c.id_cama)] = c; });
 
-    const habAngloIds = new Set();
-    const habNocheIds = new Set();
+    // Construir mapa habitacion_id → tipo de etiqueta (igual que infraestructura)
+    // 'tipo' puede ser 'anglo', 'noche', 'empresa', '4x3', etc.
+    // 'etiqueta' es el campo texto libre adicional
+    const habTagForHab = {};  // habitacion_id → tipo ('anglo' | 'noche' | ...)
     (distribucion || []).forEach(d => {
-      const tipo = (d.tipo || '').toLowerCase().trim();
+      const tipo = (d.tipo || d.etiqueta || '').toLowerCase().trim();
       const camRec = camaById[String(d.id_cama)];
-      if (!camRec) return;
-      if (tipo === 'anglo' && camRec.habitacion_id) {
-        habAngloIds.add(camRec.habitacion_id);
-      }
-      if ((tipo === 'noche' || tipo === 'night') && camRec.habitacion_id) {
-        habNocheIds.add(camRec.habitacion_id);
+      if (camRec?.habitacion_id && !habTagForHab[camRec.habitacion_id]) {
+        // Primera coincidencia por habitación (como en infraestructura)
+        habTagForHab[camRec.habitacion_id] = tipo;
       }
     });
+
+    const habAngloIds = new Set();
+    const habNocheIds = new Set();
+    Object.entries(habTagForHab).forEach(([habId, tipo]) => {
+      if (tipo === 'anglo') habAngloIds.add(habId);
+      if (tipo === 'noche' || tipo === 'night') habNocheIds.add(habId);
+    });
+
+
     const camaNocheSet = new Set();
     camas.forEach(c => {
       if (habAngloIds.has(c.habitacion_id) && Number(c.numero_cama) === 2) {

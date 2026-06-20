@@ -248,6 +248,22 @@ export async function renderV2Detalle(container) {
     console.log('[v2-detalle] 🏠 habMap size:', Object.keys(habMap).length,
       '| full:', habitacionesAll.length, '| simple:', (habSimple || []).length,
       '| número COPC000003:', habMap['COPC000003']?.numero_hab);
+    // DIAGNÓSTICO: Mostrar muestra real de habitaciones y camas para confirmar IDs
+    const habSample = Object.entries(habMap).slice(0, 5).map(([k, h]) => ({
+      id_custom: k, numero_hab: h.numero_hab, pabellon: h.pabellon
+    }));
+    console.log('[v2-detalle] 🔍 habMap sample (primeros 5):', JSON.stringify(habSample));
+    if (camasAll.length > 0) {
+      const camSample = camasAll.slice(0, 5).map(c => ({
+        id_cama: c.id_cama, habitacion_id: c.habitacion_id, estado: c.estado
+      }));
+      console.log('[v2-detalle] 🛏️ camasAll sample (primeros 5):', JSON.stringify(camSample));
+      // Verificar si habitacion_id de cama está en habMap
+      const testCama = camasAll[0];
+      const testHab = habMap[String(testCama?.habitacion_id)];
+      console.log('[v2-detalle] 🔗 cama[0].habitacion_id=', testCama?.habitacion_id,
+        '→ habMap lookup numero_hab=', testHab?.numero_hab, '(raw hab=', JSON.stringify(testHab), ')');
+    }
 
     // Conjunto de camas ocupadas
     const ocupadosSet = new Set(asigActivas.map(a => String(a.id_cama)));

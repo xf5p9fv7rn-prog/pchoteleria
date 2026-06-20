@@ -309,6 +309,29 @@ export async function renderV2Detalle(container) {
     const totalCamasNoche = camaNocheSet.size;
     const totalCamasDia = camas.length - totalCamasNoche;
 
+    // DIAGNÓSTICO Noche/Anglo
+    console.log('[v2-detalle] 🌙 NOCHE DIAG:',
+      'distribucion.length=', (distribucion||[]).length,
+      '| habAngloIds.size=', habAngloIds.size,
+      '| habNocheIds.size=', habNocheIds.size,
+      '| camaNocheSet.size=', camaNocheSet.size,
+      '| totalDía=', totalCamasDia, '| totalNoche=', totalCamasNoche
+    );
+    // Muestra los tipos únicos en distribución para saber qué valores reales hay
+    const tiposUnicos = [...new Set((distribucion||[]).map(d => d.tipo))];
+    console.log('[v2-detalle] 🏷️ tipos en distribucion:', JSON.stringify(tiposUnicos));
+    const distSample = (distribucion||[]).slice(0,5).map(d => ({id_cama: d.id_cama, tipo: d.tipo, etiqueta: d.etiqueta}));
+    console.log('[v2-detalle] 🏷️ distribucion sample:', JSON.stringify(distSample));
+    if (habAngloIds.size > 0) {
+      const angloSample = [...habAngloIds].slice(0,3);
+      console.log('[v2-detalle] 🤝 habAngloIds sample:', angloSample);
+      // Buscar camas de esas habs
+      const angloC = camas.filter(c => habAngloIds.has(c.habitacion_id)).slice(0,6)
+        .map(c => ({id_cama: c.id_cama, habitacion_id: c.habitacion_id, numero_cama: c.numero_cama}));
+      console.log('[v2-detalle] 🤝 camas anglo (primeras 6):', JSON.stringify(angloC));
+    }
+
+
     // ── Crear motor centralizado (Single Source of Truth) ─────────────────
     const engine = new CampDataEngine({
       camas, camasCOPC, camasR220,

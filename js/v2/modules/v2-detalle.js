@@ -108,13 +108,15 @@ export async function renderV2Detalle(container) {
     // ── Carga masiva en paralelo ──────────────────────────────────────────
     const [camasAll, habitacionesAll, asigRaw, distribucion, habSimple] = await Promise.all([
       fetchAll('v2_camas', 'id_cama,estado,numero_cama,habitacion_id'),
-      fetchAll('v2_habitaciones', 'id_custom,numero_hab,estado,pabellon,sector,motivo_bloqueo,fecha_bloqueo,v2_pabellones(nombre,v2_edificios(nombre))'),
+      // COLUMNAS VÁLIDAS ONLY: pabellon_id (FK) hace join a v2_pabellones, sin columnas 'pabellon'/'sector' (no existen)
+      fetchAll('v2_habitaciones', 'id_custom,numero_hab,estado,motivo_bloqueo,fecha_bloqueo,en_mantencion,v2_pabellones(nombre,v2_edificios(nombre))'),
       fetchAll('v2_asignaciones',
         'id,id_cama,nombre_huesped,rut_huesped,fecha_checkin,fecha_salida_programada,huesped_confirmo,estado_asignacion,numero_contrato,v2_empresas(nombre,turno,v2_gerencias(nombre)),v2_camas(numero_cama,habitacion_id,v2_habitaciones(id_custom,numero_hab))',
         q => q.is('fecha_checkout', null)
       ),
       fetchAll('v2_distribucion_camas', 'id_cama,tipo,etiqueta'),
-      fetchAll('v2_habitaciones', 'id_custom,numero_hab,pabellon,sector'),  // fetch simple sin joins (para habMap números y pabellón)
+      // fetch simple para habMap — solo columnas que realmente existen
+      fetchAll('v2_habitaciones', 'id_custom,numero_hab'),
     ]);
 
     // ── Fetch PAGINADO de solicitudes B2B (usa fetchAll para superar límite de 1000 filas) ─

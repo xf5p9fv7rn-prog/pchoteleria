@@ -71,7 +71,7 @@ export async function renderV2Detalle(container) {
   try {
     // ── Carga masiva en paralelo ──────────────────────────────────────────
     const [camasAll, habitacionesAll, asigRaw, distribucion, habSimple] = await Promise.all([
-      fetchAll('v2_camas', 'id_cama,estado,numero_cama,habitacion_id,v2_habitaciones(id_custom,numero_hab,pabellon,sector)'),
+      fetchAll('v2_camas', 'id_cama,estado,numero_cama,habitacion_id'),
       fetchAll('v2_habitaciones', 'id_custom,numero_hab,estado,pabellon,sector,motivo_bloqueo,fecha_bloqueo,v2_pabellones(nombre,v2_edificios(nombre))'),
       fetchAll('v2_asignaciones',
         'id,id_cama,nombre_huesped,rut_huesped,fecha_checkin,fecha_salida_programada,huesped_confirmo,estado_asignacion,numero_contrato,v2_empresas(nombre,turno,v2_gerencias(nombre)),v2_camas(numero_cama,habitacion_id,v2_habitaciones(id_custom,numero_hab))',

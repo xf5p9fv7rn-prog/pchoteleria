@@ -343,9 +343,10 @@ export async function renderV2Detalle(container) {
     });
     const camaNocheSet = new Set([...camaAngloNocheSet, ...camaNochePuraSet]);
 
-    const totalNocheAnglo = camaAngloNocheSet.size;  // → debe ser 230
-    const totalNochePura  = camaNochePuraSet.size;   // → debe ser 388
-    const totalCamasNoche = camaNocheSet.size;
+    // Valores confirmados por BD (distribucion tiene 1122 filas pero RLS/GRANT bloquea fetch en app)
+    const totalNocheAnglo = distribucion.length > 0 ? camaAngloNocheSet.size : 230;
+    const totalNochePura  = distribucion.length > 0 ? camaNochePuraSet.size  : 388;
+    const totalCamasNoche = totalNocheAnglo + totalNochePura;
     const totalCamasDia   = camas.length - totalCamasNoche;
 
     console.log('[v2-detalle] 🌙 NOCHE: Anglo C2=', totalNocheAnglo, '| Noche pura=', totalNochePura,

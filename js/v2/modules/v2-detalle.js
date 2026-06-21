@@ -299,84 +299,52 @@ export async function renderV2Detalle(container) {
     const habsCOPC = habitacionesAll.filter(h => habIdsCOPC.has(String(h.id_custom ?? h.id ?? '')));
     const habsR220 = habitacionesAll.filter(h => habIdsR220.has(String(h.id_custom ?? h.id ?? '')));
 
-    // ── Calcular camas Noche desde fuentes reales del sistema ────────────
-    // FUENTE 1: v2_asignaciones_anglo → habitaciones modo Anglo
-    //   Regla: C1 (numero_cama=1) = Día, C2 (numero_cama=2) = Noche para Anglo
-    // FUENTE 2: v2_distribucion_camas tipo='noche' → habs de solo-noche
-    //   Regla: TODAS las camas de esas habs = Noche
+    // ── Calcular camas Noche desde v2_distribucion_camas ────────────────
+    // FUENTE ÚNICA: v2_distribucion_camas
+    //   tipo='anglo' → C2 (numero_cama=2) de esa hab = cama Noche Anglo
+    //   tipo='noche' → TODAS las camas de esa hab = cama Noche pura
+    // ⚠️ Si devuelve 0 filas = RLS bloqueando → ejecutar sql/fix_rls_distribucion_camas.sql
     const camaById = {};
     camas.forEach(c => { camaById[String(c.id_cama)] = c; });
 
-    // Obtener habitaciones Anglo activas (por numero_hab)
-    const habAngloIds = new Set();    // Set de habitacion_id (id_custom de v2_habitaciones)
-    const habNocheIds = new Set();    // Set de habitacion_id para habs tipo "noche"
-    try {
-      // Buscar habitaciones Anglo activas en v2_asignaciones_anglo
-      const { data: angloActivos } = await supabase
-        .from('v2_asignaciones_anglo')
-        .select('numero_hab')
-        .eq('activa', true);
+    const habAngloIds = new Set();  // habitacion_id con etiqueta 'anglo'
+    const habNocheIds = new Set();  // habitacion_id con etiqueta 'noche'
 
-      if (angloActivos?.length) {
-        // numero_hab en asignaciones_anglo = numero_hab en v2_habitaciones
-        const angloNumHabs = new Set((angloActivos || []).map(a => String(a.numero_hab)));
-        // Mapear numero_hab → id_custom usando habMap
-        Object.entries(habMap).forEach(([idCustom, h]) => {
-          if (angloNumHabs.has(String(h.numero_hab))) {
-            habAngloIds.add(idCustom);
-          }
-        });
-        console.log('[v2-detalle] 🤝 Anglo activos:', angloActivos.length,
-          '| habs mapeadas a habAngloIds:', habAngloIds.size);
-      } else {
-        // Si no hay asignaciones activas, usar el total de habs con camas C1+C2
-        // (cualquier hab COPC con 2 camas puede ser Anglo)
-        console.log('[v2-detalle] 🤝 Sin asignaciones Anglo activas, buscando habs 2-camas COPC...');
-        // Contar habs que tienen al menos cama C1 y C2
-        const habConC2 = new Set(
-          camas.filter(c => Number(c.numero_cama) === 2 && !isR220(c.id_cama))
-               .map(c => c.habitacion_id).filter(Boolean)
-        );
-        // Cualquier hab COPC con C2 es potencialmente Anglo (C2 es siempre noche en Anglo)
-        habConC2.forEach(hid => habAngloIds.add(hid));
-        console.log('[v2-detalle] 🤝 Habs COPC con C2:', habAngloIds.size);
-      }
-    } catch(eAnglo) {
-      console.warn('[v2-detalle] ⚠️ Error leyendo asignaciones Anglo:', eAnglo.message);
+    (distribucion || []).forEach(d => {
+      const tipo = (d.tipo || '').toLowerCase().trim();
+      const camRec = camaById[String(d.id_cama)];
+      if (!camRec?.habitacion_id) return;
+      if (tipo === 'anglo') habAngloIds.add(camRec.habitacion_id);
+      if (tipo === 'noche' || tipo === 'night') habNocheIds.add(camRec.habitacion_id);
+    });
+
+    console.log('[v2-detalle] 🏷️ Etiquetas: anglo habs=', habAngloIds.size,
+      '| noche habs=', habNocheIds.size,
+      '| (distribucion total=', distribucion.length, ')');
+    if (distribucion.length === 0) {
+      console.warn('[v2-detalle] ⚠️ distribucion vacía — aplicar RLS: sql/fix_rls_distribucion_camas.sql');
     }
 
-    // Habitaciones tipo 'noche' desde distribución (si hay datos)
-    if (distribucion.length > 0) {
-      (distribucion || []).forEach(d => {
-        const tipo = (d.tipo || d.etiqueta || '').toLowerCase().trim();
-        if (tipo === 'noche' || tipo === 'night') {
-          const camRec = camaById[String(d.id_cama)];
-          if (camRec?.habitacion_id) habNocheIds.add(camRec.habitacion_id);
-        }
-      });
-    }
-
-    // Construir camaNocheSet
-    // SET separados: Anglo-noche vs Noche-pura
-    const camaAngloNocheSet = new Set();   // C2 de habs Anglo
-    const camaNochePuraSet  = new Set();   // todas las camas de habs etiqueta 'noche'
+    // Construir sets separados: Anglo-noche vs Noche-pura
+    const camaAngloNocheSet = new Set();  // C2 de habs Anglo
+    const camaNochePuraSet  = new Set();  // TODAS las camas de habs etiqueta 'noche'
     camas.forEach(c => {
-      // Anglo: solo C2 (numero_cama=2) = cama noche
       if (habAngloIds.has(c.habitacion_id) && Number(c.numero_cama) === 2) {
         camaAngloNocheSet.add(String(c.id_cama));
       }
-      // Noche puro: TODAS las camas son noche
       if (habNocheIds.has(c.habitacion_id)) {
         camaNochePuraSet.add(String(c.id_cama));
       }
     });
-    // Set combinado (para retro-compatibilidad con engine)
     const camaNocheSet = new Set([...camaAngloNocheSet, ...camaNochePuraSet]);
 
-    const totalNocheAnglo = camaAngloNocheSet.size;   // Camas Noche Anglo (C2)
-    const totalNochePura  = camaNochePuraSet.size;    // Camas Noche pura
-    const totalCamasNoche = camaNocheSet.size;         // Total combinado
+    const totalNocheAnglo = camaAngloNocheSet.size;  // → debe ser 230
+    const totalNochePura  = camaNochePuraSet.size;   // → debe ser 388
+    const totalCamasNoche = camaNocheSet.size;
     const totalCamasDia   = camas.length - totalCamasNoche;
+
+    console.log('[v2-detalle] 🌙 NOCHE: Anglo C2=', totalNocheAnglo, '| Noche pura=', totalNochePura,
+      '| total=', totalCamasNoche, '| día=', totalCamasDia);
 
     console.log('[v2-detalle] 🌙 NOCHE RESULTADO:',
       '🤝 Anglo C2=', totalNocheAnglo,

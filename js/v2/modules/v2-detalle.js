@@ -106,7 +106,7 @@ export async function renderV2Detalle(container) {
 
   try {
     // ── Carga masiva en paralelo ──────────────────────────────────────────
-    const [camasAll, habitacionesAll, asigRaw, distribucion, habSimple] = await Promise.all([
+    const [camasAll, habitacionesAll, asigRaw, habSimple] = await Promise.all([
       fetchAll('v2_camas', 'id_cama,estado,numero_cama,habitacion_id'),
       // COLUMNAS VÁLIDAS ONLY: pabellon_id (FK) hace join a v2_pabellones, sin columnas 'pabellon'/'sector' (no existen)
       fetchAll('v2_habitaciones', 'id_custom,numero_hab,estado,motivo_bloqueo,fecha_bloqueo,en_mantencion,v2_pabellones(nombre,v2_edificios(nombre))'),
@@ -114,10 +114,29 @@ export async function renderV2Detalle(container) {
         'id,id_cama,nombre_huesped,rut_huesped,fecha_checkin,fecha_salida_programada,huesped_confirmo,estado_asignacion,numero_contrato,v2_empresas(nombre,turno,v2_gerencias(nombre)),v2_camas(numero_cama,habitacion_id,v2_habitaciones(id_custom,numero_hab))',
         q => q.is('fecha_checkout', null)
       ),
-      fetchAll('v2_distribucion_camas', 'id_cama,tipo,etiqueta'),
       // fetch simple para habMap — solo columnas que realmente existen
       fetchAll('v2_habitaciones', 'id_custom,numero_hab'),
     ]);
+
+    // ── Fetch de distribución filtrado por IDs conocidos (igual que Infraestructura) ──
+    // MOTIVO: fetchAll sin filtro es bloqueado por RLS en Supabase.
+    // Usando .in('id_cama', camaIds) el query pasa las políticas de acceso.
+    let distribucion = [];
+    try {
+      const camaIdsParaDistrib = camasAll.map(c => c.id_cama);
+      const CHUNK_DIST = 500;
+      for (let ci = 0; ci < camaIdsParaDistrib.length; ci += CHUNK_DIST) {
+        const { data: distBatch, error: distErr } = await supabase
+          .from('v2_distribucion_camas')
+          .select('id_cama,tipo,etiqueta')
+          .in('id_cama', camaIdsParaDistrib.slice(ci, ci + CHUNK_DIST));
+        if (distErr) { console.warn('[v2-detalle] distribución batch error:', distErr.message); break; }
+        distribucion = distribucion.concat(distBatch || []);
+      }
+      console.log('[v2-detalle] ✅ distribucion cargada:', distribucion.length, 'registros');
+    } catch(eDist) {
+      console.warn('[v2-detalle] ⚠️ Error cargando distribución:', eDist.message);
+    }
 
     // ── Fetch PAGINADO de solicitudes B2B (usa fetchAll para superar límite de 1000 filas) ─
     let solsB2B = [];

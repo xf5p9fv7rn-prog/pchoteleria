@@ -357,25 +357,32 @@ export async function renderV2Detalle(container) {
     }
 
     // Construir camaNocheSet
-    const camaNocheSet = new Set();
+    // SET separados: Anglo-noche vs Noche-pura
+    const camaAngloNocheSet = new Set();   // C2 de habs Anglo
+    const camaNochePuraSet  = new Set();   // todas las camas de habs etiqueta 'noche'
     camas.forEach(c => {
-      // Anglo: solo C2 (numero_cama=2) es cama noche
+      // Anglo: solo C2 (numero_cama=2) = cama noche
       if (habAngloIds.has(c.habitacion_id) && Number(c.numero_cama) === 2) {
-        camaNocheSet.add(String(c.id_cama));
+        camaAngloNocheSet.add(String(c.id_cama));
       }
       // Noche puro: TODAS las camas son noche
       if (habNocheIds.has(c.habitacion_id)) {
-        camaNocheSet.add(String(c.id_cama));
+        camaNochePuraSet.add(String(c.id_cama));
       }
     });
-    const totalCamasNoche = camaNocheSet.size;
-    const totalCamasDia = camas.length - totalCamasNoche;
+    // Set combinado (para retro-compatibilidad con engine)
+    const camaNocheSet = new Set([...camaAngloNocheSet, ...camaNochePuraSet]);
+
+    const totalNocheAnglo = camaAngloNocheSet.size;   // Camas Noche Anglo (C2)
+    const totalNochePura  = camaNochePuraSet.size;    // Camas Noche pura
+    const totalCamasNoche = camaNocheSet.size;         // Total combinado
+    const totalCamasDia   = camas.length - totalCamasNoche;
 
     console.log('[v2-detalle] 🌙 NOCHE RESULTADO:',
-      'habAngloIds=', habAngloIds.size,
-      '| habNocheIds=', habNocheIds.size,
-      '| camaNocheSet=', camaNocheSet.size,
-      '| totalDía=', totalCamasDia, '| totalNoche=', totalCamasNoche
+      '🤝 Anglo C2=', totalNocheAnglo,
+      '| 🌙 Noche pura=', totalNochePura,
+      '| total noche=', totalCamasNoche,
+      '| total día=', totalCamasDia
     );
 
     // ── Crear motor centralizado (Single Source of Truth) ─────────────────
@@ -394,9 +401,10 @@ export async function renderV2Detalle(container) {
       habitacionesAll, habsCOPC, habsR220,
       asigActivas, asigPre,          // mantenidos para renderLibre/renderBloqueadas
       ocupadosSet, distEmpMap, habMap, distribucion,
-      camaNocheSet, camaById,
+      camaNocheSet, camaAngloNocheSet, camaNochePuraSet, camaById,
       habAngloIds, habNocheIds,
       totalCamasDia, totalCamasNoche,
+      totalNocheAnglo, totalNochePura,
       solsMap,
       solsB2B: solsB2B || [],
     };
@@ -606,7 +614,10 @@ function renderTab(container) {
 // TAB A — TOTAL HABITACIONES
 // ══════════════════════════════════════════════════════════════════════════════
 function renderTotal() {
-  const { camas, camasCOPC, camasR220, habsCOPC, habsR220, totalCamasDia, totalCamasNoche, engine } = _data;
+  const { camas, camasCOPC, camasR220, habsCOPC, habsR220,
+          totalCamasDia, totalCamasNoche, totalNocheAnglo, totalNochePura,
+          engine } = _data;
+
 
   const total = camas.length;
   const copc = camasCOPC.length;
@@ -647,11 +658,12 @@ function renderTotal() {
 
   return `
     ${kpiRow([
-    { icon: '🛏️', val: total, lbl: 'Total Camas', color: '#6366f1' },
-    { icon: '🏢', val: camasCOPC.length, lbl: 'Camas COPC', color: '#6366f1' },
-    { icon: '🏗️', val: camasR220.length, lbl: 'Camas REF 220', color: '#0ea5e9' },
-    { icon: '☀️', val: totalCamasDia, lbl: 'Camas Día', color: '#f59e0b' },
-    { icon: '🌙', val: totalCamasNoche, lbl: 'Camas Noche', color: '#4338ca' },
+    { icon: '🛏️', val: total,           lbl: 'Total Camas',     color: '#6366f1' },
+    { icon: '🏢', val: camasCOPC.length, lbl: 'Camas COPC',      color: '#6366f1' },
+    { icon: '🏗️', val: camasR220.length, lbl: 'Camas REF 220',   color: '#0ea5e9' },
+    { icon: '☀️', val: totalCamasDia,   lbl: 'Camas Día',        color: '#f59e0b' },
+    { icon: '🤝', val: totalNocheAnglo, lbl: 'Noche Anglo',      color: '#d97706' },
+    { icon: '🌙', val: totalNochePura,  lbl: 'Noche (etiq.)',    color: '#4338ca' },
   ])}
 
     ${balHTML}
@@ -670,7 +682,8 @@ function renderTotal() {
           Día / Noche
         </div>
         ${sectorBar('☀️ Día', totalCamasDia, total, '#f59e0b', pctDia)}
-        ${sectorBar('🌙 Noche', totalCamasNoche, total, '#4338ca', pctNoche)}
+        ${sectorBar('🤝 Noche Anglo (C2)', totalNocheAnglo, total, '#d97706', Math.round(totalNocheAnglo*100/Math.max(total,1)))}
+        ${sectorBar('🌙 Noche (etiq. noche)', totalNochePura, total, '#4338ca', Math.round(totalNochePura*100/Math.max(total,1)))}
       </div>
     </div>`;
 }

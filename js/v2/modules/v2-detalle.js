@@ -118,20 +118,25 @@ export async function renderV2Detalle(container) {
       fetchAll('v2_habitaciones', 'id_custom,numero_hab'),
     ]);
 
-    // ── Fetch de distribución filtrado por IDs conocidos (igual que Infraestructura) ──
-    // MOTIVO: fetchAll sin filtro es bloqueado por RLS en Supabase.
-    // Usando .in('id_cama', camaIds) el query pasa las políticas de acceso.
+    // ── Fetch de distribución — sin filtro (política RLS permite lectura a autenticados) ──
+    // NOTA: La política 'app_puede_leer_distribucion' ya existe en Supabase.
+    // Paginamos en lotes de 1000 para cubrir toda la tabla.
     let distribucion = [];
     try {
-      const camaIdsParaDistrib = camasAll.map(c => c.id_cama);
-      const CHUNK_DIST = 500;
-      for (let ci = 0; ci < camaIdsParaDistrib.length; ci += CHUNK_DIST) {
+      let distPage = 0;
+      const DIST_PAGE = 1000;
+      while (true) {
         const { data: distBatch, error: distErr } = await supabase
           .from('v2_distribucion_camas')
           .select('id_cama,tipo')
-          .in('id_cama', camaIdsParaDistrib.slice(ci, ci + CHUNK_DIST));
-        if (distErr) { console.warn('[v2-detalle] distribución batch error:', distErr.message); break; }
+          .range(distPage * DIST_PAGE, (distPage + 1) * DIST_PAGE - 1);
+        if (distErr) {
+          console.warn('[v2-detalle] distribución error:', distErr.message);
+          break;
+        }
         distribucion = distribucion.concat(distBatch || []);
+        if (!distBatch || distBatch.length < DIST_PAGE) break;
+        distPage++;
       }
       console.log('[v2-detalle] ✅ distribucion cargada:', distribucion.length, 'registros');
     } catch(eDist) {
@@ -312,10 +317,12 @@ export async function renderV2Detalle(container) {
 
     (distribucion || []).forEach(d => {
       const tipo = (d.tipo || '').toLowerCase().trim();
-      const camRec = camaById[String(d.id_cama)];
-      if (!camRec?.habitacion_id) return;
-      if (tipo === 'anglo') habAngloIds.add(camRec.habitacion_id);
-      if (tipo === 'noche' || tipo === 'night') habNocheIds.add(camRec.habitacion_id);
+      // Derivar habitacion_id: quitar sufijo -C1 / -C2 / -C3 del id_cama
+      // Ejemplo: 'COPC000886-C2' → 'COPC000886'
+      const habId = String(d.id_cama).replace(/-C\d+$/i, '');
+      if (!habId) return;
+      if (tipo === 'anglo') habAngloIds.add(habId);
+      if (tipo === 'noche' || tipo === 'night') habNocheIds.add(habId);
     });
 
     console.log('[v2-detalle] 🏷️ Etiquetas: anglo habs=', habAngloIds.size,

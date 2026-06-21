@@ -128,7 +128,7 @@ export async function renderV2Detalle(container) {
       for (let ci = 0; ci < camaIdsParaDistrib.length; ci += CHUNK_DIST) {
         const { data: distBatch, error: distErr } = await supabase
           .from('v2_distribucion_camas')
-          .select('id_cama,tipo,etiqueta')
+          .select('id_cama,tipo')
           .in('id_cama', camaIdsParaDistrib.slice(ci, ci + CHUNK_DIST));
         if (distErr) { console.warn('[v2-detalle] distribución batch error:', distErr.message); break; }
         distribucion = distribucion.concat(distBatch || []);

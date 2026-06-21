@@ -118,29 +118,27 @@ export async function renderV2Detalle(container) {
       fetchAll('v2_habitaciones', 'id_custom,numero_hab'),
     ]);
 
-    // ── Fetch de distribución — sin filtro (política RLS permite lectura a autenticados) ──
-    // NOTA: La política 'app_puede_leer_distribucion' ya existe en Supabase.
-    // Paginamos en lotes de 1000 para cubrir toda la tabla.
+    // ── Fetch de distribución — usa fetchAll (mismo helper que otras tablas) ──
     let distribucion = [];
     try {
-      let distPage = 0;
-      const DIST_PAGE = 1000;
-      while (true) {
-        const { data: distBatch, error: distErr } = await supabase
+      distribucion = await fetchAll('v2_distribucion_camas', 'id_cama,tipo');
+      console.log('[v2-detalle] ✅ distribucion cargada (fetchAll):', distribucion.length);
+    } catch(eDist) {
+      // Fallback: query directa sin paginación
+      try {
+        const { data: distDirect, error: distDirectErr } = await supabase
           .from('v2_distribucion_camas')
           .select('id_cama,tipo')
-          .range(distPage * DIST_PAGE, (distPage + 1) * DIST_PAGE - 1);
-        if (distErr) {
-          console.warn('[v2-detalle] distribución error:', distErr.message);
-          break;
+          .limit(2000);
+        if (distDirectErr) {
+          console.warn('[v2-detalle] ❌ distribución error:', distDirectErr.message, distDirectErr.code);
+        } else {
+          distribucion = distDirect || [];
+          console.log('[v2-detalle] ✅ distribucion cargada (fallback):', distribucion.length);
         }
-        distribucion = distribucion.concat(distBatch || []);
-        if (!distBatch || distBatch.length < DIST_PAGE) break;
-        distPage++;
+      } catch(e2) {
+        console.warn('[v2-detalle] ❌ distribucion excepción:', e2.message);
       }
-      console.log('[v2-detalle] ✅ distribucion cargada:', distribucion.length, 'registros');
-    } catch(eDist) {
-      console.warn('[v2-detalle] ⚠️ Error cargando distribución:', eDist.message);
     }
 
     // ── Fetch PAGINADO de solicitudes B2B (usa fetchAll para superar límite de 1000 filas) ─

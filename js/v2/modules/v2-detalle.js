@@ -299,39 +299,71 @@ export async function renderV2Detalle(container) {
     const habsCOPC = habitacionesAll.filter(h => habIdsCOPC.has(String(h.id_custom ?? h.id ?? '')));
     const habsR220 = habitacionesAll.filter(h => habIdsR220.has(String(h.id_custom ?? h.id ?? '')));
 
-    // ── Calcular camas Noche desde distribución de camas ────────────────
-    // REGLA SISTEMA (invariante):
-    //   Hab etiqueta 'anglo': C1 (numero_cama=1) = Día, C2 (numero_cama=2) = Noche disponible para Anglo
-    //   Hab etiqueta 'noche': TODAS sus camas = Noche
+    // ── Calcular camas Noche desde fuentes reales del sistema ────────────
+    // FUENTE 1: v2_asignaciones_anglo → habitaciones modo Anglo
+    //   Regla: C1 (numero_cama=1) = Día, C2 (numero_cama=2) = Noche para Anglo
+    // FUENTE 2: v2_distribucion_camas tipo='noche' → habs de solo-noche
+    //   Regla: TODAS las camas de esas habs = Noche
     const camaById = {};
     camas.forEach(c => { camaById[String(c.id_cama)] = c; });
 
-    // Construir mapa habitacion_id → tipo de etiqueta (igual que infraestructura)
-    // 'tipo' puede ser 'anglo', 'noche', 'empresa', '4x3', etc.
-    // 'etiqueta' es el campo texto libre adicional
-    const habTagForHab = {};  // habitacion_id → tipo ('anglo' | 'noche' | ...)
-    (distribucion || []).forEach(d => {
-      const tipo = (d.tipo || d.etiqueta || '').toLowerCase().trim();
-      const camRec = camaById[String(d.id_cama)];
-      if (camRec?.habitacion_id && !habTagForHab[camRec.habitacion_id]) {
-        // Primera coincidencia por habitación (como en infraestructura)
-        habTagForHab[camRec.habitacion_id] = tipo;
+    // Obtener habitaciones Anglo activas (por numero_hab)
+    const habAngloIds = new Set();    // Set de habitacion_id (id_custom de v2_habitaciones)
+    const habNocheIds = new Set();    // Set de habitacion_id para habs tipo "noche"
+    try {
+      // Buscar habitaciones Anglo activas en v2_asignaciones_anglo
+      const { data: angloActivos } = await supabase
+        .from('v2_asignaciones_anglo')
+        .select('numero_hab')
+        .eq('activa', true);
+
+      if (angloActivos?.length) {
+        // numero_hab en asignaciones_anglo = numero_hab en v2_habitaciones
+        const angloNumHabs = new Set((angloActivos || []).map(a => String(a.numero_hab)));
+        // Mapear numero_hab → id_custom usando habMap
+        Object.entries(habMap).forEach(([idCustom, h]) => {
+          if (angloNumHabs.has(String(h.numero_hab))) {
+            habAngloIds.add(idCustom);
+          }
+        });
+        console.log('[v2-detalle] 🤝 Anglo activos:', angloActivos.length,
+          '| habs mapeadas a habAngloIds:', habAngloIds.size);
+      } else {
+        // Si no hay asignaciones activas, usar el total de habs con camas C1+C2
+        // (cualquier hab COPC con 2 camas puede ser Anglo)
+        console.log('[v2-detalle] 🤝 Sin asignaciones Anglo activas, buscando habs 2-camas COPC...');
+        // Contar habs que tienen al menos cama C1 y C2
+        const habConC2 = new Set(
+          camas.filter(c => Number(c.numero_cama) === 2 && !isR220(c.id_cama))
+               .map(c => c.habitacion_id).filter(Boolean)
+        );
+        // Cualquier hab COPC con C2 es potencialmente Anglo (C2 es siempre noche en Anglo)
+        habConC2.forEach(hid => habAngloIds.add(hid));
+        console.log('[v2-detalle] 🤝 Habs COPC con C2:', habAngloIds.size);
       }
-    });
+    } catch(eAnglo) {
+      console.warn('[v2-detalle] ⚠️ Error leyendo asignaciones Anglo:', eAnglo.message);
+    }
 
-    const habAngloIds = new Set();
-    const habNocheIds = new Set();
-    Object.entries(habTagForHab).forEach(([habId, tipo]) => {
-      if (tipo === 'anglo') habAngloIds.add(habId);
-      if (tipo === 'noche' || tipo === 'night') habNocheIds.add(habId);
-    });
+    // Habitaciones tipo 'noche' desde distribución (si hay datos)
+    if (distribucion.length > 0) {
+      (distribucion || []).forEach(d => {
+        const tipo = (d.tipo || d.etiqueta || '').toLowerCase().trim();
+        if (tipo === 'noche' || tipo === 'night') {
+          const camRec = camaById[String(d.id_cama)];
+          if (camRec?.habitacion_id) habNocheIds.add(camRec.habitacion_id);
+        }
+      });
+    }
 
-
+    // Construir camaNocheSet
     const camaNocheSet = new Set();
     camas.forEach(c => {
+      // Anglo: solo C2 (numero_cama=2) es cama noche
       if (habAngloIds.has(c.habitacion_id) && Number(c.numero_cama) === 2) {
         camaNocheSet.add(String(c.id_cama));
       }
+      // Noche puro: TODAS las camas son noche
       if (habNocheIds.has(c.habitacion_id)) {
         camaNocheSet.add(String(c.id_cama));
       }
@@ -339,28 +371,12 @@ export async function renderV2Detalle(container) {
     const totalCamasNoche = camaNocheSet.size;
     const totalCamasDia = camas.length - totalCamasNoche;
 
-    // DIAGNÓSTICO Noche/Anglo
-    console.log('[v2-detalle] 🌙 NOCHE DIAG:',
-      'distribucion.length=', (distribucion||[]).length,
-      '| habAngloIds.size=', habAngloIds.size,
-      '| habNocheIds.size=', habNocheIds.size,
-      '| camaNocheSet.size=', camaNocheSet.size,
+    console.log('[v2-detalle] 🌙 NOCHE RESULTADO:',
+      'habAngloIds=', habAngloIds.size,
+      '| habNocheIds=', habNocheIds.size,
+      '| camaNocheSet=', camaNocheSet.size,
       '| totalDía=', totalCamasDia, '| totalNoche=', totalCamasNoche
     );
-    // Muestra los tipos únicos en distribución para saber qué valores reales hay
-    const tiposUnicos = [...new Set((distribucion||[]).map(d => d.tipo))];
-    console.log('[v2-detalle] 🏷️ tipos en distribucion:', JSON.stringify(tiposUnicos));
-    const distSample = (distribucion||[]).slice(0,5).map(d => ({id_cama: d.id_cama, tipo: d.tipo, etiqueta: d.etiqueta}));
-    console.log('[v2-detalle] 🏷️ distribucion sample:', JSON.stringify(distSample));
-    if (habAngloIds.size > 0) {
-      const angloSample = [...habAngloIds].slice(0,3);
-      console.log('[v2-detalle] 🤝 habAngloIds sample:', angloSample);
-      // Buscar camas de esas habs
-      const angloC = camas.filter(c => habAngloIds.has(c.habitacion_id)).slice(0,6)
-        .map(c => ({id_cama: c.id_cama, habitacion_id: c.habitacion_id, numero_cama: c.numero_cama}));
-      console.log('[v2-detalle] 🤝 camas anglo (primeras 6):', JSON.stringify(angloC));
-    }
-
 
     // ── Crear motor centralizado (Single Source of Truth) ─────────────────
     const engine = new CampDataEngine({

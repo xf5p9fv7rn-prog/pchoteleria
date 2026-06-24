@@ -8,6 +8,8 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <title>Mi Habitación — PC Hotelería</title>
+    <!-- Supabase UMD global — sin redirects CORS, funciona en Safari y iOS -->
+    <script src="https://unpkg.com/@supabase/supabase-js@2.49.4/dist/umd/supabase.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
@@ -717,16 +719,13 @@
     <script type="module">
         import { toChileanDate } from './js/utils.js';
 
-        // ── Supabase (lazy load) ──────────────────────────────────────────────
+        // ── Supabase (usa el UMD global cargado en el <head>) ───────────────────
         let _supabase = null;
         async function getSb() {
             if (_supabase) return _supabase;
-            // Timeout de 10s para conexiones lentas (3G)
-            const mod = await Promise.race([
-                import('./js/supabaseClient.js'),
-                new Promise((_, rej) => setTimeout(() => rej(new Error('Tiempo de espera agotado. Verifica tu señal.')), 10000))
-            ]);
-            _supabase = mod.supabase;
+            const SUPA_URL = 'https://pnkajjduvadcxealodcp.supabase.co';
+            const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBua2FqamR1dmFkY3hlYWxvZGNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUyNDQ1MzIsImV4cCI6MjA5MDgyMDUzMn0.NsL16NP16MVEwTSN-1ggAtwzTA-2tDPF7Ndbcsdl-Ro';
+            _supabase = window.supabase.createClient(SUPA_URL, SUPA_KEY);
             return _supabase;
         }
 
@@ -1059,11 +1058,14 @@
 
                 // ✅ 2. Liberar la cama en v2_camas → visible inmediatamente en el mapa admin
                 //    (huesped_confirmo NO existe en v2_camas — solo en v2_asignaciones)
+                //    NO liberar si es Deshabilitada (cama C3 sin instalar físicamente)
                 if (asignacion.id_cama) {
                     await sb.from('v2_camas')
                         .update({ estado: 'Disponible' })
-                        .eq('id_cama', asignacion.id_cama);
+                        .eq('id_cama', asignacion.id_cama)
+                        .neq('estado', 'Deshabilitada');
                 }
+
 
                 document.getElementById('success-section').style.display = 'none';
                 document.getElementById('checkout-done-section').style.display = 'block';

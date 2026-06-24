@@ -13,21 +13,21 @@ let _filtro     = 'todos'; // 'todos' | 'confirmados' | 'pendientes'
 let _busqueda   = '';
 let _empresasMap = {};  // nombre_lower → { id, nombre } — relleno en cargarDatos
 
-// ── Auto Check-Out: el día antes de la fecha de salida ────────────────────────
+// ── Auto Check-Out: solo limpiar trabajadores que ya SOBREPASARON su fecha de salida
+// (fecha_salida < hoy). Los de salida=hoy se manejan en db.js a las 22:00.
 async function autoCheckoutVencidos() {
     try {
-        const hoy    = new Date().toISOString().split('T')[0];
-        const manana = new Date(Date.now() + 86400000).toISOString().split('T')[0];
+        const hoy = new Date().toISOString().split('T')[0];
 
-        // ── 1. Asignaciones reales vencidas ──────────────────────────────────
+        // ── 1. Asignaciones reales vencidas (salida < hoy = ya sobrepasaron) ────
         const { data: vencidas, error } = await supabase
             .from('v2_asignaciones')
             .select('id, id_cama, nombre_huesped, rut_huesped, fecha_salida_programada')
             .is('fecha_checkout', null)
-            .lte('fecha_salida_programada', manana)   // salida ≤ mañana
+            .lt('fecha_salida_programada', hoy)   // salida ESTRICTAMENTE anterior a hoy
             .neq('estado_asignacion', 'pre_asignado');
 
-        const ahora   = new Date().toISOString();
+        const ahora = new Date().toISOString();
         let total = 0;
 
         if (!error && vencidas?.length) {
@@ -35,40 +35,49 @@ async function autoCheckoutVencidos() {
             const camaIds = [...new Set(vencidas.map(a => a.id_cama).filter(Boolean))];
             const ruts    = [...new Set(vencidas.map(a => (a.rut_huesped||'').replace(/[\.\-]/g,'').toUpperCase()).filter(Boolean))];
 
-            // Checkout masivo en lotes de 50
+            // Checkout masivo en lotes de 50 — usar 'sin_checkout' (valor válido en constraint)
             for (let i = 0; i < ids.length; i += 50) {
-                await supabase.from('v2_asignaciones')
-                    .update({ fecha_checkout: ahora, estado_asignacion: 'checkout_auto' })
+                const { error: e } = await supabase.from('v2_asignaciones')
+                    .update({ fecha_checkout: ahora, estado_asignacion: 'sin_checkout' })
                     .in('id', ids.slice(i, i + 50));
+                if (e) console.warn('[AutoCheckout] Error checkout asignaciones:', e.message);
             }
-            // Liberar camas
-            for (let i = 0; i < camaIds.length; i += 50) {
-                await supabase.from('v2_camas')
-                    .update({ estado: 'Disponible' })
-                    .in('id_cama', camaIds.slice(i, i + 50))
-                    .neq('estado', 'Deshabilitada');
+            // Liberar camas que no tengan otra asignación activa
+            if (camaIds.length) {
+                const { data: camasConActiva } = await supabase
+                    .from('v2_asignaciones')
+                    .select('id_cama')
+                    .in('id_cama', camaIds)
+                    .is('fecha_checkout', null);
+                const protegidas = new Set((camasConActiva||[]).map(a => a.id_cama));
+                const aLiberar = camaIds.filter(id => !protegidas.has(id));
+                if (aLiberar.length) {
+                    for (let i = 0; i < aLiberar.length; i += 50) {
+                        await supabase.from('v2_camas')
+                            .update({ estado: 'Disponible' })
+                            .in('id_cama', aLiberar.slice(i, i + 50))
+                            .neq('estado', 'Deshabilitada');
+                    }
+                }
             }
-            // ✅ Marcar las solicitudes como 'finalizado' para que no vuelvan como sintéticos
+            // Marcar solicitudes como 'finalizado'
             if (ruts.length) {
                 for (let i = 0; i < ruts.length; i += 50) {
                     await supabase.from('v2_solicitudes_b2b')
                         .update({ status: 'finalizado' })
-                        .in('rut_trabajador', ruts.slice(i, i + 50).map(r => {
-                            // Tanto con guión como sin él
-                            return r;
-                        }))
+                        .in('rut_trabajador', ruts.slice(i, i + 50))
                         .in('status', ['aceptada', 'aceptada_asignada']);
                 }
             }
             total += vencidas.length;
         }
 
-        // ── 2. Solicitudes SIN asignación real cuya fecha ya venció ──────────
+        // ── 2. Solicitudes SIN asignación real cuya fecha ya venció (< hoy) ────
         const { data: solsVencidas } = await supabase
             .from('v2_solicitudes_b2b')
             .select('id, rut_trabajador, nombre_trabajador, fecha_salida')
             .in('status', ['aceptada', 'aceptada_asignada'])
-            .lte('fecha_salida', manana)   // salida ≤ mañana
+            .lt('fecha_salida', hoy)   // salida ESTRICTAMENTE anterior a hoy
             .not('fecha_salida', 'is', null);
 
         if (solsVencidas?.length) {
@@ -160,7 +169,7 @@ async function cargarDatos() {
         while (true) {
             const { data: solPage, error: solErr } = await supabase
                 .from('v2_solicitudes_b2b')
-                .select('id, nombre_trabajador, rut_trabajador, empresa, hab_solicitada, fecha_llegada, fecha_salida, status')
+                .select('id, nombre_trabajador, rut_trabajador, empresa, hab_solicitada, fecha_llegada, fecha_salida, status, motivo_pendiente')
                 .in('status', ['aceptada', 'aceptada_asignada', 'pendiente'])
                 .order('created_at', { ascending: false })
                 .range(solOffset, solOffset + SOL_PAGE - 1);
@@ -204,6 +213,9 @@ async function cargarDatos() {
                 v2_camas:                null,
                 _solicitudId:            s.id,
                 _empresaTexto:           s.empresa || '',
+                _habSolicitada:          s.hab_solicitada || null,
+                _sinCamaStatus:          s.status || 'pendiente',
+                _motivoPendiente:        s.motivo_pendiente || null,
             };
         });
 
@@ -288,28 +300,80 @@ async function _autoCrearSilencioso(pendientes) {
     let creados = 0;
     for (const sol of pendientes) {
         try {
-            // Buscar cama disponible en la hab solicitada
+            // ── NUEVA LÓGICA DE VALIDACIÓN DE CAMAS ──
             let camaId = null;
-            if (sol.hab_solicitada) {
-                const { data: habRow } = await supabase
-                    .from('v2_habitaciones').select('id_custom')
-                    .eq('numero_hab', sol.hab_solicitada).maybeSingle();
-                if (habRow?.id_custom) {
-                    const { data: camas } = await supabase
-                        .from('v2_camas').select('id_cama')
-                        .eq('habitacion_id', habRow.id_custom).eq('estado', 'Disponible').limit(1);
-                    if (camas?.length) camaId = camas[0].id_cama;
+            let motivoRechazo = null;
+
+            if (!sol.hab_solicitada) {
+                console.warn(`[AutoCrear] ⚠️ ${sol.nombre_trabajador}: sin hab_solicitada en el Excel → omitido`);
+                continue;
+            }
+
+            // 1. ¿Existe la habitación?
+            const { data: habRow } = await supabase
+                .from('v2_habitaciones').select('id_custom')
+                .eq('numero_hab', sol.hab_solicitada).maybeSingle();
+
+            if (!habRow?.id_custom) {
+                motivoRechazo = 'hab_no_existe';
+                console.warn(`[AutoCrear] 🚫 ${sol.nombre_trabajador}: hab. ${sol.hab_solicitada} NO EXISTE`);
+            } else {
+                // 2. Obtener todas las camas de la habitación (no deshabilitadas)
+                const { data: camasHab } = await supabase
+                    .from('v2_camas').select('id_cama')
+                    .eq('habitacion_id', habRow.id_custom)
+                    .neq('estado', 'Deshabilitada');
+
+                if (!camasHab || camasHab.length === 0) {
+                    motivoRechazo = 'hab_llena'; // o no tiene camas
+                } else {
+                    // 3. Buscar una cama sin conflicto de fechas
+                    const newLlegada = sol.fecha_llegada || hoy;
+                    const newSalida  = sol.fecha_salida || '2099-12-31';
+
+                    for (const c of camasHab) {
+                        // Obtener asignaciones activas/pre de esta cama
+                        const { data: asigsCama } = await supabase
+                            .from('v2_asignaciones')
+                            .select('fecha_checkin, fecha_salida_programada')
+                            .eq('id_cama', c.id_cama)
+                            .is('fecha_checkout', null);
+
+                        let conflicto = false;
+                        if (asigsCama && asigsCama.length > 0) {
+                            for (const a of asigsCama) {
+                                const existLlegada = a.fecha_checkin || '1970-01-01';
+                                const existSalida  = a.fecha_salida_programada || '2099-12-31';
+
+                                // Regla: Solape si (A.checkin < B.checkout) AND (A.checkout > B.checkin)
+                                // Mismo día permitido: si existSalida == newLlegada, no hay solape porque existSalida <= newLlegada
+                                if (existLlegada < newSalida && existSalida > newLlegada) {
+                                    conflicto = true;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (!conflicto) {
+                            camaId = c.id_cama; // ¡Cama encontrada!
+                            break;
+                        }
+                    }
+
+                    if (!camaId) {
+                        motivoRechazo = 'conflicto_fechas';
+                        console.warn(`[AutoCrear] 📅 ${sol.nombre_trabajador}: hab. ${sol.hab_solicitada} FECHAS EN CONFLICTO`);
+                    }
                 }
             }
-            // ⛔ SIN FALLBACK: si la habitación solicitada no tiene camas libres,
-            //    el trabajador queda como SIN CAMA. NO se asigna a otra habitación.
+
+            // Si hay rechazo, marcar como pendiente y guardar motivo
             if (!camaId) {
-                if (!sol.hab_solicitada) {
-                    console.warn(`[AutoCrear] ⚠️ ${sol.nombre_trabajador}: sin hab_solicitada en el Excel → omitido`);
-                } else {
-                    console.warn(`[AutoCrear] ⚠️ ${sol.nombre_trabajador}: hab. ${sol.hab_solicitada} sin camas libres → SIN CAMA`);
-                }
-                continue;  // NO asignar a otra habitación
+                motivoRechazo = motivoRechazo || 'hab_llena';
+                await supabase.from('v2_solicitudes_b2b')
+                    .update({ status: 'pendiente', motivo_pendiente: motivoRechazo })
+                    .eq('id', sol.id);
+                continue;
             }
 
 
@@ -611,18 +675,25 @@ function renderFila(a, i) {
         const fechaCi  = a.fecha_checkin  ? new Date(a.fecha_checkin).toLocaleDateString('es-CL')  : '—';
         const fechaSal = a.fecha_salida_programada ? new Date(a.fecha_salida_programada).toLocaleDateString('es-CL') : '—';
         const rowBg = i % 2 === 0 ? 'transparent' : 'rgba(249,115,22,.03)';
+        const habLabel = a._habSolicitada
+            ? `<span title="Hab. solicitada (sin cama disponible)" style="background:rgba(249,115,22,.12);color:#c2410c;font-weight:800;font-size:12px;padding:3px 10px;border-radius:8px;font-family:monospace">${a._habSolicitada}</span>`
+            : `<span style="background:rgba(100,116,139,.1);color:#64748b;font-size:11px;padding:3px 8px;border-radius:8px">Sin asignar</span>`;
+        const MOTIVOS = {
+            'hab_no_existe':    '🚫 HAB NO EXISTE',
+            'conflicto_fechas': '📅 FECHAS EN CONFLICTO',
+            'hab_llena':        '⚠️ HAB. LLENA',
+        };
+        const razon = MOTIVOS[a._motivoPendiente] || (a._habSolicitada ? '⚠️ HAB. LLENA' : '⚠️ SIN HAB');
         return `
     <tr style="border-bottom:1px solid var(--border);background:${rowBg}" id="fila-${a.id}">
       <td style="padding:9px 10px;font-weight:700;color:var(--text-primary)">${hl(a.nombre_huesped || '—', _busqueda)}</td>
       <td style="padding:9px 10px;font-family:monospace;color:var(--text-muted);font-size:11px">${hl(a.rut_huesped || '—', _busqueda)}</td>
-      <td style="padding:9px 10px;text-align:center">
-        <span style="background:rgba(249,115,22,0.12);color:#c2410c;font-weight:800;font-size:12px;padding:3px 10px;border-radius:8px;font-family:monospace">—</span>
-      </td>
+      <td style="padding:9px 10px;text-align:center">${habLabel}</td>
       <td style="padding:9px 10px;font-weight:700;color:#94a3b8">—</td>
       <td style="padding:9px 10px;text-align:center;color:var(--text-muted)">${fechaCi}</td>
       <td style="padding:9px 10px;text-align:center;color:var(--text-muted)">${fechaSal}</td>
       <td style="padding:9px 10px;text-align:center">
-        <span style="background:#fff7ed;color:#c2410c;padding:2px 10px;border-radius:99px;font-size:10px;font-weight:800">⚠️ SIN CAMA</span>
+        <span title="${a._habSolicitada ? 'La habitación solicitada no tiene camas disponibles' : 'No se indicó habitación en el Excel'}" style="background:#fff7ed;color:#c2410c;padding:2px 10px;border-radius:99px;font-size:10px;font-weight:800">${razon}</span>
       </td>
       <td style="padding:9px 10px;text-align:center">
         <span style="color:#94a3b8;font-size:10px">—</span>

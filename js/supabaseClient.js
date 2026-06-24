@@ -1,10 +1,12 @@
 // js/supabaseClient.js
-// Importamos Supabase directamente desde la nube (CDN)
-import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/+esm';
+// Supabase se carga como UMD global desde el <script> en index.html
+// NO uses import ESM aquí — evita problemas de CORS/redirects en Safari y Safari iOS
 
-const supabaseUrl = 'https://pnkajjduvadcxealodcp.supabase.co';
-// anon/public key — segura para el frontend, RLS controla el acceso por rol
+const supabaseUrl     = 'https://pnkajjduvadcxealodcp.supabase.co';
 const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBua2FqamR1dmFkY3hlYWxvZGNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUyNDQ1MzIsImV4cCI6MjA5MDgyMDUzMn0.NsL16NP16MVEwTSN-1ggAtwzTA-2tDPF7Ndbcsdl-Ro';
+
+// El script UMD de unpkg expone window.supabase con el método createClient
+const { createClient } = window.supabase;
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 

@@ -80,14 +80,16 @@ async function ejecutarGrupo(rows) {
     // ── Fecha de llegada del lote (para rotación de turno) ────────────────────
     // Si el lote llega el 06-05 y hay camas que se liberan el 06-05,
     // esas camas deben considerarse disponibles para este lote.
-    const fechaLlegadaLote = rows[0]?.fecha_llegada || new Date().toISOString().split('T')[0];
-    console.log(`[Motor] 📅 Fecha llegada del lote: ${fechaLlegadaLote}`);
+    // Usar la fecha más temprana del lote para la rotación de turno
+    const fechaLlegadaLote = [...rows].map(r => r.fecha_llegada).filter(Boolean).sort()[0]
+        || new Date().toISOString().split('T')[0];
+    console.log(`[Motor] 📅 Fecha llegada del lote (min): ${fechaLlegadaLote}`);
 
     // Cargar camas, asignaciones y habitaciones en paralelo (todo paginado)
     // Incluimos fecha_salida_programada para detectar rotaciones de turno
     const [camasData, asigActivas] = await Promise.all([
         _fetchAllPages('v2_camas', 'id_cama,habitacion_id,estado', 'id_cama'),
-        _fetchAllPages('v2_asignaciones', 'id_cama,empresa_id,fecha_salida_programada,rut_huesped', 'id_cama',
+        _fetchAllPages('v2_asignaciones', 'id_cama,empresa_id,fecha_checkin,fecha_salida_programada,rut_huesped,nombre_huesped', 'id_cama',
             q => q.is('fecha_checkout', null))
     ]);
     console.log(`[Motor] 🛏️ v2_camas: ${camasData.length} camas | v2_asignaciones activas: ${asigActivas.length}`);
@@ -230,7 +232,7 @@ async function ejecutarGrupo(rows) {
                     for (let i = 0; i < camasEnHabs.length; i += 50) {
                         const lote = camasEnHabs.slice(i, i + 50);
                         const { data: coData } = await supabase.from('v2_asignaciones')
-                            .update({ fecha_checkout: ahora, estado_asignacion: 'checkout_rotacion' })
+                            .update({ fecha_checkout: ahora, estado_asignacion: 'sin_checkout' })
                             .in('id_cama', lote)
                             .is('fecha_checkout', null)
                             .select('id_cama');
@@ -290,7 +292,10 @@ async function ejecutarGrupo(rows) {
     const habMap={};
     for(const c of camasData||[]) {
         if(!habMap[c.habitacion_id]) habMap[c.habitacion_id]={libres:[],ocupantes:[]};
-        if(c.estado==='Disponible') habMap[c.habitacion_id].libres.push(c.id_cama);
+        // Incluir camas Disponible u Ocupada: camaLibreEnFechas (date-aware) filtra correctamente
+        // si el ocupante actual se va el mismo día que llega el nuevo (a2 <= b1 → sin solapamiento).
+        // Las camas Deshabilitadas nunca se incluyen.
+        if(c.estado==='Disponible' || c.estado==='Ocupada') habMap[c.habitacion_id].libres.push(c.id_cama);
     }
     // ── Rotación de turno: camas que se liberan el mismo día que llega el lote ──
     // Si fecha_salida_programada del ocupante actual <= fechaLlegadaLote,
@@ -309,12 +314,25 @@ async function ejecutarGrupo(rows) {
             .filter(a => !camasEnRotacion.has(String(a.id_cama))) // excluir rotaciones
             .map(a => String(a.id_cama))
     );
-    // Actualizar libres: agregar camas en rotación + quitar las bloqueadas
-    for(const hab of Object.values(habMap)) {
-        // Agregar camas en rotación que pertenecen a esta habitación
-        const camasHab = (camasData||[]).filter(c => c.habitacion_id === hab._habId);
-        hab.libres = hab.libres.filter(idC => !asigSet.has(String(idC)));
+    // ── Índice date-aware: cama_id → [{checkin, salida, empresa_id, nombre}] ────────────
+    // Permite asignar la misma cama en turnos sin solapamiento de fechas (pre-asig)
+    const asigActivasMap = new Map();
+    for (const a of asigActivas || []) {
+        if (camasEnRotacion.has(String(a.id_cama))) continue; // en rotación → ya libre
+        const cid = String(a.id_cama);
+        const slots = asigActivasMap.get(cid) || [];
+        slots.push({
+            checkin:    a.fecha_checkin || '0000-01-01',
+            salida:     a.fecha_salida_programada || '9999-12-31',
+            empresa_id: a.empresa_id || null,
+            nombre:     a.nombre_huesped || '',
+        });
+        asigActivasMap.set(cid, slots);
     }
+    // ⚠️ NO pre-filtrar habMap.libres por asigSet:
+    // Se eliminan camas que aparecen como 'Disponible' en BD pero con pre-asignación
+    // futura. Al no filtrar, camaLibreEnFechas (date-aware) decide si hay solapamiento.
+    // Solo se filtran por el estado='Disponible' en la construcción del habMap (línea 293).
     // Segunda pasada: añadir las camas en rotación al habMap
     for(const c of camasData||[]) {
         if(camasEnRotacion.has(String(c.id_cama))) {
@@ -370,20 +388,70 @@ async function ejecutarGrupo(rows) {
     const rutsProcesadosLote = new Set();
 
     // Verifica si una cama está libre para el período [checkin, salida]
+    // ── Helper: fecha + 1 día (string YYYY-MM-DD) ────────────────────────────
+    // Regla de negocio: el checkout se realiza la NOCHE ANTERIOR a fecha_salida
+    // (a las 22:00 del día T-1). Por eso un nuevo huésped que llega el día T-1
+    // puede ocupar la cama: el saliente se va esa misma noche y el entrante
+    // llega durante el día. Aplicamos +1 día de gracia al b1 del incoming.
+    function _nextDay(dateStr) {
+        if (!dateStr || dateStr === '9999-12-31') return '9999-12-31';
+        const d = new Date(dateStr + 'T12:00:00Z'); // mediodia UTC evita cambio de día
+        d.setUTCDate(d.getUTCDate() + 1);
+        return d.toISOString().split('T')[0];
+    }
+
     function camaLibreEnFechas(camaId, checkin, salida) {
         const cid = String(camaId);
-        if(asigSet.has(cid)) return false; // ocupada por asignación activa pre-existente
-        const slots = camasUsadasLote.get(cid) || [];
-        if(!slots.length) return true;
         const b1 = checkin || '0000-01-01';
         const b2 = salida  || '9999-12-31';
-        // Verifica que no haya solapamiento con ningún slot existente
+        // Con la regla "checkout noche anterior": el entrante puede llegar el mismo
+        // día en que el saliente tiene fecha_salida (o incluso 1 día antes).
+        // Usamos nextDay(b1) para la comparación: a2 <= nextDay(b1) = sin solapamiento.
+        const b1next = _nextDay(b1); // b1 + 1 día de gracia por regla de checkout
+
+        // ── Verificar contra asignaciones pre-existentes (date-aware) ─────────────
+        const asigPrev = asigActivasMap.get(cid);
+        if (asigPrev) {
+            const solapado = asigPrev.some(s => {
+                const a1 = s.checkin;
+                const a2 = s.salida;
+                // Sin solapamiento si: salida_existente <= checkin_nuevo+1día
+                //   O checkin_existente >= salida_nuevo
+                return !(b2 <= a1 || a2 <= b1next); // hay solapamiento de fechas
+            });
+            if (solapado) return false;
+        }
+
+        // ── Verificar intra-lote (misma carga, distintos trabajadores) ─────────
+        const slots = camasUsadasLote.get(cid) || [];
+        if (!slots.length) return true;
         return slots.every(s => {
             const a1 = s.checkin || '0000-01-01';
             const a2 = s.salida  || '9999-12-31';
-            return b2 <= a1 || a2 <= b1; // sin solapamiento
+            return b2 <= a1 || a2 <= b1next;
         });
     }
+
+    // Verifica si la habitación ya tiene ocupantes de OTRA empresa en esas fechas
+    // Retorna el primer ocupante conflictivo (o null si no hay mezcla)
+    // Aplica la misma regla de checkout-noche-anterior: b1next = b1 + 1 día
+    function habConOtraEmpresa(habId, empresaIdCheck, checkin, salida) {
+        if (!empresaIdCheck || !habId) return null;
+        const b1 = checkin || '0000-01-01';
+        const b2 = salida  || '9999-12-31';
+        const b1next = _nextDay(b1); // mismo ajuste que en camaLibreEnFechas
+        for (const a of asigActivas || []) {
+            if (!a.empresa_id) continue;                          // sin empresa → ignorar
+            if (String(a.empresa_id) === String(empresaIdCheck)) continue; // misma empresa → OK
+            const camaDe = camaIndex[String(a.id_cama)];
+            if (camaDe?.habitacion_id !== habId) continue;        // distinta habitación
+            const a1 = a.fecha_checkin || '0000-01-01';
+            const a2 = a.fecha_salida_programada || '9999-12-31';
+            if (!(b2 <= a1 || a2 <= b1next)) return a;           // solapamiento → conflicto
+        }
+        return null;
+    }
+
     function registrarCamaUsada(camaId, checkin, salida) {
         const cid = String(camaId);
         const slots = camasUsadasLote.get(cid) || [];
@@ -420,12 +488,44 @@ async function ejecutarGrupo(rows) {
 
         if(!rut||!nombre){ fallidos.push(`RUT/nombre vacío`); continue; }
 
-        // ── ¿Este RUT ya tiene asignación activa? → NUNCA duplicar ─────────────────────
+        // ── ¿Este RUT ya tiene asignación activa? ────────────────────────────────────────
         const camaActualDelRut = rutACamaActiva[rut];
         if(camaActualDelRut) {
-            console.log(`[Motor] ⏭ ${nombre} (${rut}) ya tiene cama activa ${camaActualDelRut} — omitido (DB)`);
-            rowsActualizadas.push(row.id);
-            continue;
+            // ¿El Excel lo mueve a una habitación DIFERENTE? (caso Juanito Pérez)
+            if (habPedida) {
+                const habActualId = camaIndex[String(camaActualDelRut)]?.habitacion_id;
+                const habPedidaId = habByNumero[habPedida] || habPedida;
+                if (habActualId && habPedidaId && habActualId !== habPedidaId) {
+                    // 🔀 Cambio de habitación: hacer checkout de la cama anterior
+                    console.log(`[Motor] 🔀 ${nombre} (${rut}): cambia hab ${habActualId} → ${habPedida}. Checkout cama ${camaActualDelRut}`);
+                    const ahora = new Date().toISOString();
+                    await supabase.from('v2_asignaciones')
+                        .update({ fecha_checkout: ahora, estado_asignacion: 'sin_checkout' })
+                        .eq('id_cama', camaActualDelRut).eq('rut_huesped', rut).is('fecha_checkout', null);
+                    await supabase.from('v2_camas')
+                        .update({ estado: 'Disponible' })
+                        .eq('id_cama', camaActualDelRut).neq('estado', 'Deshabilitada');
+                    // Liberar en índices en memoria
+                    delete rutACamaActiva[rut];
+                    asigSet.delete(String(camaActualDelRut));
+                    asigActivasMap.delete(String(camaActualDelRut));
+                    const habViejaMap = habMap[habActualId];
+                    if (habViejaMap && !habViejaMap.libres.includes(camaActualDelRut)) {
+                        habViejaMap.libres.push(camaActualDelRut);
+                    }
+                    // Continuar con la asignación normal en la nueva hab ↓
+                } else {
+                    // Misma habitación (o no determinada) → no duplicar
+                    console.log(`[Motor] ⏭ ${nombre} (${rut}) ya en cama ${camaActualDelRut} — misma hab, omitido`);
+                    rowsActualizadas.push(row.id);
+                    continue;
+                }
+            } else {
+                // Sin hab_solicitada → conservar asignación actual
+                console.log(`[Motor] ⏭ ${nombre} (${rut}) ya tiene cama activa ${camaActualDelRut} — omitido (DB)`);
+                rowsActualizadas.push(row.id);
+                continue;
+            }
         }
         // ── Guardia intra-lote: mismo RUT dos veces en el Excel → skip absoluto ──
         if(rutsProcesadosLote.has(rut)) {
@@ -444,6 +544,15 @@ async function ejecutarGrupo(rows) {
             if(habIdResuelto) {
                 const habR = habMap[habIdResuelto];
                 if(habR) {
+                    // ── Verificar mezcla de empresas ───────────────────────────────────
+                    // Regla: no pueden convivir personas de diferente empresa en la misma hab
+                    const ocupanteOtraEmp = habConOtraEmpresa(habIdResuelto, empresaId, rowCheckin, rowSalida);
+                    if (ocupanteOtraEmp) {
+                        const razon = `Hab. ${habPedida} tiene ocupante de otra empresa en esas fechas: ${ocupanteOtraEmp.nombre_huesped || '(sin nombre)'}`;
+                        console.warn(`[Motor] 🚫 MEZCLA EMPRESA: ${nombre}: ${razon}`);
+                        sinAsignar.push({ nombre, rut, habPedida, razon, sugerencias: [], rowId: row.id });
+                        continue;
+                    }
                     // Buscar primera cama libre para las fechas de este trabajador
                     const camaIdx = habR.libres.findIndex(cId => camaLibreEnFechas(cId, rowCheckin, rowSalida));
                     if(camaIdx >= 0) {
@@ -497,18 +606,19 @@ async function ejecutarGrupo(rows) {
         }
         _logCount++;
 
-        // ── Sin cama en hab_pedida → DETENER, no reubicar automaticamente ─────────
-        // REGLA CRITICA: si el trabajador venia con hab_solicitada y la hab
-        //    esta llena o no existe, registrar el problema y parar aqui.
-        //    NO asignar a otra habitacion para evitar reacciones en cadena.
+        // ── Hab pedida llena → sinAsignar (HAB. LLENA) ──────────────────────────────
+        // Si después de intentar todas las camas de la hab_pedida (incluyendo
+        // las Ocupadas que se liberan ese día, via _nextDay) aún no hay cama,
+        // es que la habitación GENUINAMENTE no tiene espacio → registrar y parar.
+        // La asignación automática a OTRA hab queda fuera de la lógica de hab_pedida.
         if (!camaAsignada && habPedida) {
             const habExiste = !!habByNumero[habPedida];
             const razon = habExiste
-                ? `Hab. ${habPedida} llena o sin camas libres en las fechas solicitadas`
+                ? `Hab. ${habPedida} llena sin rotación disponible en esas fechas`
                 : `Hab. ${habPedida} no existe en el sistema`;
-            console.warn(`[Motor] DETENIDO ${nombre}: ${razon} - intervencion manual requerida`);
+            console.warn(`[Motor] ⛔ ${nombre}: ${razon}`);
             sinAsignar.push({ nombre, rut, habPedida, razon, sugerencias: [], rowId: row.id });
-            continue; // no asignar a ninguna otra hab
+            continue;
         }
 
 
@@ -595,15 +705,18 @@ async function ejecutarGrupo(rows) {
             .filter(a => camasEnRotacion.has(String(a.id_cama)))
             .map(a => a.id_cama);
         if(camasRotacionNuevas.length > 0) {
-            // Para cada cama en rotación, registrar la fecha_checkout del ocupante saliente
+            // Para cada cama en rotación, hacer checkout del ocupante saliente
+            // IMPORTANTE: usar timestamp ISO y estado 'sin_checkout' (valor válido en constraint)
+            // y excluir 'pre_asignado' del mismo lote (ya fueron asignados en este batch)
+            const ahoraRot = new Date().toISOString();
             for(const camaId of camasRotacionNuevas) {
-                const nuevaLlegada = asignaciones.find(a => a.id_cama === camaId)?.fecha_checkin || hoy;
                 const {error: errCO} = await supabase.from('v2_asignaciones')
-                    .update({ fecha_checkout: nuevaLlegada })
+                    .update({ fecha_checkout: ahoraRot, estado_asignacion: 'sin_checkout' })
                     .eq('id_cama', camaId)
-                    .is('fecha_checkout', null);
+                    .is('fecha_checkout', null)
+                    .neq('estado_asignacion', 'pre_asignado'); // no tocar pre-asignados del nuevo lote
                 if(errCO) console.warn(`[Motor] ⚠️ Checkout rotación cama ${camaId}:`, errCO.message);
-                else console.log(`[Motor] 🔄 Checkout automático cama ${camaId} → fecha ${nuevaLlegada}`);
+                else console.log(`[Motor] 🔄 Checkout rotación cama ${camaId}`);
             }
         }
 
@@ -621,13 +734,41 @@ async function ejecutarGrupo(rows) {
             const asig   = asignacionesDB[i];
             const rowId  = rowsActualizadas[i]; // id de la solicitud b2b correspondiente
 
+            // ══════════════════════════════════════════════════════════════════════
+            // 🛡️ ESCUDO ANTI-DUPLICADO: Verificación en tiempo real contra Supabase
+            // Antes de insertar, consultamos si la cama ya tiene una asignación
+            // activa con fechas que se solapan con las del trabajador nuevo.
+            // Esto protege contra: importaciones concurrentes, datos en caché
+            // desactualizados, y el bug de "camas en rotación" mal calculadas.
+            // ══════════════════════════════════════════════════════════════════════
+            const ciNuevo = asig.fecha_checkin           || '0000-01-01';
+            const csNuevo = asig.fecha_salida_programada || '9999-12-31';
+
+            const { data: conflictos } = await supabase
+                .from('v2_asignaciones')
+                .select('id, nombre_huesped, rut_huesped, fecha_checkin, fecha_salida_programada')
+                .eq('id_cama', asig.id_cama)
+                .is('fecha_checkout', null)
+                .neq('rut_huesped', asig.rut_huesped) // no contar al mismo trabajador
+                .or(`fecha_salida_programada.is.null,fecha_salida_programada.gt.${ciNuevo}`)
+                .lt('fecha_checkin', csNuevo);
+
+            if (conflictos && conflictos.length > 0) {
+                // ❌ La cama ya está ocupada en ese período — registrar como fallido
+                const ocupante = conflictos[0];
+                const msg = `[Motor] 🚫 BLOQUEADO: cama ${asig.id_cama} ya ocupada por ${ocupante.nombre_huesped} (${ocupante.fecha_checkin}→${ocupante.fecha_salida_programada}) al intentar asignar a ${asig.nombre_huesped}`;
+                console.warn(msg);
+                fallidos.push(`${asig.nombre_huesped}: cama ${asig.id_cama} ya ocupada por ${ocupante.nombre_huesped}`);
+                continue; // saltar INSERT — no duplicar
+            }
+
             const { error: errIns } = await supabase.from('v2_asignaciones').insert(asig);
 
             if (!errIns) {
                 // INSERT exitoso
                 rowsInsertados.push(rowId);
             } else if (errIns.code === '23505') {
-                // Conflicto de clave única — actualizar asignación existente
+                // Conflicto de clave única DB — por seguridad intentar actualizar
                 const { error: errUpd } = await supabase.from('v2_asignaciones')
                     .update({
                         rut_huesped:             asig.rut_huesped,
@@ -639,6 +780,7 @@ async function ejecutarGrupo(rows) {
                         estado_asignacion:       asig.estado_asignacion,
                     })
                     .eq('id_cama', asig.id_cama)
+                    .eq('rut_huesped', asig.rut_huesped) // solo actualizar la del MISMO trabajador
                     .is('fecha_checkout', null);
                 if (!errUpd) rowsInsertados.push(rowId);
                 else console.warn(`[Motor] ⚠️ No se pudo actualizar asig existente cama ${asig.id_cama}:`, errUpd.message);
@@ -852,6 +994,96 @@ window._solReintentarUno = async function(id) {
     if(error){ toast('❌ Error: '+error.message,'error'); return; }
     toast('🔄 Movido a pendientes');
     window._renderV2Solicitudes?.(); refreshBadge();
+};
+
+// ── Reasignar TODOS los que están sin cama (⚠️ HAB. LLENA) ──────────────────
+// Busca todas las solicitudes con status='aceptada' (sinAsignar), las resetea
+// a 'pendiente' y ejecuta el motor por empresa para intentar asignarlas.
+window._reasignarTodosHabLlena = async function() {
+    const overlay = document.createElement('div');
+    overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:99999;display:flex;align-items:center;justify-content:center';
+    overlay.innerHTML=`<div style="background:#fff;border-radius:16px;padding:32px 40px;text-align:center;min-width:320px;max-width:480px">
+        <div style="font-size:40px;margin-bottom:12px">🔄</div>
+        <div style="font-weight:800;font-size:18px;margin-bottom:8px">Reasignando pendientes…</div>
+        <div id="_reasig_status" style="font-size:13px;color:#64748b;margin-bottom:4px">Cargando solicitudes sin cama…</div>
+        <div id="_reasig_progress" style="margin-top:16px;height:6px;background:#e2e8f0;border-radius:99px"><div id="_reasig_bar" style="height:6px;background:#6366f1;border-radius:99px;width:0%;transition:width .4s"></div></div>
+    </div>`;
+    document.body.appendChild(overlay);
+    const setStatus = (txt) => { const el=overlay.querySelector('#_reasig_status'); if(el) el.textContent=txt; };
+    const setBar = (pct) => { const el=overlay.querySelector('#_reasig_bar'); if(el) el.style.width=pct+'%'; };
+
+    try {
+        // 1. Obtener todas las solicitudes sin cama (aceptada = sin_asignar)
+        let sinCama = [], page = 0;
+        while(true) {
+            const {data, error} = await supabase.from('v2_solicitudes_b2b')
+                .select('*')
+                .eq('status','aceptada')
+                .range(page*1000, page*1000+999);
+            if(error) throw new Error(error.message);
+            if(!data?.length) break;
+            sinCama = sinCama.concat(data);
+            if(data.length < 1000) break;
+            page++;
+        }
+
+        if(!sinCama.length) {
+            overlay.remove();
+            toast('✅ No hay trabajadores sin cama pendientes','success');
+            return;
+        }
+
+        setStatus(`Encontrados ${sinCama.length} sin cama. Reseteando…`);
+
+        // 2. Resetear todos a pendiente
+        const ids = sinCama.map(r=>r.id);
+        for(let i=0; i<ids.length; i+=500) {
+            await supabase.from('v2_solicitudes_b2b').update({status:'pendiente'}).in('id', ids.slice(i,i+500));
+        }
+
+        // 3. Agrupar por empresa
+        const porEmpresa = {};
+        for(const r of sinCama) {
+            const e = r.empresa || 'SIN_EMPRESA';
+            if(!porEmpresa[e]) porEmpresa[e] = [];
+            porEmpresa[e].push(r);
+        }
+        const empresas = Object.keys(porEmpresa);
+        let totalAsignados = 0, totalFallidos = [];
+
+        // 4. Ejecutar motor por empresa
+        for(let i=0; i<empresas.length; i++) {
+            const emp = empresas[i];
+            const rows = porEmpresa[emp];
+            setStatus(`[${i+1}/${empresas.length}] ${emp}: ${rows.length} trabajadores…`);
+            setBar(Math.round((i/empresas.length)*100));
+            try {
+                const res = await ejecutarGrupo(rows);
+                if(res.ok) {
+                    totalAsignados += res.asignados || 0;
+                    totalFallidos = totalFallidos.concat(res.fallidos || []);
+                    totalFallidos = totalFallidos.concat((res.sinAsignar||[]).map(s=>s.nombre||s.rut||'?'));
+                }
+            } catch(e) {
+                console.warn('[Reasignar] Error en empresa '+emp+':', e.message);
+            }
+        }
+
+        setBar(100);
+        overlay.remove();
+
+        const fallMsg = totalFallidos.length > 0
+            ? `\n⚠️ Aún sin cama (${totalFallidos.length}):\n${totalFallidos.slice(0,10).join('\n')}${totalFallidos.length>10?'\n…':''}` : '';
+
+        toast(`✅ Reasignación completa: ${totalAsignados} asignados de ${sinCama.length}`,'success');
+        if(fallMsg) alert(`Resultado reasignación masiva:\n✅ ${totalAsignados} asignados${fallMsg}`);
+        window._renderV2Solicitudes?.();
+        refreshBadge();
+
+    } catch(e) {
+        overlay.remove();
+        toast('🚨 Error: '+e.message,'error');
+    }
 };
 
 
@@ -1286,29 +1518,50 @@ window._solSetHabManual = async function(solicitudId, gKey, numHab) {
             .update({ hab_solicitada: numHab })
             .eq('id', solicitudId);
         if (error) throw new Error(error.message);
-        // Refrescar la vista de solicitudes pendientes
         window._renderV2Solicitudes?.();
     } catch(e) {
         if (inp) { inp.disabled = false; inp.style.opacity = '1'; }
-        alert('❌ Error al guardar habitación: ' + e.message);
+        alert('\u274c Error al guardar habitaci\u00f3n: ' + e.message);
     }
 };
 
-// ── Borrar SOLO la lista de solicitudes (sin tocar asignaciones/camas) ──────
-// ── _solBorrarListaEmpresa: alias de compatibilidad → usa _solBorrarLista ─────
+/**
+ * _limpiarCamasPerdidas(camaIds)
+ * Dado un array de IDs de cama liberadas, elimina sus registros en v2_camas_perdidas.
+ * Se llama siempre que se borra una lista, un trabajador o una asignaci\u00f3n.
+ */
+async function _limpiarCamasPerdidas(camaIds) {
+    if (!camaIds?.length) return;
+    try {
+        const { data: camasData } = await supabase
+            .from('v2_camas')
+            .select('id_cama,habitacion_id')
+            .in('id_cama', camaIds);
+        const habIds = [...new Set((camasData || []).map(c => c.habitacion_id).filter(Boolean))];
+        if (!habIds.length) return;
+        const { error } = await supabase
+            .from('v2_camas_perdidas')
+            .delete()
+            .in('habitacion_id', habIds);
+        if (error) console.warn('[CP] Error limpiando v2_camas_perdidas:', error.message);
+        else console.log(`[CP] \u2705 v2_camas_perdidas limpiado: ${habIds.length} habitaciones`);
+    } catch(e) {
+        console.warn('[CP] Excepci\u00f3n en _limpiarCamasPerdidas:', e.message);
+    }
+}
+
+// \u2500\u2500 Borrar lista de solicitudes (\u00e1lias de compatibilidad) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
 window._solBorrarListaEmpresa = function(empresa) {
-    // Busca el gKey cuya metadata tenga esa empresa
     const meta = window._gruposMetadata || {};
     const key = Object.keys(meta).find(k => meta[k].empresa === empresa);
     if(key != null) { window._solBorrarLista(parseInt(key)); }
-    else { toast('⚠️ Recarga la página antes de borrar', 'warn'); }
+    else { toast('\u26a0\ufe0f Recarga la p\u00e1gina antes de borrar', 'warn'); }
 };
 
 /**
  * _solBorrarLista(gKey)
- * Borra ÚNICAMENTE los registros de la lista seleccionada por sus IDs.
- * NO filtra por empresa — garantiza que otras listas de la misma empresa
- * no sean afectadas aunque tengan el mismo contrato.
+ * Borra \u00danICAMENTE los registros de la lista seleccionada.
+ * Libera camas, hace checkout, limpia v2_camas_perdidas y borra solicitudes.
  */
 window._solBorrarLista = async function(gKey) {
     const data = window._gruposData[gKey];
@@ -1316,27 +1569,26 @@ window._solBorrarLista = async function(gKey) {
     const meta = (window._gruposMetadata || {})[gKey] || {};
     const empresa = meta.empresa || rows[0]?.empresa || 'esta empresa';
     const ids = (meta.ids?.length ? meta.ids : rows.map(r => r.id)).filter(Boolean);
-    const ruts = [...new Set(rows.map(r => r.rut_trabajador).filter(Boolean))];
 
     if(!ids.length) { toast('No hay registros en esta lista', 'warn'); return; }
     if(!await _solConfirm(
-        `¿Borrar esta lista de ${ids.length} solicitudes de "${empresa}"?\n\n` +
-        `Período: ${meta.fechaIn||'—'} → ${meta.fechaOut||'—'}\n` +
-        `N° Contrato: ${meta.contrato||'—'}\n\n` +
-        `• Se hará Check-Out de los trabajadores asignados\n` +
-        `• Las camas quedarán libres\n` +
-        `• Desaparecerán de Control de Asistencia e Infraestructura\n` +
-        `Solo se elimina ESTA lista — otras listas no se ven afectadas.`,
-        {confirmText:'🗑️ Borrar y liberar', danger:true}
+        `\u00bfBorrar esta lista de ${ids.length} solicitudes de "${empresa}"?\n\n` +
+        `Per\u00edodo: ${meta.fechaIn||'\u2014'} \u2192 ${meta.fechaOut||'\u2014'}\n` +
+        `N\u00b0 Contrato: ${meta.contrato||'\u2014'}\n\n` +
+        `\u2022 Se har\u00e1 Check-Out de los trabajadores asignados\n` +
+        `\u2022 Las camas quedar\u00e1n libres\n` +
+        `\u2022 Desaparecer\u00e1n de Control de Asistencia e Infraestructura\n` +
+        `Solo se elimina ESTA lista \u2014 otras listas no se ven afectadas.`,
+        {confirmText:'\ud83d\uddd1\ufe0f Borrar y liberar', danger:true}
     )) return;
 
-    // ── Overlay de progreso ────────────────────────────────────────────────────
+    // \u2500\u2500 Overlay de progreso \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
     const overlay = document.createElement('div');
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:99999;display:flex;align-items:center;justify-content:center';
     overlay.innerHTML = `<div style="background:#fff;border-radius:20px;padding:32px 40px;text-align:center;min-width:340px">
-        <div style="font-size:36px;margin-bottom:10px">🗑️</div>
+        <div style="font-size:36px;margin-bottom:10px">\ud83d\uddd1\ufe0f</div>
         <div style="font-weight:900;font-size:15px;margin-bottom:6px">Borrando lista: ${empresa}</div>
-        <div id="_bl_txt" style="font-size:13px;color:#64748b;min-height:20px;margin-bottom:12px">Preparando…</div>
+        <div id="_bl_txt" style="font-size:13px;color:#64748b;min-height:20px;margin-bottom:12px">Preparando\u2026</div>
         <div style="height:7px;background:#f1f5f9;border-radius:99px;overflow:hidden">
             <div id="_bl_prog" style="height:100%;width:0%;background:linear-gradient(90deg,#b91c1c,#ef4444);transition:width .4s;border-radius:99px"></div>
         </div></div>`;
@@ -1349,35 +1601,50 @@ window._solBorrarLista = async function(gKey) {
     };
 
     try {
-        // PASO 1: Obtener detalles de las solicitudes y empresa
-        const {data:sols} = await supabase.from('v2_solicitudes_b2b').select('rut_trabajador,nombre_trabajador').in('id', ids);
-        const rutsNorm = [...new Set((sols||[]).map(s=>String(s.rut_trabajador||'').replace(/[.\-\s]/g,'').toUpperCase().slice(0,12)).filter(Boolean))];
-        const nombresNorm = [...new Set((sols||[]).map(s=>s.nombre_trabajador).filter(Boolean))];
-        
+        // PASO 1: Obtener detalles de solicitudes, empresa y contrato
+        const {data:sols} = await supabase
+            .from('v2_solicitudes_b2b')
+            .select('rut_trabajador,nombre_trabajador,n_contrato')
+            .in('id', ids);
+        const rutsNorm    = [...new Set((sols||[]).map(s => String(s.rut_trabajador||'').replace(/[\.\-\s]/g,'').toUpperCase().slice(0,12)).filter(Boolean))];
+        const nombresNorm = [...new Set((sols||[]).map(s => s.nombre_trabajador).filter(Boolean))];
+        const contratos   = [...new Set((sols||[]).map(s => String(s.n_contrato||meta.contrato||'')).filter(Boolean))];
+
         const {data:empRows} = await supabase.from('v2_empresas').select('id').ilike('nombre', empresa).limit(1);
         const empId = empRows?.[0]?.id;
 
-        setStep(`Buscando asignaciones activas de la lista…`, 20);
+        setStep('Buscando asignaciones activas\u2026', 20);
         let asigIds = [], camaIds = [];
-        
-        // PASO 2: Buscar asignaciones activas (fecha_checkout=null) por RUT o Nombre + Empresa
-        if(empId && (rutsNorm.length > 0 || nombresNorm.length > 0)) {
-            let query = supabase.from('v2_asignaciones').select('id,id_cama').is('fecha_checkout', null).eq('empresa_id', empId);
-            
-            // Construir filtro OR para RUT o Nombres
-            let orFiltros = [];
-            if (rutsNorm.length > 0) orFiltros.push(`rut_huesped.in.(${rutsNorm.join(',')})`);
-            if (nombresNorm.length > 0) orFiltros.push(`nombre_huesped.in.(${nombresNorm.map(n=>`"${n}"`).join(',')})`);
-            
-            query = query.or(orFiltros.join(','));
-            
-            const {data:asigs} = await query;
-            asigIds  = (asigs||[]).map(a => a.id);
-            camaIds  = [...new Set((asigs||[]).map(a => a.id_cama).filter(Boolean))];
+
+        // PASO 2: 3 estrategias en paralelo \u2014 RUT + Nombre + N\u00b0 Contrato
+        if (empId) {
+            const queries = [];
+            if (rutsNorm.length > 0 || nombresNorm.length > 0) {
+                let q = supabase.from('v2_asignaciones').select('id,id_cama').is('fecha_checkout', null).eq('empresa_id', empId);
+                let orFiltros = [];
+                if (rutsNorm.length > 0)    orFiltros.push(`rut_huesped.in.(${rutsNorm.join(',')})`);
+                if (nombresNorm.length > 0) orFiltros.push(`nombre_huesped.in.(${nombresNorm.map(n=>`"${n}"`).join(',')})`);
+                queries.push(q.or(orFiltros.join(',')));
+            }
+            if (contratos.length > 0) {
+                queries.push(
+                    supabase.from('v2_asignaciones')
+                        .select('id,id_cama')
+                        .is('fecha_checkout', null)
+                        .in('numero_contrato', contratos)
+                );
+            }
+            const results = await Promise.all(queries);
+            const asigMap = {};
+            results.flatMap(r => r.data || []).forEach(a => { asigMap[a.id] = a; });
+            const dedupAsigs = Object.values(asigMap);
+            asigIds = dedupAsigs.map(a => a.id);
+            camaIds = [...new Set(dedupAsigs.map(a => a.id_cama).filter(Boolean))];
+            console.log(`[BorrarLista] ${asigIds.length} asignaciones / ${camaIds.length} camas`);
         }
 
-        // PASO 3: Liberar camas INMEDIATAMENTE
-        setStep(`Liberando ${camaIds.length} camas…`, 45);
+        // PASO 3: Liberar camas
+        setStep(`Liberando ${camaIds.length} camas\u2026`, 45);
         if(camaIds.length) {
             for(let i = 0; i < camaIds.length; i += 50) {
                 await supabase.from('v2_camas')
@@ -1387,8 +1654,12 @@ window._solBorrarLista = async function(gKey) {
             }
         }
 
-        // PASO 4: Eliminar asignaciones por completo (DELETE)
-        setStep(`Borrando ${asigIds.length} asignaciones…`, 65);
+        // PASO 3.5: Limpiar v2_camas_perdidas de las habitaciones liberadas
+        setStep('Limpiando camas perdidas\u2026', 55);
+        await _limpiarCamasPerdidas(camaIds);
+
+        // PASO 4: Eliminar asignaciones
+        setStep(`Borrando ${asigIds.length} asignaciones\u2026`, 65);
         if(asigIds.length) {
             for(let i = 0; i < asigIds.length; i += 50) {
                 await supabase.from('v2_asignaciones')
@@ -1398,26 +1669,25 @@ window._solBorrarLista = async function(gKey) {
         }
 
         // PASO 5: Eliminar solicitudes de B2B
-        setStep('Eliminando solicitudes…', 85);
+        setStep('Eliminando solicitudes\u2026', 85);
         const {error} = await supabase.from('v2_solicitudes_b2b').delete().in('id', ids);
         if(error) throw new Error(error.message);
 
-        setStep('✅ Lista borrada', 100);
+        setStep('\u2705 Lista borrada', 100);
         await new Promise(r => setTimeout(r, 700));
         overlay.remove();
         toast(
-            `✅ Lista de "${empresa}" borrada · ${asigIds.length} checkout · ${camaIds.length} camas liberadas`,
+            `\u2705 Lista de "${empresa}" borrada \u00b7 ${asigIds.length} checkout \u00b7 ${camaIds.length} camas liberadas`,
             'success'
         );
         window._renderV2Solicitudes?.();
         refreshBadge();
     } catch(e) {
         overlay.remove();
-        alert('❌ Error al borrar lista:\n'+e.message);
+        alert('\u274c Error al borrar lista:\n'+e.message);
     }
 };
 
-// ── Borrar UN SOLO trabajador de la lista (checkout + liberar cama + eliminar solicitud) ──
 window._solBorrarUno = async function(solicitudId, rutB64, nombreB64, gKey) {
     const rut    = decodeURIComponent(escape(atob(rutB64)));
     const nombre = decodeURIComponent(escape(atob(nombreB64)));
@@ -1469,6 +1739,8 @@ window._solBorrarUno = async function(solicitudId, rutB64, nombreB64, gKey) {
                 .update({ estado: 'Disponible' })
                 .in('id_cama', camaIds)
                 .neq('estado', 'Deshabilitada');
+            // Limpiar v2_camas_perdidas para esas habitaciones
+            await _limpiarCamasPerdidas(camaIds);
         }
 
         // 3. Eliminar asignaciones por completo (DELETE)
@@ -1574,27 +1846,180 @@ export async function renderV2Solicitudes(container) {
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:24px">
             <div>
                 <h2 style="font-size:22px;font-weight:800;margin:0">🔔 Solicitudes B2B</h2>
-                <p style="font-size:13px;color:#64748b;margin:4px 0 0">Agrupadas por empresa · Motor V2</p>
+                <p style="font-size:13px;color:#64748b;margin:4px 0 0">Agrupadas por empresa &middot; Motor V2</p>
             </div>
-            <button onclick="window._renderV2Solicitudes()" style="padding:9px 18px;border:none;border-radius:10px;background:#c0392b;color:#fff;font-weight:700;font-size:13px;cursor:pointer">🔄 Actualizar</button>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+                <button onclick="window._reasignarTodosHabLlena()" style="padding:9px 18px;border:none;border-radius:10px;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;font-weight:700;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:6px;box-shadow:0 2px 8px rgba(99,102,241,.35)">🔄 Reasignar Todos los Pendientes</button>
+                <button onclick="window._solEliminarPorRutModal()" style="padding:9px 18px;border:none;border-radius:10px;background:#7c3aed;color:#fff;font-weight:700;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:6px">🗑️ Eliminar por RUT</button>
+                <button onclick="window._renderV2Solicitudes()" style="padding:9px 18px;border:none;border-radius:10px;background:#c0392b;color:#fff;font-weight:700;font-size:13px;cursor:pointer">🔄 Actualizar</button>
+            </div>
         </div>
         <div id="sol-kpis" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px;margin-bottom:24px"></div>
         <div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap">
             <button class="sol-tab active" id="tab-pending" onclick="window._solTab('pending')">⏳ Pendientes <span id="tab-cnt"></span></button>
-            <button id="tab-conhab"
+            <button class="sol-tab" id="tab-conhab"
                 style="padding:10px 22px;border:none;border-radius:10px;font-weight:800;font-size:13px;cursor:pointer;background:linear-gradient(135deg,#15803d,#22c55e);color:#fff;box-shadow:0 2px 10px rgba(21,128,61,.35);display:flex;align-items:center;gap:6px"
-                onclick="window._solCargarExcelConHab()">📂 Cargas con Habitación
+                onclick="window._solTab('conhab')">📋 Cargas con Habitación
             </button>
             <button class="sol-tab" id="tab-history" onclick="window._solTab('history')">📋 Historial</button>
         </div>
-        <!-- Input oculto para Excel de habitaciones -->
+        <!-- Input oculto para Excel de habitaciones (legado) -->
         <input type="file" id="_sol-excel-conhab" accept=".xlsx,.xls,.csv" style="display:none"
                onchange="window._solProcesarExcelConHab(this)">
         <div id="sol-body"></div>
     </div>`;
 
+
     window._renderV2Solicitudes = () => renderV2Solicitudes(container);
     window._solTab = t => renderTab(t);
+
+    // ── Eliminar persona por RUT (libera cama + checkout) ─────────────────────
+    window._solEliminarPorRutModal = function() {
+        // Eliminar modal anterior si existe
+        document.getElementById('_elim-rut-overlay')?.remove();
+
+        const overlay = document.createElement('div');
+        overlay.id = '_elim-rut-overlay';
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px';
+        overlay.innerHTML = `
+        <div style="background:#fff;border-radius:20px;padding:32px 36px;max-width:480px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.35);position:relative">
+            <button onclick="document.getElementById('_elim-rut-overlay').remove()" style="position:absolute;top:14px;right:16px;background:none;border:none;font-size:20px;cursor:pointer;color:#64748b">✕</button>
+            <div style="font-size:28px;margin-bottom:8px">🗑️</div>
+            <h3 style="margin:0 0 6px;font-size:18px;font-weight:800;color:#1e293b">Eliminar persona por RUT</h3>
+            <p style="margin:0 0 20px;font-size:13px;color:#64748b">Busca por RUT a una persona activa o pre-asignada para liberarla y liberar su cama.</p>
+
+            <div style="display:flex;gap:8px;margin-bottom:16px">
+                <input id="_elim-rut-input" type="text" placeholder="Ej: 12.345.678-9"
+                    onkeydown="if(event.key==='Enter') window._solEliminarBuscar()"
+                    style="flex:1;padding:10px 14px;border:2px solid #e2e8f0;border-radius:10px;font-size:14px;outline:none;font-family:monospace"
+                    oninput="document.getElementById('_elim-result').innerHTML=''"
+                >
+                <button onclick="window._solEliminarBuscar()" style="padding:10px 18px;border:none;border-radius:10px;background:#3b82f6;color:#fff;font-weight:700;font-size:13px;cursor:pointer">🔍 Buscar</button>
+            </div>
+
+            <div id="_elim-result"></div>
+        </div>`;
+        document.body.appendChild(overlay);
+        setTimeout(() => document.getElementById('_elim-rut-input')?.focus(), 100);
+    };
+
+    window._solEliminarBuscar = async function() {
+        const inp = document.getElementById('_elim-rut-input');
+        if (!inp) return;
+        const rawRut = inp.value.trim();
+        const rutNorm = rawRut.replace(/[.\-\s]/g,'').toUpperCase();
+        if (!rutNorm || rutNorm.length < 4) {
+            document.getElementById('_elim-result').innerHTML = `<div style="color:#ef4444;font-size:13px;font-weight:600">⚠️ Ingresa un RUT válido</div>`;
+            return;
+        }
+
+        const resDiv = document.getElementById('_elim-result');
+        resDiv.innerHTML = `<div style="color:#64748b;font-size:13px;padding:12px 0">⏳ Buscando…</div>`;
+
+        try {
+            // Buscar asignación activa o pre-asignada
+            const { data: asigs, error } = await supabase
+                .from('v2_asignaciones')
+                .select('id, nombre_huesped, rut_huesped, id_cama, empresa_id, fecha_checkin, fecha_salida_programada, estado_asignacion, v2_camas(v2_habitaciones(numero_hab)), v2_empresas(nombre)')
+                .eq('rut_huesped', rutNorm)
+                .is('fecha_checkout', null)
+                .in('estado_asignacion', ['activa', 'pre_asignado']);
+
+            if (error) throw error;
+
+            if (!asigs || asigs.length === 0) {
+                resDiv.innerHTML = `
+                <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:12px;padding:14px 16px;font-size:13px;color:#c2410c">
+                    <b>⚠️ No encontrado</b><br>No hay asignación activa o pre-asignada para el RUT <code>${rawRut}</code>.
+                </div>`;
+                return;
+            }
+
+            const a = asigs[0];
+            const hab     = a.v2_camas?.v2_habitaciones?.numero_hab || '—';
+            const empresa = a.v2_empresas?.nombre || '—';
+            const ci  = a.fecha_checkin ? new Date(a.fecha_checkin).toLocaleDateString('es-CL') : '—';
+            const sal = a.fecha_salida_programada ? new Date(a.fecha_salida_programada).toLocaleDateString('es-CL') : '—';
+            const estadoBadge = a.estado_asignacion === 'pre_asignado'
+                ? `<span style="background:#ede9fe;color:#6d28d9;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:700">PRE-ASIGNADO</span>`
+                : `<span style="background:#dcfce7;color:#15803d;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:700">ACTIVO</span>`;
+
+            const nombreSeguro = (a.nombre_huesped||'').replace(/['"`<>]/g,' ').trim();
+
+            resDiv.innerHTML = `
+            <div style="background:#f8fafc;border:1.5px solid #e2e8f0;border-radius:14px;padding:16px 18px;margin-bottom:14px">
+                <div style="font-size:16px;font-weight:800;color:#1e293b;margin-bottom:4px">${a.nombre_huesped}</div>
+                <div style="font-size:12px;color:#64748b;font-family:monospace;margin-bottom:10px">${a.rut_huesped}</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px">
+                    <div><span style="color:#94a3b8">Empresa:</span> <b>${empresa}</b></div>
+                    <div><span style="color:#94a3b8">Estado:</span> ${estadoBadge}</div>
+                    <div><span style="color:#94a3b8">Habitación:</span> <b style="color:#059669">${hab}</b></div>
+                    <div><span style="color:#94a3b8">Cama ID:</span> <code style="font-size:11px">${a.id_cama}</code></div>
+                    <div><span style="color:#94a3b8">Check-in:</span> <b>${ci}</b></div>
+                    <div><span style="color:#94a3b8">Salida:</span> <b>${sal}</b></div>
+                </div>
+            </div>
+            <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:10px 14px;font-size:12px;color:#b91c1c;margin-bottom:14px">
+                ⚠️ Al confirmar: se hará checkout de esta persona, se liberará la cama <b>${hab}</b> y la solicitud quedará marcada como finalizada.
+            </div>
+            <button onclick="window._solEliminarConfirmar('${a.id}','${a.id_cama}','${a.rut_huesped}','${nombreSeguro}')"
+                style="width:100%;padding:12px;border:none;border-radius:12px;background:linear-gradient(135deg,#dc2626,#ef4444);color:#fff;font-weight:800;font-size:14px;cursor:pointer">
+                🗑️ Confirmar eliminación
+            </button>`;
+
+        } catch(e) {
+            resDiv.innerHTML = `<div style="color:#ef4444;font-size:13px">❌ Error: ${e.message}</div>`;
+        }
+    };
+
+    window._solEliminarConfirmar = async function(asigId, camaId, rut, nombre) {
+        const btn = document.querySelector('#_elim-result button');
+        if (btn) { btn.disabled = true; btn.textContent = '⏳ Procesando…'; }
+
+        try {
+            const ahora = new Date().toISOString();
+
+            // 1. Checkout de la asignación
+            const { error: e1 } = await supabase.from('v2_asignaciones')
+                .update({ fecha_checkout: ahora, estado_asignacion: 'sin_checkout' })
+                .eq('id', asigId).is('fecha_checkout', null);
+            if (e1) throw new Error('Checkout: ' + e1.message);
+
+            // 2. Liberar la cama
+            const { error: e2 } = await supabase.from('v2_camas')
+                .update({ estado: 'Disponible' })
+                .eq('id_cama', camaId).neq('estado', 'Deshabilitada');
+            if (e2) throw new Error('Cama: ' + e2.message);
+
+            // 3. Marcar solicitud como finalizada
+            const rutNorm = rut.replace(/[.\-\s]/g,'').toUpperCase();
+            await supabase.from('v2_solicitudes_b2b')
+                .update({ status: 'finalizado' })
+                .eq('rut_trabajador', rutNorm)
+                .in('status', ['aceptada', 'aceptada_asignada', 'pendiente']);
+
+            // Éxito
+            document.getElementById('_elim-result').innerHTML = `
+            <div style="background:#f0fdf4;border:1.5px solid #86efac;border-radius:12px;padding:16px;text-align:center">
+                <div style="font-size:28px;margin-bottom:8px">✅</div>
+                <div style="font-weight:800;font-size:15px;color:#15803d;margin-bottom:4px">${nombre} eliminado</div>
+                <div style="font-size:12px;color:#16a34a">Cama liberada · Solicitud finalizada</div>
+            </div>
+            <button onclick="document.getElementById('_elim-rut-overlay').remove();window._renderV2Solicitudes();" style="width:100%;margin-top:12px;padding:10px;border:none;border-radius:10px;background:#e2e8f0;color:#1e293b;font-weight:700;font-size:13px;cursor:pointer">Cerrar y actualizar</button>`;
+
+            await Promise.resolve().then(() => {
+                try {
+                    // logAudit opcional — puede no estar disponible en este módulo
+                    if (typeof logAudit === 'function') logAudit('ELIMINAR_POR_RUT', `Checkout manual: ${nombre} (${rut}) liberado`, { asigId, camaId, rut });
+                } catch(_) {}
+            });
+
+        } catch(e) {
+            const resDiv = document.getElementById('_elim-result');
+            if (resDiv) resDiv.innerHTML += `<div style="color:#ef4444;font-size:13px;margin-top:8px">❌ Error: ${e.message}</div>`;
+            if (btn) { btn.disabled = false; btn.textContent = '🗑️ Confirmar eliminación'; }
+        }
+    };
 
     // ── Helpers de selección por checkboxes ───────────────────────────────────
     window._solToggleAll = (gKey, checked) => {
@@ -1928,10 +2353,9 @@ export async function renderV2Solicitudes(container) {
     };
     window._solRechazarGrupo = ids => rechazarGrupo(ids);
 
-    // ── Botón "Cargas con Habitación" ───────────────────────────────────
+    // ── Botón "Cargas con Habitación" → abre Panel de Dotación embebido ────
     window._solCargarExcelConHab = function() {
-        const inp = document.getElementById('_sol-excel-conhab');
-        if(inp) { inp.value = ''; inp.click(); }
+        window._solTab('conhab');
     };
 
     window._solProcesarExcelConHab = async function(inputEl) {
@@ -2022,6 +2446,8 @@ export async function renderV2Solicitudes(container) {
             const cRut = fc('rut','run','dni','cedula','identificacion','id trabajador','pt','employee','empid','cod trab','num trab','id trab','nro trab','numero trab','ut','folio','nro trabajador','num trabajador');
             // Empresa
             const cEmp = fc('empresa','company','contratista','razon social','razon_social','cliente');
+            // Superintendencia — alias múltiple para compatibilidad con plantillas antiguas y nuevas
+            const cSuperint = fc('superintendencia','super intendencia','suptcia','supintend','superint');
             // Gerencia
             const cGer = fc('gerencia','area','unidad','departamento','gcia');
             // Contrato
@@ -2133,14 +2559,26 @@ export async function renderV2Solicitudes(container) {
                 // como regla de negocio obligatoria.
                 const empresaDesdeArchivo = file.name.replace(/\.[^/.]+$/, "").trim();
 
+                // ── Turno de sistema (columna J: 7x7, 4x3, 14x14…) ──────────────
+                // Diferente a cTipo (columna L: Día/Noche). Columna J = índice 9.
+                const cSistTurno = fc('sistema','sistema turno','sistematurno','turno sistema','s turno','shift system','turno') ||
+                                   (headers.length > 9 ? headers[9] : null); // columna J
+                const sistTurnoRaw = cSistTurno ? String(row[cSistTurno]||'').trim() : '';
+                // Normalizar: "7 x 7" → "7x7", mantener mayúsculas
+                const sistTurno = sistTurnoRaw.replace(/\s*x\s*/gi, 'x').trim() || null;
+
+                // Superintendencia del Excel
+                const superint = cSuperint ? String(row[cSuperint]||'').trim() : '';
+
                 registros.push({
                     empresa:           empresaDesdeArchivo || emp || 'Sin empresa',
                     nombre_trabajador: nom||rut,
                     rut_trabajador:    rut||null,
                     genero:            gen,
-                    turno:             tipo,          // ← GUARDADO (columna L del Excel)
+                    turno:             sistTurno || tipo,  // Prioriza sistema (7x7) sobre día/noche
                     n_contrato:        con||null,
                     gerencia:          ger||null,
+                    origen:            superint||null,  // superintendencia → columna libre 'origen' en Supabase
                     hab_solicitada:    hab,
                     fecha_llegada:     lle,
                     fecha_salida:      sal,
@@ -2227,11 +2665,28 @@ export async function renderV2Solicitudes(container) {
 }
 
 async function renderTab(tab) {
-    document.getElementById('tab-pending')?.classList.toggle('active',tab==='pending');
-    document.getElementById('tab-history')?.classList.toggle('active',tab==='history');
-    const body=document.getElementById('sol-body');
-    if(!body) return;
-    body.innerHTML=`<div style="text-align:center;padding:40px;color:#94a3b8"><div style="font-size:36px">⏳</div><div>Cargando…</div></div>`;
+    document.getElementById('tab-pending')?.classList.toggle('active', tab === 'pending');
+    document.getElementById('tab-history')?.classList.toggle('active', tab === 'history');
+    document.getElementById('tab-conhab')?.classList.toggle('active', tab === 'conhab');
+    const body = document.getElementById('sol-body');
+    if (!body) return;
+
+    // ── TAB: Panel de Dotación embebido ─────────────────────────────────────────
+    if (tab === 'conhab') {
+        body.innerHTML = `
+            <div style="border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.10);border:1px solid #e2e8f0">
+                <iframe
+                    id="dotacion-iframe"
+                    src="panel-dotacion.html"
+                    style="width:100%;height:calc(100vh - 240px);min-height:600px;border:none;display:block;border-radius:16px"
+                    allow="clipboard-read; clipboard-write"
+                    title="Panel de Dotación">
+                </iframe>
+            </div>`;
+        return;
+    }
+
+    body.innerHTML = `<div style="text-align:center;padding:40px;color:#94a3b8"><div style="font-size:36px">⏳</div><div>Cargando…</div></div>`;
 
     try {
         let reqs;
@@ -2470,8 +2925,14 @@ async function renderTab(tab) {
                     if (desde  && g.fechaIn  && g.fechaIn < desde)        return false;
                     if (hasta  && g.fechaIn  && g.fechaIn > hasta)        return false;
                     if (status && g.status !== status)                    return false;
+                    // ── Filtro por defecto: solo mostrar activos y pre-asignados ────────
+                    // Si no hay filtro de fecha manual, ocultar cargas cuya fecha ya pasó.
+                    // El usuario puede buscar históricas usando los filtros Desde/Hasta.
+                    const hoyDefault = new Date().toISOString().split('T')[0];
+                    if (!desde && !hasta && g.fechaOut && g.fechaOut < hoyDefault) return false;
                     return true;
                 });
+
                 filtered.sort((a, b) => {
                     // Orden por fecha (asc o desc), luego empresa, luego contrato
                     const cmpFecha = (a.fechaIn || '').localeCompare(b.fechaIn || '');
@@ -2674,6 +3135,8 @@ La cama quedará libre.`, {confirmText:'🗑️ Borrar', danger:true})) return;
             const {id:asigId, id_cama} = asigs[0];
             // 2. Liberar cama
             await supabase.from('v2_camas').update({estado:'Disponible'}).eq('id_cama', id_cama).neq('estado', 'Deshabilitada');
+            // 2.5 Limpiar v2_camas_perdidas de esa habitación
+            await _limpiarCamasPerdidas([id_cama]);
             // 3. Borrar asignación
             await supabase.from('v2_asignaciones').delete().eq('id', asigId);
         }
@@ -2848,9 +3311,11 @@ window._solCheckoutLista = async function(gKey) {
             const {error:eCama} = await supabase
                 .from('v2_camas')
                 .update({ estado: 'Disponible' })
-                .in('id_cama', camaIds);
+                .in('id_cama', camaIds)
+                .neq('estado', 'Deshabilitada'); // ← NO reactivar camas C3 deshabilitadas
             if(eCama) console.warn('[Checkout] Error liberando camas:', eCama.message);
         }
+
 
         // ── PASO 4: Calcular y guardar registro de cobro ──────────────────────
         setStep('Guardando registro de cobro…', 70);

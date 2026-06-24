@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Detalle del Campamento — PC HOTELERÍA</title>
+  <meta name="description" content="Vista en vivo del campamento. Misma información que el sistema interno PC Hotelería.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    /* ── Reset & Dark Theme ────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:           #0d1117;
+      --bg-card:      #161b27;
+      --border:       rgba(255,255,255,.08);
+      --text:         #e2e8f0;
+      --text-primary: #f1f5f9;
+      --text-muted:   #64748b;
+      --accent:       #818cf8;
+    }
+
+    html, body {
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── Loading overlay ───────────────────────────────────────────────── */
+    #portal-loading {
+      position: fixed; inset: 0; z-index: 9999;
+      background: var(--bg);
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 16px;
+    }
+    #portal-loading .spin {
+      width: 48px; height: 48px;
+      border: 4px solid rgba(129,140,248,.25);
+      border-top-color: #818cf8;
+      border-radius: 50%;
+      animation: spin .8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #portal-loading p {
+      font-size: 14px; font-weight: 600; color: var(--text-muted);
+    }
+
+    /* ── Error banner ──────────────────────────────────────────────────── */
+    #portal-error {
+      display: none; position: fixed; bottom: 20px; left: 50%;
+      transform: translateX(-50%); z-index: 999;
+      background: #1e293b; border: 1.5px solid #ef4444;
+      border-radius: 14px; padding: 14px 20px;
+      font-size: 13px; font-weight: 600; color: #fca5a5;
+      box-shadow: 0 8px 30px rgba(0,0,0,.4);
+      max-width: 90vw; text-align: center;
+    }
+
+    /* ── Wrapper for the Detalle module ─────────────────────────────────── */
+    #detalle-root { min-height: 100vh; }
+
+    /* ══ FORZAR OCULTAMIENTO DE ELEMENTOS RT (ADMIN-ONLY) ══════════════
+       Doble protección: aunque _rtIsAdmin() devuelva true,
+       ningún elemento de Reserva Técnica es visible en el portal.
+       ═════════════════════════════════════════════════════════════════ */
+
+    /* Candado / botón de acceso admin */
+    button[onclick="window._rtOpen()"],
+    #_rt_lock_btn,
+    ._rt-lock-btn {
+      display: none !important;
+      pointer-events: none !important;
+    }
+
+    /* Modal de RT */
+    #_rt_modal {
+      display: none !important;
+    }
+
+    /* Texto "Real: X · Buffer: Y%" */
+    [data-rt-admin],
+    ._rt-admin-info {
+      display: none !important;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Loading -->
+  <div id="portal-loading">
+    <div class="spin"></div>
+    <p>Conectando con el campamento…</p>
+  </div>
+
+  <!-- Error -->
+  <div id="portal-error"></div>
+
+  <!-- Contenedor del módulo — renderV2Detalle lo llena con exactamente lo mismo que el sistema -->
+  <div id="detalle-root"></div>
+
+  <!-- CDN Supabase para window.supabase (requerido por supabaseClient.js) -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+
+  <script>
+    // ══ PORTAL MODE — Ejecutar ANTES de importar el módulo ══════════════════
+    // 1. Eliminar sesión admin: _rtIsAdmin() siempre devolverá false
+    //    (evita que Juan/Guissele vean candado y RT en el portal)
+    sessionStorage.removeItem('cm_session_v2');
+
+    // 2. Interceptar cualquier futura escritura de la sesión
+    const _origSetItem = sessionStorage.setItem.bind(sessionStorage);
+    sessionStorage.setItem = function(key, val) {
+      if (key === 'cm_session_v2') return; // bloquear en portal
+      _origSetItem(key, val);
+    };
+
+    // 3. Override de _rtIsAdmin — defensa adicional
+    //    (el módulo usa la función privada, pero si por alguna razón
+    //     se expone globalmente, esta la bloquea)
+    window._portalMode = true; // flag para saber que estamos en portal
+
+    // 4. Ocultar el modal RT si aparece dinámicamente
+    const _portalObserver = new MutationObserver(() => {
+      const modal = document.getElementById('_rt_modal');
+      if (modal) { modal.remove(); }
+      // Ocultar cualquier botón del candado que aparezca
+      document.querySelectorAll('button[onclick*="_rtOpen"]').forEach(b => {
+        b.style.display = 'none';
+        b.style.pointerEvents = 'none';
+      });
+    });
+    _portalObserver.observe(document.body, { childList: true, subtree: true });
+  </script>
+
+  <script type="module">
+    import { renderV2Detalle } from './js/v2/modules/v2-detalle.js';
+
+    const root    = document.getElementById('detalle-root');
+    const loading = document.getElementById('portal-loading');
+    const errBox  = document.getElementById('portal-error');
+
+    // window.navigate es usado por v2-detalle.js para el botón "Actualizar"
+    window.navigate = (page) => {
+      if (page === 'v2detalle' || page === 'detalle') {
+        // Asegurar sesión limpia en cada actualización
+        sessionStorage.removeItem('cm_session_v2');
+        loading.style.display = 'flex';
+        renderV2Detalle(root).finally(() => {
+          loading.style.display = 'none';
+        });
+      }
+    };
+
+    // Lanzar
+    try {
+      await renderV2Detalle(root);
+    } catch (err) {
+      errBox.textContent = '❌ Error: ' + (err?.message || err);
+      errBox.style.display = 'block';
+      console.error('[portal]', err);
+    } finally {
+      loading.style.display = 'none';
+    }
+  </script>
+</body>
+</html>

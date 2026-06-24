@@ -248,13 +248,19 @@ export async function renderCupos(container) {
 
           <!-- Acciones -->
           <div style="margin-top:12px;padding-top:10px;border-top:1px solid ${borderCard};display:flex;gap:6px">
+            ${['admin','superadmin','supervisor'].includes(window._currentUser?.role) ? `
+            <button class="btn" style="font-size:12px;padding:6px 10px;background:linear-gradient(135deg,#2b6cb0,#3182ce);border:none;color:white;font-weight:700;border-radius:8px;transition:opacity 0.2s"
+              onmouseenter="this.style.opacity='0.85'" onmouseleave="this.style.opacity='1'"
+              onclick="window._openDetailModal('${encodeURIComponent(fullKey)}','${company.replace(/'/g,"\\'").replace(/"/g,'&quot;')}','${gerencia.replace(/'/g,"\\'").replace(/"/g,'&quot;')}')">
+              📊 Detalle
+            </button>` : ''}
             <button class="btn" style="flex:1;font-size:12px;padding:6px;background:white;border:1px solid #e2e8f0;color:#4a5568"
-              onclick="window._editQuota('${encodeURIComponent(fullKey)}','${company.replace(/'/g,"\\'")}','${gerencia.replace(/'/g,"\\'")}')">
+              onclick="window._editQuota('${encodeURIComponent(fullKey)}','${company.replace(/'/g,"\\'").replace(/"/g,'&quot;')}','${gerencia.replace(/'/g,"\\'").replace(/"/g,'&quot;')}')">
               ✏️ ${quota ? 'Editar cupo' : 'Definir cupo'}
             </button>
             ${quota && ['admin','superadmin'].includes(window._currentUser?.role) ? `
             <button class="btn" style="font-size:12px;padding:6px 10px;background:#fff5f5;border:1px solid #fecaca;color:#c0392b;font-weight:700"
-              onclick="window._deleteQuota('${encodeURIComponent(fullKey)}','${company.replace(/'/g,"\\'")}','${gerencia.replace(/'/g,"\\'")}')">
+              onclick="window._deleteQuota('${encodeURIComponent(fullKey)}','${company.replace(/'/g,"\\'").replace(/"/g,'&quot;')}','${gerencia.replace(/'/g,"\\'").replace(/"/g,'&quot;')}')">
               🗑️
             </button>` : ''}
           </div>
@@ -265,6 +271,41 @@ export async function renderCupos(container) {
     <style>
       #cupos-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap:16px; }
       @media(max-width:600px) { #cupos-grid { grid-template-columns: 1fr; } }
+
+      /* Modal Detalle */
+      #detail-modal-overlay {
+        position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:99999;
+        display:none;align-items:center;justify-content:center;padding:16px;
+        backdrop-filter:blur(4px);
+      }
+      #detail-modal-overlay.visible { display:flex; }
+      #detail-modal {
+        background:#fff;border-radius:20px;width:100%;max-width:680px;max-height:85vh;
+        display:flex;flex-direction:column;box-shadow:0 25px 80px rgba(0,0,0,0.35);
+        animation:slideUp 0.3s cubic-bezier(0.34,1.56,0.64,1);
+      }
+      @keyframes slideUp { from{transform:translateY(30px);opacity:0} to{transform:translateY(0);opacity:1} }
+      #detail-modal-header {
+        background:linear-gradient(135deg,#1a365d,#2b6cb0);
+        border-radius:20px 20px 0 0;padding:20px 24px;
+        display:flex;align-items:center;justify-content:space-between;gap:12px;
+      }
+      .detail-tab {
+        padding:8px 18px;border-radius:8px;border:none;cursor:pointer;
+        font-weight:700;font-size:13px;transition:all 0.2s;
+        background:rgba(255,255,255,0.15);color:rgba(255,255,255,0.7);
+      }
+      .detail-tab.active { background:rgba(255,255,255,0.95);color:#1a365d; }
+      #detail-modal-body { flex:1;overflow-y:auto;padding:20px 24px; }
+      .detail-row {
+        display:flex;align-items:center;gap:12px;padding:10px 12px;
+        border-radius:10px;transition:background 0.15s;
+      }
+      .detail-row:hover { background:#f7fafc; }
+      .detail-period-card {
+        background:#f7fafc;border:1px solid #e2e8f0;border-radius:12px;
+        padding:14px 16px;margin-bottom:10px;
+      }
     </style>
 
     <div class="section-header">
@@ -509,6 +550,216 @@ export async function renderCupos(container) {
                 showToast('Error al eliminar: ' + err.message, 'error');
             }
         };
+    };
+
+    // ── Modal Detalle (trabajadores actuales + historial) ─────────────────────
+    // Inyectar el overlay en el DOM si no existe
+    if (!document.getElementById('detail-modal-overlay')) {
+        const dmOverlay = document.createElement('div');
+        dmOverlay.id = 'detail-modal-overlay';
+        dmOverlay.innerHTML = `
+          <div id="detail-modal">
+            <div id="detail-modal-header">
+              <div>
+                <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:rgba(255,255,255,0.6);margin-bottom:4px" id="dm-company-label">EMPRESA</div>
+                <div style="font-size:17px;font-weight:800;color:#fff" id="dm-gerencia-label">Gerencia</div>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px">
+                <div style="display:flex;gap:6px;background:rgba(0,0,0,0.2);padding:4px;border-radius:10px">
+                  <button class="detail-tab active" id="dm-tab-actual" onclick="window._dmSwitchTab('actual')">👥 Actuales</button>
+                  <button class="detail-tab" id="dm-tab-hist" onclick="window._dmSwitchTab('hist')">📅 Historial</button>
+                </div>
+                <button onclick="document.getElementById('detail-modal-overlay').classList.remove('visible')"
+                  style="background:rgba(255,255,255,0.15);border:none;color:#fff;border-radius:8px;width:34px;height:34px;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center">✕</button>
+              </div>
+            </div>
+            <div id="detail-modal-body">
+              <div style="text-align:center;padding:40px;color:#718096">⏳ Cargando...</div>
+            </div>
+            <div style="padding:12px 24px;border-top:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center">
+              <span id="dm-footer-count" style="font-size:12px;color:#718096"></span>
+              <button onclick="document.getElementById('detail-modal-overlay').classList.remove('visible')"
+                style="padding:8px 18px;background:#f7fafc;border:1.5px solid #e2e8f0;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">Cerrar</button>
+            </div>
+          </div>`;
+        dmOverlay.addEventListener('click', e => { if (e.target === dmOverlay) dmOverlay.classList.remove('visible'); });
+        document.body.appendChild(dmOverlay);
+    }
+
+    // Estado del modal detalle
+    let _dmCurrentKey = '', _dmCurrentTab = 'actual', _dmAsignaciones = [];
+
+    window._dmSwitchTab = (tab) => {
+        _dmCurrentTab = tab;
+        document.getElementById('dm-tab-actual').classList.toggle('active', tab === 'actual');
+        document.getElementById('dm-tab-hist').classList.toggle('active', tab === 'hist');
+        _dmRender();
+    };
+
+    function _dmRender() {
+        const body = document.getElementById('detail-modal-body');
+        const footerCount = document.getElementById('dm-footer-count');
+        if (!body) return;
+
+        if (_dmCurrentTab === 'actual') {
+            // ── Trabajadores actuales ──────────────────────────────────────
+            if (!_dmAsignaciones.length) {
+                body.innerHTML = `<div style="text-align:center;padding:40px 20px;color:#718096">
+                  <div style="font-size:3rem;margin-bottom:12px">🛏️</div>
+                  <div style="font-weight:700;font-size:15px;margin-bottom:6px">Sin ocupantes actuales</div>
+                  <div style="font-size:13px">No hay camas asignadas en este momento para esta gerencia.</div>
+                </div>`;
+                footerCount.textContent = '0 trabajadores';
+                return;
+            }
+
+            const rows = _dmAsignaciones.map((a, i) => {
+                const turno  = a.turno || a.shift || '—';
+                const hab    = a.room_number || a.habitacion || '—';
+                const nombre = a.occupant_name || a.nombre || a.guest_name || 'Sin nombre';
+                const rut    = a.rut || a.guest_rut || '';
+                const cama   = a.bed_type || a.cama || '';
+                const turnoIcon = turno === 'Noche' || turno === 'night' ? '🌙' : '☀️';
+                const camaLabel = cama === 'extra' ? ' · Cama Extra' : cama === 'night' ? ' · Cama Noche' : cama === 'day' ? ' · Cama Día' : '';
+                return `<div class="detail-row">
+                  <div style="width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,#ebf8ff,#bee3f8);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">${turnoIcon}</div>
+                  <div style="flex:1;min-width:0">
+                    <div style="font-weight:700;font-size:13px;color:#1a202c;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${nombre}</div>
+                    <div style="font-size:11px;color:#718096">${rut ? rut + ' · ' : ''}Hab. <strong>${hab}</strong>${camaLabel}</div>
+                  </div>
+                  <span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:99px;background:${turno === 'Noche' || turno === 'night' ? '#2d3748' : '#fffbeb'};color:${turno === 'Noche' || turno === 'night' ? '#e2e8f0' : '#92400e'}">${turno}</span>
+                </div>`;
+            }).join('');
+
+            body.innerHTML = `<div style="margin-bottom:12px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#a0aec0">Trabajadores con cama asignada</div>${rows}`;
+            footerCount.textContent = `${_dmAsignaciones.length} trabajador${_dmAsignaciones.length !== 1 ? 'es' : ''} activo${_dmAsignaciones.length !== 1 ? 's' : ''}`;
+
+        } else {
+            // ── Historial por período ─────────────────────────────────────
+            const periodoSel = document.getElementById('dm-periodo-sel')?.value || 'semana';
+
+            // Agrupar asignaciones por semana o mes según fechas de entrada (fecha_ingreso o created_at)
+            const grupos = {};
+            _dmAsignaciones.forEach(a => {
+                const rawDate = a.fecha_ingreso || a.check_in || a.created_at || null;
+                if (!rawDate) return;
+                const d = new Date(rawDate);
+                let key;
+                if (periodoSel === 'semana') {
+                    // Semana ISO: lunes al domingo
+                    const startOfWeek = new Date(d);
+                    const day = d.getDay() === 0 ? 6 : d.getDay() - 1;
+                    startOfWeek.setDate(d.getDate() - day);
+                    key = startOfWeek.toLocaleDateString('es-CL', {day:'2-digit',month:'short',year:'numeric'});
+                } else {
+                    key = d.toLocaleDateString('es-CL', {month:'long',year:'numeric'});
+                }
+                if (!grupos[key]) grupos[key] = [];
+                grupos[key].push(a);
+            });
+
+            const periodoUI = `
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px">
+                <span style="font-size:12px;font-weight:700;color:#718096">Ver por:</span>
+                <select id="dm-periodo-sel"
+                  onchange="window._dmSwitchTab('hist')"
+                  style="padding:5px 10px;border-radius:8px;border:1.5px solid #e2e8f0;font-size:12px;font-weight:700;color:#2d3748;background:#fff;cursor:pointer">
+                  <option value="semana" ${periodoSel==='semana'?'selected':''}>Por semana</option>
+                  <option value="mes" ${periodoSel==='mes'?'selected':''}>Por mes</option>
+                </select>
+              </div>`;
+
+            if (!Object.keys(grupos).length) {
+                body.innerHTML = periodoUI + `<div style="text-align:center;padding:40px 20px;color:#718096">
+                  <div style="font-size:3rem;margin-bottom:12px">📅</div>
+                  <div style="font-weight:700">Sin historial disponible</div>
+                  <div style="font-size:12px;margin-top:6px">No se encontraron fechas registradas en las asignaciones.</div>
+                </div>`;
+                footerCount.textContent = '';
+                return;
+            }
+
+            const cards = Object.entries(grupos).map(([periodo, items]) => {
+                const pct  = quota?.limit ? Math.round((items.length / quota.limit) * 100) : null;
+                const col  = pct >= 100 ? '#e53e3e' : pct >= 80 ? '#dd6b20' : '#38a169';
+                return `<div class="detail-period-card">
+                  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                    <div style="font-weight:800;font-size:13px;color:#1a202c;text-transform:capitalize">${periodo}</div>
+                    <div style="display:flex;align-items:center;gap:8px">
+                      ${pct !== null ? `<span style="font-size:11px;font-weight:700;color:${col}">${pct}% cupo</span>` : ''}
+                      <span style="font-size:13px;font-weight:800;color:#2b6cb0">${items.length} cama${items.length!==1?'s':''}</span>
+                    </div>
+                  </div>
+                  ${pct !== null ? `<div style="background:#e2e8f0;border-radius:99px;height:6px;overflow:hidden">
+                    <div style="height:100%;width:${Math.min(100,pct)}%;background:${col};border-radius:99px"></div>
+                  </div>` : ''}
+                  <div style="margin-top:8px;font-size:11px;color:#718096">${items.map(a => a.occupant_name || a.nombre || 'Sin nombre').slice(0,5).join(', ')}${items.length>5?' y '+(items.length-5)+' más…':''}</div>
+                </div>`;
+            }).join('');
+
+            body.innerHTML = periodoUI + cards;
+            const total = Object.values(grupos).reduce((s,v)=>s+v.length,0);
+            footerCount.textContent = `${total} registro${total!==1?'s':''} en historial`;
+        }
+    }
+
+    window._openDetailModal = async (encodedKey, company, gerencia) => {
+        _dmCurrentKey = decodeURIComponent(encodedKey);
+        _dmCurrentTab = 'actual';
+        _dmAsignaciones = [];
+
+        // Resetear tabs
+        document.getElementById('dm-tab-actual')?.classList.add('active');
+        document.getElementById('dm-tab-hist')?.classList.remove('active');
+        document.getElementById('dm-company-label').textContent = company.toUpperCase();
+        document.getElementById('dm-gerencia-label').textContent = gerencia;
+        document.getElementById('detail-modal-body').innerHTML = '<div style="text-align:center;padding:40px;color:#718096">⏳ Cargando datos...</div>';
+        document.getElementById('dm-footer-count').textContent = '';
+        document.getElementById('detail-modal-overlay').classList.add('visible');
+
+        try {
+            // Consultar v2_asignaciones con joins para obtener datos completos
+            const { data, error } = await supabase
+                .from('v2_asignaciones')
+                .select(`
+                    id, turno, fecha_ingreso, fecha_salida, created_at,
+                    v2_huespedes(nombre, rut),
+                    v2_habitaciones(numero),
+                    v2_empresas(nombre, v2_gerencias(nombre))
+                `)
+                .order('created_at', { ascending: false });
+
+            if (error) throw error;
+
+            // Filtrar por empresa y gerencia
+            const [filterCompany, filterGerencia] = _dmCurrentKey.split('||');
+            _dmAsignaciones = (data || []).filter(a => {
+                const empNombre = (a.v2_empresas?.nombre || '').trim().toLowerCase();
+                const gerNombre = (a.v2_empresas?.v2_gerencias?.nombre || '').trim().toLowerCase();
+                return empNombre === filterCompany.toLowerCase() && gerNombre === filterGerencia.toLowerCase();
+            }).map(a => ({
+                id:            a.id,
+                nombre:        a.v2_huespedes?.nombre || 'Sin nombre',
+                rut:           a.v2_huespedes?.rut || '',
+                habitacion:    a.v2_habitaciones?.numero || '—',
+                turno:         a.turno || '—',
+                fecha_ingreso: a.fecha_ingreso || a.created_at,
+                fecha_salida:  a.fecha_salida,
+            }));
+
+        } catch(e) {
+            console.warn('[Detalle Cupo] Error:', e.message);
+            // Si falla Supabase, mostrar mensaje
+            document.getElementById('detail-modal-body').innerHTML = `
+              <div style="text-align:center;padding:40px;color:#e53e3e">
+                <div style="font-size:2.5rem;margin-bottom:12px">⚠️</div>
+                <div style="font-weight:700">Error al cargar datos</div>
+                <div style="font-size:12px;margin-top:6px;color:#718096">${e.message}</div>
+              </div>`;
+            return;
+        }
+
+        _dmRender();
     };
 }
 

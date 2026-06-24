@@ -4,7 +4,7 @@
  * Cuadrícula: EDIF · PAB · HAB · PISO · EMPRESA · GERENCIA · CONTRATO | días →
  * Cada celda = número de personas que confirmaron presencia ese día en esa hab.
  */
-import { supabase } from '../../supabaseClient.js';
+import { supabase } from '../../supabaseClient.js?v=20260616';
 
 // ── Período: mismo que censo admin (21 del mes pasado → 20 del actual) ───────
 function calcularPeriodo(offset = 0) {
@@ -293,24 +293,39 @@ function ctRenderGrid() {
             const esH  = iso === hoy;
 
             let bg, c, lbl, borde = '';
-            if (!confs) { 
-                bg = 'var(--bg)';  c = 'transparent'; lbl = ''; 
+            if (!confs) {
+                bg = 'var(--bg)';  c = 'transparent'; lbl = '';
             } else {
-                // Logica de Etiqueta vs Confirmados
-                let txt = confs + ' DÍA';
+                // ── Etiqueta: número de personas que confirmaron ───────────────
+                const capacidad = 2; // capacidad estándar por habitación
+                const sobreOcupado = confs > capacidad;
+
+                let txt;
                 if (ai.esAnglo) {
+                    // Habitaciones Anglo: formato especial día/noche
                     if (confs >= 2) txt = '1 DÍA 1 NOCHE';
                     else txt = '1 DÍA';
                 } else if (ai.esNoche) {
                     txt = confs + ' NOCHE';
                 } else {
-                    txt = confs + ' DÍA';
+                    txt = confs + ' PERS.';
                 }
 
-                if (confs === 1) { bg = '#d1fae5'; c = '#065f46'; }
-                else if (confs === 2) { bg = '#6ee7b7'; c = '#047857'; }
-                else { bg = '#10b981'; c = '#fff'; }
-                lbl = txt;
+                if (sobreOcupado) {
+                    // ⚠️ Más personas de lo esperado → alerta naranja/roja
+                    bg = confs >= 4 ? '#fecaca' : '#fed7aa';
+                    c  = confs >= 4 ? '#991b1b' : '#92400e';
+                    lbl = '⚠️ ' + txt;
+                } else if (confs === 1) {
+                    bg = '#d1fae5'; c = '#065f46';
+                    lbl = txt;
+                } else if (confs === 2) {
+                    bg = '#6ee7b7'; c = '#047857';
+                    lbl = txt;
+                } else {
+                    bg = '#10b981'; c = '#fff';
+                    lbl = txt;
+                }
             }
             if (esH) borde = ';outline:2px solid #10b981;outline-offset:-1px';
 
@@ -334,11 +349,12 @@ function ctRenderGrid() {
 
     // Leyenda de colores
     const leyenda = [
-        { bg:'#d1fae5', c:'#065f46', lbl:'1',  desc:'1 confirmación' },
-        { bg:'#6ee7b7', c:'#047857', lbl:'2',  desc:'2 confirmaciones' },
-        { bg:'#10b981', c:'#fff',    lbl:'3+', desc:'3+ confirmaciones' },
+        { bg:'#d1fae5', c:'#065f46', lbl:'1 PERS.',    desc:'1 confirmación (normal)' },
+        { bg:'#6ee7b7', c:'#047857', lbl:'2 PERS.',    desc:'2 confirmaciones (habitación llena)' },
+        { bg:'#fed7aa', c:'#92400e', lbl:'⚠️ 3 PERS.', desc:'3 personas (revisar)' },
+        { bg:'#fecaca', c:'#991b1b', lbl:'⚠️ 4+ PERS.',desc:'Sobreocupación — requiere corrección' },
     ].map(l => `<span style="display:flex;align-items:center;gap:4px">
-      <span style="min-width:18px;height:14px;padding:0 4px;border-radius:3px;background:${l.bg};color:${l.c};font-size:9px;font-weight:800;display:inline-flex;align-items:center;justify-content:center">${l.lbl}</span>
+      <span style="min-width:22px;height:14px;padding:0 5px;border-radius:3px;background:${l.bg};color:${l.c};font-size:9px;font-weight:800;display:inline-flex;align-items:center;justify-content:center;white-space:nowrap">${l.lbl}</span>
       <span style="color:var(--text-muted)">${l.desc}</span>
     </span>`).join('');
 
@@ -514,7 +530,8 @@ async function ctExportExcel() {
     a.click(); URL.revokeObjectURL(url);
 }
 
-// ── Reporte Excel multi-hoja (Por Empresa · Por Habitación · Detalle) ────────
+
+// ── Reporte Excel multi-hoja (Mensual · Semanal · Por Empresa · Por Habitación · Detalle) ──
 async function ctReporteEmpresas() {
     if (!_ctData.length) { alert('Sin datos para exportar.'); return; }
 
@@ -531,85 +548,164 @@ async function ctReporteEmpresas() {
     const pIni = fmtISO(_periodo.ini);
     const pFin = fmtISO(_periodo.fin);
 
-    // ── Hoja 1: Resumen por Empresa ──────────────────────────────────────
-    const byEmp = {};
-    _ctData.forEach(r => {
-        const emp = r.empresa || '(Sin empresa)';
-        if (!byEmp[emp]) byEmp[emp] = { conf: 0, personas: new Set(), habs: new Set(), dias: new Set() };
-        byEmp[emp].conf++;
-        if (r.rut_trabajador) byEmp[emp].personas.add(r.rut_trabajador);
-        byEmp[emp].habs.add(String(r.numero_hab));
-        if (r.fecha_scan) byEmp[emp].dias.add(r.fecha_scan);
+    // ── Mapa numero_hab → {emp, ger, cont, edif, pab} ────────────────────────
+    const habNumMap  = {};
+    const numHabToAI = {};
+    _habData.forEach(h => {
+        habNumMap[String(h.numero_hab)] = h;
+        const ai = _asigMap[h.id_custom] || {};
+        numHabToAI[String(h.numero_hab)] = {
+            emp:  ai.emp  || '(Sin empresa)',
+            ger:  ai.ger  || '—',
+            cont: ai.cont || '—',
+            edif: h.v2_pabellones?.v2_edificios?.nombre || '—',
+            pab:  h.v2_pabellones?.nombre || '—',
+            piso: h.nivel || '—',
+        };
     });
 
-    const hojaEmp = [
-        ['Empresa', 'Confirmaciones QR', 'Personas distintas', 'Habitaciones activas', 'Días activos']
-    ];
-    Object.entries(byEmp)
-        .sort(([a], [b]) => a.localeCompare(b, 'es'))
-        .forEach(([emp, d]) => {
-            hojaEmp.push([emp, d.conf, d.personas.size, d.habs.size, d.dias.size]);
-        });
-    hojaEmp.push([]);
-    hojaEmp.push([
-        'TOTAL',
-        _ctData.length,
-        new Set(_ctData.map(r => r.rut_trabajador)).size,
-        new Set(_ctData.map(r => String(r.numero_hab))).size,
-        new Set(_ctData.map(r => r.fecha_scan)).size
-    ]);
+    // Enriquecer cada fila con empresa/contrato/gerencia desde la asignación
+    const data = _ctData.map(r => {
+        const ai = numHabToAI[String(r.numero_hab)] || {};
+        return {
+            ...r,
+            _emp:  ai.emp,
+            _ger:  ai.ger,
+            _cont: ai.cont,
+            _edif: ai.edif,
+            _pab:  ai.pab,
+            _piso: ai.piso,
+        };
+    });
 
-    // ── Hoja 2: Por Habitación ───────────────────────────────────────────
+    // ── Helper: número de semana ISO (lun-dom) ───────────────────────────────
+    function isoWeek(dateStr) {
+        const d = new Date(dateStr + 'T12:00:00');
+        const day = d.getDay() || 7;
+        d.setDate(d.getDate() + 4 - day);
+        const yearStart = new Date(d.getFullYear(), 0, 1);
+        const wn = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+        return { year: d.getFullYear(), week: wn };
+    }
+    function weekLabel(dateStr) {
+        const d = new Date(dateStr + 'T12:00:00');
+        const day = d.getDay() || 7;
+        const mon = new Date(d); mon.setDate(d.getDate() - day + 1);
+        const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
+        const fmt = dt => dt.toLocaleDateString('es-CL', { day:'2-digit', month:'2-digit' });
+        const { year, week } = isoWeek(dateStr);
+        return { label: `Sem ${week}/${year} (${fmt(mon)}–${fmt(sun)})`, mon: fmtISO(mon), sun: fmtISO(sun) };
+    }
+    function mesLabel(dateStr) {
+        const d = new Date(dateStr + 'T12:00:00');
+        return d.toLocaleDateString('es-CL', { month: 'long', year: 'numeric' });
+    }
+
+    // ── HOJA 1: RESUMEN MENSUAL ───────────────────────────────────────────────
+    const byMes = {};
+    data.forEach(r => {
+        const mes  = mesLabel(r.fecha_scan);
+        const key  = mes + '|||' + (r._emp) + '|||' + (r._cont);
+        if (!byMes[key]) byMes[key] = { mes, emp: r._emp, ger: r._ger, cont: r._cont, conf: 0, personas: new Set(), habs: new Set() };
+        byMes[key].conf++;
+        if (r.rut_trabajador) byMes[key].personas.add(r.rut_trabajador);
+        byMes[key].habs.add(String(r.numero_hab));
+    });
+    const hojaMes = [
+        ['Mes', 'Empresa', 'Gerencia', 'N° Contrato', 'Confirmaciones QR', 'Personas distintas', 'Camas-Día'],
+    ];
+    Object.values(byMes)
+        .sort((a, b) => a.mes.localeCompare(b.mes, 'es') || a.emp.localeCompare(b.emp, 'es'))
+        .forEach(d => hojaMes.push([d.mes, d.emp, d.ger, d.cont, d.conf, d.personas.size, d.habs.size]));
+    hojaMes.push([]);
+    hojaMes.push(['TOTAL', '', '', '', data.length, new Set(data.map(r=>r.rut_trabajador)).size, new Set(data.map(r=>String(r.numero_hab))).size]);
+
+    // ── HOJA 2: RESUMEN SEMANAL ───────────────────────────────────────────────
+    const bySem = {};
+    data.forEach(r => {
+        const { label, mon, sun } = weekLabel(r.fecha_scan);
+        const key = label + '|||' + (r._emp) + '|||' + (r._cont);
+        if (!bySem[key]) bySem[key] = { label, mon, sun, emp: r._emp, ger: r._ger, cont: r._cont, conf: 0, personas: new Set(), habs: new Set() };
+        bySem[key].conf++;
+        if (r.rut_trabajador) bySem[key].personas.add(r.rut_trabajador);
+        bySem[key].habs.add(String(r.numero_hab));
+    });
+    const hojaSem = [
+        ['Semana', 'Inicio', 'Fin', 'Empresa', 'Gerencia', 'N° Contrato', 'Confirmaciones QR', 'Personas distintas', 'Camas-Día'],
+    ];
+    Object.values(bySem)
+        .sort((a, b) => a.mon.localeCompare(b.mon) || a.emp.localeCompare(b.emp, 'es'))
+        .forEach(d => hojaSem.push([d.label, d.mon, d.sun, d.emp, d.ger, d.cont, d.conf, d.personas.size, d.habs.size]));
+    hojaSem.push([]);
+    hojaSem.push(['TOTAL', '', '', '', '', '', data.length, new Set(data.map(r=>r.rut_trabajador)).size, new Set(data.map(r=>String(r.numero_hab))).size]);
+
+    // ── HOJA 3: RESUMEN POR EMPRESA (total período) ───────────────────────────
+    const byEmp = {};
+    data.forEach(r => {
+        const key = (r._emp) + '|||' + (r._cont);
+        if (!byEmp[key]) byEmp[key] = { emp: r._emp, ger: r._ger, cont: r._cont, conf: 0, personas: new Set(), habs: new Set(), dias: new Set() };
+        byEmp[key].conf++;
+        if (r.rut_trabajador) byEmp[key].personas.add(r.rut_trabajador);
+        byEmp[key].habs.add(String(r.numero_hab));
+        if (r.fecha_scan) byEmp[key].dias.add(r.fecha_scan);
+    });
+    const hojaEmp = [
+        ['Empresa', 'Gerencia', 'N° Contrato', 'Confirmaciones QR', 'Personas distintas', 'Habitaciones activas', 'Días activos', 'Período'],
+    ];
+    Object.values(byEmp)
+        .sort((a, b) => a.emp.localeCompare(b.emp, 'es'))
+        .forEach(d => hojaEmp.push([d.emp, d.ger, d.cont, d.conf, d.personas.size, d.habs.size, d.dias.size, `${pIni} → ${pFin}`]));
+    hojaEmp.push([]);
+    hojaEmp.push(['TOTAL', '', '', data.length, new Set(data.map(r=>r.rut_trabajador)).size, new Set(data.map(r=>String(r.numero_hab))).size, new Set(data.map(r=>r.fecha_scan)).size, '']);
+
+    // ── HOJA 4: POR HABITACIÓN ────────────────────────────────────────────────
     const byHab = {};
-    _ctData.forEach(r => {
+    data.forEach(r => {
         const k = String(r.numero_hab);
-        if (!byHab[k]) byHab[k] = { conf: 0, personas: new Set(), dias: new Set() };
+        if (!byHab[k]) byHab[k] = { conf: 0, personas: new Set(), dias: new Set(), emp: r._emp, ger: r._ger, cont: r._cont, edif: r._edif, pab: r._pab, piso: r._piso };
         byHab[k].conf++;
         if (r.rut_trabajador) byHab[k].personas.add(r.rut_trabajador);
-        if (r.fecha_scan) byHab[k].dias.add(r.fecha_scan);
+        if (r.fecha_scan)     byHab[k].dias.add(r.fecha_scan);
     });
-
-    // Mapa numero_hab → datos de habitación
-    const habNumMap = {};
-    _habData.forEach(h => { habNumMap[String(h.numero_hab)] = h; });
-
     const hojaHab = [
-        ['Habitación','Edificio','Pabellón','Piso','Empresa','Gerencia','Contrato','Confirmaciones','Personas distintas','Días activos']
+        ['Habitación','Edificio','Pabellón','Piso','Empresa','Gerencia','N° Contrato','Confirmaciones QR','Personas distintas','Días activos'],
     ];
     Object.entries(byHab)
         .sort(([a], [b]) => parseInt(a) - parseInt(b))
-        .forEach(([hab, d]) => {
-            const hd = habNumMap[hab];
-            const ai = hd ? (_asigMap[hd.id_custom] || {}) : {};
-            hojaHab.push([
-                hab,
-                hd?.v2_pabellones?.v2_edificios?.nombre || '—',
-                hd?.v2_pabellones?.nombre || '—',
-                hd?.nivel || '—',
-                ai.emp  || '—',
-                ai.ger  || '—',
-                ai.cont || '—',
-                d.conf,
-                d.personas.size,
-                d.dias.size
-            ]);
-        });
+        .forEach(([hab, d]) => hojaHab.push([
+            hab, d.edif, d.pab, d.piso, d.emp, d.ger, d.cont, d.conf, d.personas.size, d.dias.size
+        ]));
 
-    // ── Hoja 3: Detalle completo ──────────────────────────────────────────
-    const hojaDetalle = [['Habitación','Nombre','RUT','Empresa','Fecha','Hora']];
-    [..._ctData]
+    // ── HOJA 5: DETALLE COMPLETO ──────────────────────────────────────────────
+    const hojaDetalle = [['Habitación','Edificio','Empresa','Gerencia','N° Contrato','Nombre Trabajador','RUT','Fecha','Hora']];
+    [...data]
         .sort((a, b) => String(a.numero_hab).localeCompare(String(b.numero_hab)) || (a.fecha_scan||'').localeCompare(b.fecha_scan||''))
         .forEach(r => {
-            const hora = r.hora_scan
-                ? new Date(r.hora_scan).toLocaleTimeString('es-CL', {hour:'2-digit', minute:'2-digit'})
-                : '—';
-            hojaDetalle.push([r.numero_hab, r.nombre_trabajador||'—', r.rut_trabajador, r.empresa||'—', r.fecha_scan||'—', hora]);
+            const hora = r.hora_scan ? new Date(r.hora_scan).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' }) : '—';
+            hojaDetalle.push([r.numero_hab, r._edif, r._emp, r._ger, r._cont, r.nombre_trabajador||'—', r.rut_trabajador, r.fecha_scan||'—', hora]);
         });
 
-    // ── Armar libro ──────────────────────────────────────────────────────
+    // ── Armar libro ───────────────────────────────────────────────────────────
     const wb = window.XLSX.utils.book_new();
-    window.XLSX.utils.book_append_sheet(wb, window.XLSX.utils.aoa_to_sheet(hojaEmp),     'Por Empresa');
-    window.XLSX.utils.book_append_sheet(wb, window.XLSX.utils.aoa_to_sheet(hojaHab),     'Por Habitación');
-    window.XLSX.utils.book_append_sheet(wb, window.XLSX.utils.aoa_to_sheet(hojaDetalle), 'Detalle');
+
+    // Función para dar formato a la hoja
+    function makeSheet(aoa) {
+        const ws = window.XLSX.utils.aoa_to_sheet(aoa);
+        // Ancho de columnas automático basado en contenido
+        const cols = aoa[0]?.map((_, ci) => {
+            const max = Math.min(45, Math.max(10, ...aoa.map(row => String(row[ci] ?? '').length)));
+            return { wch: max };
+        }) || [];
+        ws['!cols'] = cols;
+        return ws;
+    }
+
+    window.XLSX.utils.book_append_sheet(wb, makeSheet(hojaMes),     '📅 Por Mes');
+    window.XLSX.utils.book_append_sheet(wb, makeSheet(hojaSem),     '📆 Por Semana');
+    window.XLSX.utils.book_append_sheet(wb, makeSheet(hojaEmp),     '🏢 Por Empresa');
+    window.XLSX.utils.book_append_sheet(wb, makeSheet(hojaHab),     '🏠 Por Habitación');
+    window.XLSX.utils.book_append_sheet(wb, makeSheet(hojaDetalle), '📋 Detalle');
+
     window.XLSX.writeFile(wb, `Reporte_QR_${pIni}_${pFin}.xlsx`);
 }
+

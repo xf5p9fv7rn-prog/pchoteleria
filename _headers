@@ -1,0 +1,17 @@
+## Netlify custom headers
+## Evita que el navegador use versiones antiguas del JS en caché
+
+# HTML: siempre fresco
+/*.html
+  Cache-Control: public, max-age=0, must-revalidate
+
+# JS y CSS: revalidar siempre (el CDN de Netlify sirve la versión nueva tras cada deploy)
+/*.js
+  Cache-Control: public, max-age=0, must-revalidate
+
+/*.css
+  Cache-Control: public, max-age=0, must-revalidate
+
+# Página raíz
+/
+  Cache-Control: public, max-age=0, must-revalidate

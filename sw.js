@@ -1,6 +1,6 @@
 // 🔄 IMPORTANTE: Incrementar CACHE_NAME en cada deploy para limpiar caches viejos.
-// Sincronizado con CM_VER en index.html (actualmente v87).
-const CACHE_NAME = 'v2-purge-fix-21';  // ← bumped para forzar limpieza del caché roto
+// Sincronizado con CM_VER en index.html (actualmente v88).
+const CACHE_NAME = 'v2-pab-piso-struct-37';  // bumped: force-refresh all devices - labels
 
 const STATIC_ASSETS = [
   '/',
@@ -49,10 +49,13 @@ self.addEventListener('fetch', (event) => {
   const selfOrigin = self.location.origin;
   if (!url.startsWith(selfOrigin)) return;  // ← deja pasar todo lo externo
 
-  const isJS = url.includes('.js');
+  const isJS  = url.includes('.js');
+  const isHTML = url.includes('.html') || url.endsWith('/');
+  const isCSS  = url.includes('.css');
 
-  if (isJS) {
-    // ⚡ NETWORK-FIRST para JS propio: siempre intentar red primero
+  if (isJS || isHTML || isCSS) {
+    // ⚡ NETWORK-FIRST para JS, HTML y CSS: siempre intentar red primero
+    // Esto garantiza que TODOS los dispositivos reciban la versión más reciente del código.
     event.respondWith(
       fetch(event.request)
         .then((response) => {
@@ -65,7 +68,7 @@ self.addEventListener('fetch', (event) => {
         .catch(() => caches.match(event.request))
     );
   } else {
-    // 📦 CACHE-FIRST para assets estáticos propios (imágenes, CSS, HTML)
+    // 📦 CACHE-FIRST solo para imágenes y otros assets estáticos (no cambian)
     event.respondWith(
       caches.match(event.request).then((cached) => {
         if (cached) return cached;

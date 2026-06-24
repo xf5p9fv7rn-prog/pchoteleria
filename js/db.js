@@ -4,7 +4,7 @@
  */
 
 import { MASTER_ROOMS } from './roomsConfig.js';
-import { supabase } from './supabaseClient.js';
+import { supabase } from './supabaseClient.js?v=20260616';
 
 const DB_NAME = 'campmanager_db';
 const DB_VERSION = 4;
@@ -326,27 +326,45 @@ export async function fn_transicionDiaria() {
     const hoy = new Date().toISOString().split('T')[0];
     try {
 
-        // ── CHECK-IN: PreAsignada → Ocupada cuando fecha_checkin <= HOY ─────
-        if (_ultimaTransicion !== hoy) {
-            console.log('[Transición] 🔄 Verificando check-ins para', hoy);
-            const { data: camasCheckIn } = await supabase
-                .from('v2_asignaciones')
-                .select('id_cama')
-                .lte('fecha_checkin', hoy);
+        // ── 1. PRE-ASIGNADO → ACTIVO (corre CADA ciclo, no solo 1 vez/día) ──────
+        // Si un trabajador tiene fecha_checkin <= hoy y sigue en pre_asignado,
+        // lo transicionamos a 'activa' y la cama pasa de PreAsignada → Ocupada.
+        // Se corre cada 90s para que trabajadores recién cargados se activen pronto.
+        const { data: preAsignadosHoy } = await supabase
+            .from('v2_asignaciones')
+            .select('id, id_cama')
+            .eq('estado_asignacion', 'pre_asignado')
+            .lte('fecha_checkin', hoy)
+            .is('fecha_checkout', null);
 
-            if (camasCheckIn?.length) {
-                const ids = [...new Set(camasCheckIn.map(a => a.id_cama))];
-                const { count: ci } = await supabase
+        if (preAsignadosHoy?.length) {
+            const asigIds = preAsignadosHoy.map(a => a.id);
+            const camaIds = [...new Set(preAsignadosHoy.map(a => a.id_cama))];
+
+            // Lotes de 20 para evitar URLs largas (409 Supabase URL limit)
+            const CHUNK = 20;
+            for (let i = 0; i < asigIds.length; i += CHUNK) {
+                await supabase
+                    .from('v2_asignaciones')
+                    .update({ estado_asignacion: 'activa' })
+                    .in('id', asigIds.slice(i, i + CHUNK));
+            }
+            for (let i = 0; i < camaIds.length; i += CHUNK) {
+                await supabase
                     .from('v2_camas')
                     .update({ estado: 'Ocupada' })
-                    .in('id_cama', ids)
+                    .in('id_cama', camaIds.slice(i, i + CHUNK))
                     .eq('estado', 'PreAsignada');
-                if (ci) console.log(`[Transición] ✅ Check-in: ${ci} cama(s) PreAsignada → Ocupada`);
             }
-            _ultimaTransicion = hoy;
+
+            console.log(`[Transición] ✅ CHECK-IN: ${preAsignadosHoy.length} pre_asignado → activa`);
+            window.dispatchEvent(new CustomEvent('v2:refresh'));
         }
 
-        // ── CHECKOUT AUTOMÁTICO A LAS 22:00 (una vez por día) ──────────────
+        // ── 2. CHECKOUT AUTOMÁTICO A LAS 22:00 (una vez por día) ───────────────
+        // La fecha_salida_programada indica el último día del período.
+        // A las 22:00 de ESE día hacemos checkout automático de la persona.
+        // La cama se libera SOLO si no hay otra asignación activa o pre-asignada.
         const hora = new Date().getHours();
         if (hora >= 22 && _ultimoCheckout22 !== hoy) {
             const { data: paraCheckout } = await supabase
@@ -359,14 +377,16 @@ export async function fn_transicionDiaria() {
                 const ids     = paraCheckout.map(a => a.id);
                 const camaIds = [...new Set(paraCheckout.map(a => a.id_cama))];
 
-                // Marcar asignaciones como checkout
-                await supabase
-                    .from('v2_asignaciones')
-                    .update({ fecha_checkout: hoy })
-                    .in('id', ids);
+                // Lotes de 20 para evitar URLs largas (409)
+                const CHUNK = 20;
+                for (let i = 0; i < ids.length; i += CHUNK) {
+                    await supabase
+                        .from('v2_asignaciones')
+                        .update({ fecha_checkout: new Date().toISOString(), estado_asignacion: 'sin_checkout' })
+                        .in('id', ids.slice(i, i + CHUNK));
+                }
 
-                // ✅ FIX N+1: Una sola query para saber qué camas aún tienen asignación activa
-                // (en lugar de hacer una query por cada camaId en un for-loop)
+                // Liberar camas que NO tengan otra asignación activa o pre-asignada
                 const { data: camasConActiva } = await supabase
                     .from('v2_asignaciones')
                     .select('id_cama')
@@ -377,12 +397,15 @@ export async function fn_transicionDiaria() {
                 const camasALiberar = camaIds.filter(id => !camasConActivaSet.has(id));
 
                 if (camasALiberar.length > 0) {
-                    await supabase.from('v2_camas')
-                        .update({ estado: 'Disponible' })
-                        .in('id_cama', camasALiberar)
-                        .neq('estado', 'Deshabilitada');
+                    for (let i = 0; i < camasALiberar.length; i += CHUNK) {
+                        await supabase.from('v2_camas')
+                            .update({ estado: 'Disponible' })
+                            .in('id_cama', camasALiberar.slice(i, i + CHUNK))
+                            .neq('estado', 'Deshabilitada');
+                    }
                 }
 
+                console.log(`[Transición] ✅ CHECKOUT 22h: ${ids.length} asig finalizadas, ${camasALiberar.length} camas liberadas`);
                 window.dispatchEvent(new CustomEvent('v2:refresh'));
             }
             _ultimoCheckout22 = hoy;

@@ -3,16 +3,16 @@
  * Sistema V2 — Todas las rutas conectadas a tablas v2_
  */
 
-import { openDB, getAll, getById, put, remove, seedDemoData, cleanupExpiredAssignments, getExpiredBeds, confirmCheckout, ensureDefaultUsers, ensureAramarkReservations, ensureAllRooms, freeAllRoomRestrictions, procesarColaDeSincronizacion, preloadAllData, initRealtimeSync, cleanupRealtimeSync, startPeriodicCloudRefresh, autoPromoteNextOccupants, purgeSyncQueue } from './db.js';
+import { openDB, getAll, getById, put, remove, seedDemoData, cleanupExpiredAssignments, getExpiredBeds, confirmCheckout, ensureDefaultUsers, ensureAramarkReservations, ensureAllRooms, freeAllRoomRestrictions, procesarColaDeSincronizacion, preloadAllData, initRealtimeSync, cleanupRealtimeSync, startPeriodicCloudRefresh, autoPromoteNextOccupants, purgeSyncQueue } from './db.js?v=20260615';
 import { showToast, watchOnlineStatus } from './utils.js';
-import { renderV2Infraestructura } from './v2/modules/v2-infraestructura.js';
+import { renderV2Infraestructura } from './v2/modules/v2-infraestructura.js?v=20260622-1730';
 import { renderV2Anglo }          from './v2/modules/v2-anglo.js';
 import { renderV2Dashboard } from './v2/modules/v2-dashboard.js';
 import { renderV2Buscador } from './v2/modules/v2-buscador.js';
 import { renderV2Checkin } from './v2/modules/v2-checkin.js?v=20260604-1000';
 import { renderV2Trabajadores } from './v2/modules/v2-trabajadores.js';
-import { renderV2Solicitudes } from './v2/modules/v2-solicitudes.js?v=20260602-1700';
-import { renderV2CamasPerdidas } from './v2/modules/v2-camas-perdidas.js';
+import { renderV2Solicitudes } from './v2/modules/v2-solicitudes.js?v=20260622-1910';
+import { renderV2CamasPerdidas } from './v2/modules/v2-camas-perdidas.js?v=20260623-1630';
 import { renderV2Cupos }      from './v2/modules/v2-cupos.js';
 import { renderV2Censo }      from './v2/modules/v2-censo.js';
 import { renderCensoTrabajadores } from './v2/modules/v2-censo-trabajadores.js';
@@ -23,23 +23,22 @@ import { renderV2Backup }      from './v2/modules/v2-backup.js';
 import { renderV2Asistencia }  from './v2/modules/v2-asistencia.js?v=20260602-1620';
 import { renderReagrupacion }  from './v2/modules/v2-reagrupacion.js';
 import { renderV2InformeEjecutivo } from './v2/modules/v2-informe-ejecutivo.js?v=20260603-1820';
+import { renderV2Detalle }         from './v2/modules/v2-detalle.js?v=20260623-1640';
 
-// ── Supervisores autorizados (Cupos por Gerencia + Censo Admin) ──────────────
-const SUPERVISOR_EMAILS = [
-    'garrido-juan2@aramark.cl',
-    'vegao-rodrigo@aramark.cl',
-    'barrera-guissele@aramark.cl',
-    'juan-1154@hotmail.es'  // superadmin también tiene acceso
-];
-function getRole(email) {
-    if (email === 'juan-1154@hotmail.es') return 'superadmin';
-    if (SUPERVISOR_EMAILS.includes(email.toLowerCase())) return 'supervisor';
-    return 'admin';
+// ── Roles basados en nombre de usuario (no email) ────────────────────────────
+function getRole(username) {
+    if (!username) return 'recepcionista';
+    // Los supervisores están definidos por nombre en auth.js
+    const SUPERVISORS = ['Juan Garrido', 'Guissele Barrera'];
+    if (SUPERVISORS.includes(username)) return 'supervisor';
+    // Roles especiales definidos en auth.js (lavanderia, invitado)
+    // se preservan tal cual desde la sesión — este fn es sólo fallback para legacy
+    return 'recepcionista';
 }
 import { renderUsuarios } from './modules/usuarios.js';
 import { renderAsistencia } from './modules/asistencia.js';
 import { renderCupos } from './modules/cupos.js';
-import { loginApp, logoutApp, checkSession } from './auth.js';
+import { loginApp, logoutApp, checkSession, refreshActivity, INACTIVITY_MS } from './auth.js?v=2';
 import { logAudit } from './v2/v2-audit.js';
 import { ejecutarAutoRotacion } from './v2/v2-service.js';
 
@@ -63,18 +62,20 @@ const ROUTES = {
     v2censo:          { label: 'Censo Administrativo',     icon: '📅', render: renderV2Censo },
     v2censotrab:      { label: 'Censo Trabajadores QR',    icon: '📲', render: renderCensoTrabajadores },
     v2trabajadores:   { label: 'Padrón Trabajadores',      icon: '👥', render: renderV2Trabajadores },
-    v2camasperdidas:  { label: 'Camas Perdidas',           icon: '🛏️', render: renderV2CamasPerdidas, supervisorOnly: true },
+    v2camasperdidas:  { label: 'Camas Perdidas',           icon: '🛏️', render: renderV2CamasPerdidas },  // ✅ Visible para todos los roles
     v2reagrupacion:   { label: 'Reagrupación de Camas',     icon: '🔀', render: renderReagrupacion,   supervisorOnly: true },
     v2cupos:          { label: 'Cupos por Gerencia',       icon: '📊', render: renderV2Cupos,        supervisorOnly: true },
     v2distribucion:   { label: 'Distribución Habitaciones',icon: '🏨', render: renderV2Distribucion, supervisorOnly: true },
     v2historial:      { label: 'Historial',                 icon: '📋', render: renderV2Historial,   supervisorOnly: true },
     v2cama3:          { label: 'Gestión Cama 3',            icon: '🛏️', render: renderV2Cama3,      supervisorOnly: true },
     v2backup:         { label: 'Respaldo Diario',            icon: '🛡️', render: renderV2Backup,     supervisorOnly: true },
+    v2detalle:        { label: 'Detalle',                    icon: '📋', render: renderV2Detalle,   supervisorOnly: true },
     v2asistencia:     { label: 'Control de Asistencia',      icon: '📋', render: renderV2Asistencia }, // ✅ Visible para todos los admins
-    // ── Superadmin ────────────────────────────────────────────
-    cupos:      { label: 'Cupos por Gerencia',          icon: '🎯', render: renderCupos,      superadminOnly: true, hidden: true },
-    asistencia: { label: 'Control Asistencia',           icon: '✅', render: renderAsistencia, superadminOnly: true, hidden: true },
-    users:      { label: 'Gestión de Administradores', icon: '👥', render: renderUsuarios,  superadminOnly: true },
+    // ── Solo Superadmin (legacy — ocultos) ───────────────────────────────────────
+    cupos:      { label: 'Cupos por Gerencia',   icon: '🎯', render: renderCupos,      superadminOnly: true, hidden: true },
+    asistencia: { label: 'Control Asistencia',    icon: '✅', render: renderAsistencia, superadminOnly: true, hidden: true },
+    // ── Gestión de Usuarios — visible para Supervisores ──────────────────────────
+    users: { label: 'Gestión de Usuarios', icon: '👥', render: renderUsuarios, supervisorOnly: true },
 };
 
 
@@ -100,16 +101,17 @@ async function boot() {
         console.warn('[Boot] Error abriendo IndexedDB:', e);
     }
 
-    // ── PASO 2: Verificar sesión (sin importar el estado de la BD) ────────────
-    const userSession = await checkSession();
+    // ── PASO 2: Verificar sesión local (sessionStorage) ──────────────────────
+    const userSession = checkSession();
 
     if (!userSession) {
         showLoginOverlay();
     } else {
         window._currentUser = {
-            username: userSession.email,
-            name: userSession.email.split('@')[0],
-            role: getRole(userSession.email)
+            username:    userSession.username,
+            name:        userSession.displayName,
+            role:        userSession.role,
+            initials:    userSession.initials,
         };
         initApp();
 
@@ -180,13 +182,18 @@ async function initApp() {
     document.getElementById('app').style.display = 'flex';
     document.getElementById('login-overlay').style.display = 'none';
 
+    // ── Inactividad: iniciar timer global de 10 horas ────────────────────────
+    _startInactivityWatcher();
+
     // Update Profile UI
     const u = window._currentUser;
-    const displayName = u.name.charAt(0).toUpperCase() + u.name.slice(1);
+    const displayName = u.name || u.username;
+    const roleLabel   = u.role === 'supervisor' ? 'Supervisor' : 'Recepcionista';
+    const initials    = u.initials || displayName.slice(0, 2).toUpperCase();
 
     document.getElementById('sidebar-user-name').textContent = displayName;
-    document.getElementById('sidebar-user-role').textContent = u.role === 'superadmin' ? 'Super Visor' : 'Administrador';
-    document.getElementById('sidebar-avatar').textContent = displayName.slice(0, 2).toUpperCase();
+    document.getElementById('sidebar-user-role').textContent = roleLabel;
+    document.getElementById('sidebar-avatar').textContent = initials;
 
     // Register service worker
     if ('serviceWorker' in navigator) {
@@ -351,72 +358,115 @@ async function initApp() {
 }
 
 function showLoginOverlay() {
-    const overlay = document.getElementById('login-overlay');
-    const btn = document.getElementById('login-btn');
+    const overlay  = document.getElementById('login-overlay');
+    const btn      = document.getElementById('login-btn');
+    const btnText  = document.getElementById('login-btn-text');
+    const btnSpinner = document.getElementById('login-btn-spinner');
     const errorMsg = document.getElementById('login-error');
+    const userInput = document.getElementById('login-user');
+    const passInput = document.getElementById('login-pass');
 
-    if (!overlay || !btn) {
-        console.error('[Auth] UI elements missing');
-        return;
+    if (!overlay || !btn) { console.error('[Auth] UI elements missing'); return; }
+
+    overlay.classList.remove('opacity-0');
+    overlay.style.display = 'flex';
+
+    // Mostrar aviso de sesión expirada por inactividad
+    const logoutReason = localStorage.getItem('cm_logout_reason');
+    if (logoutReason === 'inactivity') {
+        const alert = document.getElementById('inactivity-alert');
+        if (alert) alert.classList.remove('hidden');
+        localStorage.removeItem('cm_logout_reason');
     }
 
-    overlay.style.display = 'flex';
-    overlay.style.opacity = '1';
+    // Toggle visibilidad contraseña
+    window.togglePasswordVisibility = () => {
+        const eyeOpen   = document.getElementById('eye-open');
+        const eyeClosed = document.getElementById('eye-closed');
+        if (passInput.type === 'password') {
+            passInput.type = 'text';
+            eyeOpen.classList.add('hidden');
+            eyeClosed.classList.remove('hidden');
+        } else {
+            passInput.type = 'password';
+            eyeOpen.classList.remove('hidden');
+            eyeClosed.classList.add('hidden');
+        }
+    };
 
-    btn.onclick = async (e) => {
-        if (e) e.preventDefault();
+    // Limpiar errores de borde al escribir
+    userInput?.addEventListener('input', () => userInput.classList.remove('border-red-500'));
+    passInput?.addEventListener('input', () => passInput.classList.remove('border-red-500'));
 
-        const userVal = document.getElementById('login-user').value.trim();
-        const passVal = document.getElementById('login-pass').value.trim();
+    const doLogin = async () => {
+        const userVal = userInput.value.trim();
+        const passVal = passInput.value;
 
+        // Validación visual de campos vacíos
+        let hasError = false;
+        if (!userVal) { userInput.classList.add('border-red-500'); hasError = true; }
+        if (!passVal) { passInput.classList.add('border-red-500'); hasError = true; }
+        if (hasError) {
+            errorMsg.textContent = 'Complete todos los campos para continuar.';
+            errorMsg.classList.remove('hidden');
+            return;
+        }
+
+        // Estado de carga
         btn.disabled = true;
-        const originalText = btn.textContent;
-        btn.textContent = '⏱️ Verificando...';
-        errorMsg.style.display = 'none';
+        if (btnText)   btnText.textContent = 'Verificando...';
+        if (btnSpinner) btnSpinner.classList.remove('hidden');
+        errorMsg.classList.add('hidden');
 
         try {
             const result = await loginApp(userVal, passVal);
 
             if (result.success) {
-                btn.textContent = '📥 Conectando...';
-                btn.style.background = '#276749';
-                btn.style.borderColor = '#276749';
+                if (btnText) btnText.textContent = 'Conectando...';
+                btn.classList.remove('bg-red-600', 'hover:bg-red-700');
+                btn.classList.add('bg-emerald-600');
 
                 window._currentUser = {
-                    username: result.user.email,
-                    name: result.user.email.split('@')[0],
-                    role: getRole(result.user.email)
+                    username: result.user.username,
+                    name:     result.user.displayName,
+                    role:     result.user.role,
+                    initials: result.user.initials,
                 };
 
                 try {
-                    await put('logs', { timestamp: new Date().toISOString(), username: userVal, action: 'LOGIN', details: 'Acceso seguro en la nube' });
-                    await logAudit('LOGIN', `Ingreso al sistema desde ${navigator.platform||'web'}`, { email: userVal, role: getRole(userVal) });
-                } catch (err) { }
+                    await put('logs', { timestamp: new Date().toISOString(), username: userVal, action: 'LOGIN', details: 'Acceso local seguro' });
+                    await logAudit('LOGIN', `Ingreso al sistema · ${userVal} · Rol: ${result.user.role}`, { username: userVal, role: result.user.role });
+                } catch (_) { }
 
+                overlay.style.transition = 'opacity 0.4s ease';
                 overlay.style.opacity = '0';
                 setTimeout(() => {
                     overlay.style.display = 'none';
                     initApp();
                 }, 400);
             } else {
-                errorMsg.innerHTML = `⚠️ Error: ${result.message || 'Credenciales inválidas'}`;
-                errorMsg.style.display = 'block';
-                btn.classList.add('shake');
-                setTimeout(() => btn.classList.remove('shake'), 450);
+                errorMsg.textContent = `⚠️ ${result.message || 'Credenciales inválidas'}`;
+                errorMsg.classList.remove('hidden');
+                userInput.classList.add('border-red-500');
+                passInput.classList.add('border-red-500');
+                btn.classList.add('animate-shake');
+                setTimeout(() => btn.classList.remove('animate-shake'), 450);
                 btn.disabled = false;
-                btn.textContent = originalText;
+                if (btnText)   btnText.textContent = 'Iniciar Sesión';
+                if (btnSpinner) btnSpinner.classList.add('hidden');
             }
         } catch (err) {
-            errorMsg.textContent = '⚠️ Error inesperado al conectar con el servidor.';
-            errorMsg.style.display = 'block';
+            errorMsg.textContent = '⚠️ Error inesperado. Verifique su conexión.';
+            errorMsg.classList.remove('hidden');
             btn.disabled = false;
-            btn.textContent = originalText;
+            if (btnText)   btnText.textContent = 'Iniciar Sesión';
+            if (btnSpinner) btnSpinner.classList.add('hidden');
         }
     };
 
-    document.getElementById('login-pass')?.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') btn.click();
-    });
+    btn.onclick = doLogin;
+    passInput?.addEventListener('keypress', e => { if (e.key === 'Enter') doLogin(); });
+    userInput?.addEventListener('keypress', e => { if (e.key === 'Enter') passInput?.focus(); });
 }
 
 // ── Badge: Solicitudes Pendientes ───────────────────────────────────────────
@@ -444,24 +494,29 @@ function buildNav() {
     const bottomNavEl = document.getElementById('bottom-nav');
     if (!navEl) return;
 
+    const isSupervisor = ['supervisor', 'superadmin'].includes(window._currentUser?.role);
+
     navEl.innerHTML = `
     <div class="nav-section-label">Campamentos Perez V2</div>
     ${Object.entries(ROUTES).filter(([k, r]) => !r.superadminOnly && !r.supervisorOnly && !r.hidden).map(([key, r]) => navItemHTML(key, r)).join('')}
 
-    ${(['supervisor','superadmin'].includes(window._currentUser?.role)) ? `
+    ${isSupervisor ? `
     <div class="nav-section-label">Supervisores</div>
     ${Object.entries(ROUTES).filter(([k, r]) => r.supervisorOnly && !r.hidden).map(([key, r]) => navItemHTML(key, r)).join('')}
     ` : ''}
 
-    ${window._currentUser?.role === 'superadmin' ? `
-    <div class="nav-section-label">Super Visor</div>
-    ${Object.entries(ROUTES).filter(([k, r]) => r.superadminOnly && !r.hidden).map(([key, r]) => navItemHTML(key, r)).join('')}
-    ` : ''}
-
     <div class="nav-section-label">Portales</div>
+    <a href="panel-dotacion.html" target="_blank" class="nav-item" style="background:linear-gradient(135deg,rgba(16,185,129,0.12),rgba(5,150,105,0.06));border:1px solid rgba(16,185,129,0.28);border-radius:10px;">
+      <span class="nav-icon">👥</span>
+      <span class="nav-label" style="color:#059669;font-weight:700;">Panel Dotación Excel</span>
+    </a>
     <a href="dashboard-resumen.html" target="_blank" class="nav-item" style="background:linear-gradient(135deg,rgba(99,102,241,0.10),rgba(139,92,246,0.06));border:1px solid rgba(99,102,241,0.22);border-radius:10px;">
       <span class="nav-icon">📈</span>
       <span class="nav-label" style="color:#4f46e5;font-weight:700;">Resumen General</span>
+    </a>
+    <a href="detalle-portal.html" target="_blank" class="nav-item" style="background:linear-gradient(135deg,rgba(129,140,248,0.12),rgba(99,102,241,0.06));border:1px solid rgba(129,140,248,0.28);border-radius:10px;">
+      <span class="nav-icon">📋</span>
+      <span class="nav-label" style="color:#818cf8;font-weight:700;">Portal Detalle (QR)</span>
     </a>
     <a href="censo-portal.html" target="_blank" class="nav-item">
       <span class="nav-icon">📋</span>
@@ -490,12 +545,19 @@ function buildNav() {
   `;
 
     if (bottomNavEl) {
+        const role  = window._currentUser?.role;
+        const isSup = ['supervisor', 'superadmin'].includes(role);
         bottomNavEl.innerHTML = Object.entries(ROUTES)
-            .filter(([k, r]) => !r.superadminOnly || window._currentUser?.role === 'superadmin')
+            .filter(([k, r]) => {
+                if (r.hidden)           return false; // nunca en bottom-nav
+                if (r.superadminOnly)   return role === 'superadmin';
+                if (r.supervisorOnly)   return isSup;
+                return true; // visible para todos
+            })
             .map(([key, r]) => `
       <div class="bottom-nav-item ${key === currentRoute ? 'active' : ''}" 
            id="bnav-${key}" onclick="window.navigate('${key}')">
-        <div class="bnav-icon-wrap ${key === currentRoute ? '' : ''}">
+        <div class="bnav-icon-wrap">
           <div class="bnav-icon">${r.icon}</div>
         </div>
         <span>${r.label.split(' ')[0]}</span>
@@ -521,6 +583,19 @@ function navItemHTML(key, r) {
 
 async function navigate(route) {
     if (!(route in ROUTES)) return;
+
+    // ── Guard de ruta: recepcionistas bloqueados de zonas de supervisor ────────
+    const routeDef = ROUTES[route];
+    const userRole = window._currentUser?.role;
+    const canAccessSupervisor = ['supervisor', 'superadmin'].includes(userRole);
+    if (routeDef.superadminOnly && userRole !== 'superadmin') {
+        import('./utils.js').then(m => m.showToast('⛔ Acceso restringido — Solo superadmin', 'error'));
+        route = 'v2dashboard';
+    } else if (routeDef.supervisorOnly && !canAccessSupervisor) {
+        import('./utils.js').then(m => m.showToast('⛔ Acceso restringido — Solo supervisores', 'error'));
+        route = 'v2dashboard';
+    }
+
     currentRoute = route;
     window._currentRoute = route; // 🔒 Exponer globalmente para guards en módulos
 
@@ -591,10 +666,29 @@ window.navigate = navigate;
 
 window.handleLogout = async () => {
     if (confirm('¿Seguro que deseas cerrar sesión?')) {
-        cleanupRealtimeSync(); // Cerrar canales Realtime antes de desconectar
-        await logoutApp();
+        cleanupRealtimeSync();
+        logoutApp('manual');
     }
 };
+
+// ── Timer de Inactividad — se arranca en initApp() ──────────────────────────
+function _startInactivityWatcher() {
+    // Eventos que cuentan como actividad del usuario
+    const ACTIVITY_EVENTS = ['mousemove', 'mousedown', 'keypress', 'scroll', 'touchstart', 'click', 'pointermove'];
+    ACTIVITY_EVENTS.forEach(ev => document.addEventListener(ev, refreshActivity, { passive: true }));
+
+    // Verificar cada minuto si el usuario lleva más de 10h inactivo
+    setInterval(() => {
+        const lastActivity = parseInt(localStorage.getItem('cm_last_activity') || '0', 10);
+        if (Date.now() - lastActivity > INACTIVITY_MS) {
+            console.warn('[Auth] Sesión expirada por inactividad. Cerrando sesión...');
+            cleanupRealtimeSync();
+            logoutApp('inactivity');
+        }
+    }, 60_000); // Revisar cada 60 segundos
+
+    console.log('[Auth] ⏰ Timer de inactividad activo — sesión expira tras 10h sin actividad.');
+}
 
 if ('serviceWorker' in navigator) {
     navigator.serviceWorker.addEventListener('message', (event) => {

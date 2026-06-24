@@ -206,7 +206,7 @@ export class CampDataEngine {
     const camasPreSet  = new Set(reservas.map(a => String(a.id_cama)));
 
     // ── Habitaciones bloqueadas ───────────────────────────────────────────
-    const esBloqueo     = h => /manten|reparac|bloquea|bloqu/i.test(h.estado || '');
+    const esBloqueo     = h => /manten|reparac|bloquea|bloqu/i.test(h.estado || '') || h.en_mantencion === true;
     const habsBloqueadas = habitacionesAll.filter(esBloqueo);
     const habsBloqIds   = new Set(habsBloqueadas.map(h => String(h.id_custom || h.id || '')));
 

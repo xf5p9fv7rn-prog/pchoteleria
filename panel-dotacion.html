@@ -1,0 +1,1054 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Panel Dotación — PC Hotelería</title>
+  <meta name="description" content="Panel de control de dotación activa por turno y fecha.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+
+  <!-- SheetJS local (prioritario) con fallback CDN -->
+  <script>
+  (function(){
+    var s = document.createElement('script');
+    s.src = './js/xlsx.full.min.js';
+    s.onerror = function(){
+      var s2 = document.createElement('script');
+      s2.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+      document.head.appendChild(s2);
+    };
+    document.head.appendChild(s);
+  })();
+  </script>
+
+  <!-- Supabase JS (para importar al sistema) -->
+  <script src="https://unpkg.com/@supabase/supabase-js@2.49.4/dist/umd/supabase.js"></script>
+
+  <style>
+    :root {
+      --navy: #0f172a;
+      --navy2: #1e293b;
+      --red: #e63946;
+      --blue: #3b82f6;
+      --green: #10b981;
+      --purple: #8b5cf6;
+      --amber: #f59e0b;
+      --cyan: #06b6d4;
+      --bg: #f0f4f8;
+      --border: rgba(0,0,0,.08);
+      --white: #fff;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background: var(--bg);
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ─── HEADER ─── */
+    .app-header {
+      background: linear-gradient(135deg, #0f172a 0%, #1a3252 60%, #1e293b 100%);
+      padding: 0 24px;
+      position: sticky; top: 0; z-index: 100;
+      box-shadow: 0 4px 24px rgba(0,0,0,.35);
+    }
+    .header-inner {
+      max-width: 1400px; margin: 0 auto;
+      display: flex; align-items: center; gap: 18px; height: 64px;
+    }
+    .header-logo { font-size: 26px; }
+    .header-brand { font-size: 17px; font-weight: 800; color: #fff; }
+    .header-brand span { color: #f87171; }
+    .header-sub { font-size: 11px; color: rgba(255,255,255,.5); margin-top: 2px; }
+    .header-date { margin-left: auto; text-align: right; color: rgba(255,255,255,.7); font-size: 12px; font-weight: 600; }
+    .header-date strong { color: #fff; font-size: 14px; display: block; }
+
+    /* ─── MAIN ─── */
+    .app-main { max-width: 1400px; margin: 0 auto; padding: 24px 20px 60px; }
+
+    /* ─── UPLOAD ─── */
+    #upload-zone {
+      background: var(--white); border: 2.5px dashed #cbd5e1;
+      border-radius: 20px; padding: 60px 40px; text-align: center;
+      cursor: pointer; transition: all .2s; position: relative;
+    }
+    #upload-zone:hover, #upload-zone.drag { border-color: var(--blue); background: #eff6ff; }
+    #upload-zone input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+    .up-icon { font-size: 52px; margin-bottom: 16px; }
+    .up-title { font-size: 20px; font-weight: 800; color: var(--navy2); margin-bottom: 8px; }
+    .up-hint { font-size: 13px; color: #64748b; max-width: 380px; margin: 0 auto; line-height: 1.6; }
+    .col-tags { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin-top: 18px; }
+    .col-tag {
+      background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 99px;
+      padding: 3px 10px; font-size: 11px; color: #475569; font-weight: 600;
+    }
+    .spinner {
+      width: 40px; height: 40px;
+      border: 3px solid #e2e8f0; border-top-color: var(--blue);
+      border-radius: 50%; animation: spin .7s linear infinite;
+      margin: 40px auto;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ─── FILTRO TURNO ─── */
+    #filter-bar {
+      background: var(--white); border-radius: 16px; padding: 14px 20px;
+      margin-bottom: 20px; box-shadow: 0 2px 10px rgba(0,0,0,.06);
+      border: 1px solid var(--border);
+      display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    }
+    .filter-lbl { font-size: 12px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: .5px; }
+    .turno-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+    .t-btn {
+      padding: 8px 18px; border-radius: 99px;
+      border: 2px solid #e2e8f0; background: #f8fafc;
+      color: #475569; font-size: 13px; font-weight: 700;
+      cursor: pointer; transition: all .18s; font-family: inherit;
+    }
+    .t-btn:hover { border-color: #94a3b8; background: #f1f5f9; }
+    .t-btn.active { background: linear-gradient(135deg, #1e293b, #334155); color: #fff; border-color: transparent; box-shadow: 0 3px 10px rgba(30,41,59,.3); }
+    .t-btn[data-t="7x7"].active   { background: linear-gradient(135deg, #1d4ed8, #3b82f6); }
+    .t-btn[data-t="4x3"].active   { background: linear-gradient(135deg, #7c3aed, #8b5cf6); }
+    .t-btn[data-t="14x14"].active { background: linear-gradient(135deg, #0e7490, #06b6d4); }
+    .t-btn[data-t="5x2"].active   { background: linear-gradient(135deg, #b45309, #f59e0b); }
+    .t-btn[data-t="8x6"].active   { background: linear-gradient(135deg, #065f46, #10b981); }
+    .filter-info { margin-left: auto; font-size: 12px; color: #94a3b8; font-weight: 500; }
+    #btn-cambiar {
+      background: none; border: none; color: var(--blue);
+      cursor: pointer; font-size: 11px; font-weight: 700; font-family: inherit; margin-left: 8px;
+    }
+
+    /* ─── KPI GRID ─── */
+    #kpi-grid {
+      display: grid; grid-template-columns: repeat(4,1fr); gap: 16px; margin-bottom: 22px;
+    }
+    @media(max-width:900px){ #kpi-grid { grid-template-columns: repeat(2,1fr); } }
+    @media(max-width:500px){ #kpi-grid { grid-template-columns: 1fr; } }
+
+    .kpi-card {
+      background: var(--white); border-radius: 18px;
+      padding: 22px 24px; box-shadow: 0 2px 12px rgba(0,0,0,.07);
+      border: 1px solid var(--border); position: relative; overflow: hidden;
+      transition: transform .2s, box-shadow .2s;
+    }
+    .kpi-card:hover { transform: translateY(-3px); box-shadow: 0 8px 28px rgba(0,0,0,.12); }
+    .kpi-card::before {
+      content: ''; position: absolute; top: 0; left: 0; right: 0; height: 4px; border-radius: 18px 18px 0 0;
+    }
+    .kpi-card.total::before  { background: linear-gradient(90deg, #1d4ed8, #3b82f6); }
+    .kpi-card.ref::before    { background: linear-gradient(90deg, #7c3aed, #a78bfa); }
+    .kpi-card.copc::before   { background: linear-gradient(90deg, #065f46, #10b981); }
+    .kpi-card.noche::before  { background: linear-gradient(90deg, #4c1d95, #8b5cf6); }
+    .kpi-ico { font-size: 28px; margin-bottom: 10px; }
+    .kpi-val { font-size: 44px; font-weight: 900; line-height: 1; margin-bottom: 6px; letter-spacing: -2px; }
+    .kpi-card.total .kpi-val  { color: #1d4ed8; }
+    .kpi-card.ref   .kpi-val  { color: #7c3aed; }
+    .kpi-card.copc  .kpi-val  { color: #059669; }
+    .kpi-card.noche .kpi-val  { color: #6d28d9; }
+    .kpi-lbl { font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: .6px; }
+    .kpi-sub { font-size: 12px; color: #64748b; margin-top: 4px; font-weight: 500; }
+    .kpi-badge {
+      position: absolute; top: 16px; right: 16px;
+      font-size: 10px; font-weight: 800; padding: 3px 9px; border-radius: 99px;
+    }
+    .kpi-card.total  .kpi-badge { background: #eff6ff; color: #1d4ed8; }
+    .kpi-card.ref    .kpi-badge { background: #f5f3ff; color: #7c3aed; }
+    .kpi-card.copc   .kpi-badge { background: #f0fdf4; color: #059669; }
+    .kpi-card.noche  .kpi-badge { background: #ede9fe; color: #6d28d9; }
+
+    /* ─── CONTENT ROW ─── */
+    #content-row { display: grid; grid-template-columns: 1fr 320px; gap: 20px; align-items: start; }
+    @media(max-width:1100px){ #content-row { grid-template-columns: 1fr; } }
+
+    /* ─── LISTA ─── */
+    #lista-panel { background: var(--white); border-radius: 18px; box-shadow: 0 2px 12px rgba(0,0,0,.07); border: 1px solid var(--border); overflow: hidden; }
+    .lista-hdr {
+      background: linear-gradient(135deg, #0f172a, #1e293b); color: #fff;
+      padding: 18px 24px; display: flex; align-items: center; justify-content: space-between;
+    }
+    .lista-hdr h2 { font-size: 15px; font-weight: 800; }
+    .count-badge { background: rgba(255,255,255,.18); border-radius: 99px; padding: 3px 12px; font-size: 12px; font-weight: 700; }
+
+    .emp-group { border-bottom: 2px solid #f1f5f9; }
+    .emp-group:last-child { border-bottom: none; }
+    .emp-hdr {
+      background: linear-gradient(135deg, #f8fafc, #f1f5f9);
+      padding: 12px 20px; display: flex; align-items: center; justify-content: space-between;
+      cursor: pointer; user-select: none;
+    }
+    .emp-hdr:hover { background: #e2e8f0; }
+    .emp-name { font-size: 13px; font-weight: 800; color: var(--navy2); display: flex; align-items: center; gap: 10px; }
+    .emp-pill { background: var(--navy2); color: #fff; border-radius: 99px; font-size: 10px; font-weight: 700; padding: 2px 9px; }
+    .emp-stats { display: flex; gap: 12px; font-size: 11px; font-weight: 600; }
+    .emp-conf { color: #059669; }
+    .emp-pend { color: #dc2626; }
+    .emp-arr  { color: #94a3b8; font-size: 12px; }
+    .emp-body { display: block; }
+    .emp-body.collapsed { display: none; }
+
+    .w-row {
+      display: grid; grid-template-columns: 2fr 1.4fr 1.4fr auto;
+      gap: 10px; padding: 10px 20px; align-items: center;
+      font-size: 13px; border-bottom: 1px solid #f8fafc; transition: opacity .15s;
+    }
+    .w-row:last-child { border-bottom: none; }
+    .w-row:hover { opacity: .85; }
+    .w-row.conf { background-color: #f0fdf4; }
+    .w-row.pend { background-color: #fef2f2; }
+    .w-name { font-weight: 700; color: var(--navy2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .w-meta { font-size: 11px; color: #64748b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .w-cont { font-size: 10px; font-weight: 700; background: #f1f5f9; padding: 3px 8px; border-radius: 6px; color: #475569; white-space: nowrap; }
+    .w-st { font-size: 10px; font-weight: 800; padding: 3px 10px; border-radius: 99px; white-space: nowrap; }
+    .w-st.c { background: #dcfce7; color: #15803d; }
+    .w-st.p { background: #fee2e2; color: #b91c1c; }
+    @media(max-width:640px){ .w-row { grid-template-columns: 1fr auto; } .w-meta, .w-cont { display: none; } }
+
+    /* ─── EMPTY STATE ─── */
+    .empty { padding: 48px 24px; text-align: center; color: #94a3b8; }
+    .empty .ei { font-size: 40px; margin-bottom: 12px; }
+    .empty p { font-size: 14px; font-weight: 600; }
+
+    /* ─── PANEL LATERAL ─── */
+    #side-panel { display: flex; flex-direction: column; gap: 16px; }
+    .stats-card { background: var(--white); border-radius: 18px; box-shadow: 0 2px 12px rgba(0,0,0,.07); border: 1px solid var(--border); overflow: hidden; }
+    .stats-hdr { padding: 14px 18px; display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 800; color: #fff; }
+    .stats-hdr.ger  { background: linear-gradient(135deg, #1e40af, #3b82f6); }
+    .stats-hdr.supe { background: linear-gradient(135deg, #6d28d9, #8b5cf6); }
+    .stats-body { padding: 10px 0; max-height: 380px; overflow-y: auto; }
+    .s-row { display: flex; align-items: center; padding: 8px 18px; border-bottom: 1px solid #f8fafc; transition: background .15s; }
+    .s-row:last-child { border-bottom: none; }
+    .s-row:hover { background: #f8fafc; }
+    .s-bar { width: 4px; border-radius: 99px; align-self: stretch; min-height: 24px; margin-right: 10px; flex-shrink: 0; }
+    .s-name { font-size: 12px; color: #334155; font-weight: 600; line-height: 1.35; flex: 1; padding-right: 12px; }
+    .s-cnt { font-size: 18px; font-weight: 900; color: var(--navy2); min-width: 36px; text-align: right; }
+    .stats-chip { margin-left: auto; background: rgba(255,255,255,.2); border-radius: 99px; padding: 2px 10px; font-size: 11px; }
+
+    /* ─── ERROR ─── */
+    #error-banner {
+      background: #fef2f2; border: 1px solid #fecaca; border-radius: 12px;
+      padding: 14px 20px; font-size: 13px; color: #b91c1c; margin-bottom: 16px; font-weight: 600; display: none;
+    }
+
+    /* ─── SCROLLBAR ─── */
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 99px; }
+
+    /* ─── ANIMATIONS ─── */
+    @keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+    .fade { animation: fadeUp .3s ease both; }
+
+    @media(max-width:768px){
+      .app-main { padding: 16px 12px 40px; }
+      .kpi-val { font-size: 36px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header class="app-header">
+  <div class="header-inner">
+    <span class="header-logo">🏕️</span>
+    <div>
+      <div class="header-brand">PC <span>Hotelería</span></div>
+      <div class="header-sub">Panel de Control · Dotación Activa</div>
+    </div>
+    <div class="header-date" id="hdr-date"></div>
+  </div>
+</header>
+
+<div class="app-main">
+
+  <!-- ERROR -->
+  <div id="error-banner"></div>
+
+  <!-- UPLOAD ZONE -->
+  <div id="upload-zone">
+    <input type="file" id="file-input" accept=".xlsx,.xls">
+    <div class="up-icon">📂</div>
+    <div class="up-title">Cargar Excel de Dotación</div>
+    <div class="up-hint">Arrastra y suelta o haz click para seleccionar el archivo Excel oficial de carga masiva del campamento.</div>
+    <div class="col-tags">
+      <span class="col-tag">EMPRESA</span>
+      <span class="col-tag">GERENCIA</span>
+      <span class="col-tag">SUPERINTENDENCIA</span>
+      <span class="col-tag">NOMBRE COMPLETO</span>
+      <span class="col-tag">RUT</span>
+      <span class="col-tag">TURNO</span>
+      <span class="col-tag">TIPO (Dia/Noche)</span>
+      <span class="col-tag">ESTADO</span>
+      <span class="col-tag">FECHA INICIO</span>
+      <span class="col-tag">FECHA TÉRMINO</span>
+    </div>
+  </div>
+
+  <!-- PANEL PRINCIPAL (oculto hasta cargar Excel) -->
+  <div id="main-panel" style="display:none">
+
+    <!-- FILTRO TURNOS -->
+    <div id="filter-bar">
+      <span class="filter-lbl">⚡ Turno</span>
+      <div class="turno-btns" id="turno-btns"></div>
+      <div class="filter-info" id="filter-info"></div>
+      <button id="btn-importar"
+        onclick="importarASistema()"
+        style="margin-left:auto;flex-shrink:0;padding:9px 18px;border-radius:99px;border:none;
+               background:linear-gradient(135deg,#059669,#10b981);color:#fff;
+               font-size:12px;font-weight:800;cursor:pointer;font-family:inherit;
+               box-shadow:0 3px 12px rgba(16,185,129,.35);transition:all .2s;"
+        onmouseover="this.style.transform='translateY(-1px)'" onmouseout="this.style.transform=''">
+        📤 Importar al Sistema
+      </button>
+    </div>
+
+    <!-- KPIs -->
+    <div id="kpi-grid">
+      <div class="kpi-card total fade">
+        <span class="kpi-badge">CONFIRMADOS</span>
+        <div class="kpi-ico">🛏️</div>
+        <div class="kpi-val" id="kpi-total">0</div>
+        <div class="kpi-lbl">Total Camas Ocupadas</div>
+        <div class="kpi-sub" id="kpi-total-sub"></div>
+      </div>
+      <div class="kpi-card ref fade">
+        <span class="kpi-badge">SECTOR REF</span>
+        <div class="kpi-ico">🏗️</div>
+        <div class="kpi-val" id="kpi-ref">0</div>
+        <div class="kpi-lbl">Camas Ocupadas REF</div>
+        <div class="kpi-sub">Confirmados en R-220 / REF</div>
+      </div>
+      <div class="kpi-card copc fade">
+        <span class="kpi-badge">SECTOR COPC</span>
+        <div class="kpi-ico">🏢</div>
+        <div class="kpi-val" id="kpi-copc">0</div>
+        <div class="kpi-lbl">Camas Ocupadas COPC</div>
+        <div class="kpi-sub">Confirmados en COPC</div>
+      </div>
+      <div class="kpi-card noche fade">
+        <span class="kpi-badge">NOCHE</span>
+        <div class="kpi-ico">🌙</div>
+        <div class="kpi-val" id="kpi-noche">0</div>
+        <div class="kpi-lbl">Camas Ocupadas de Noche</div>
+        <div class="kpi-sub">Tipo "Noche" confirmados</div>
+      </div>
+    </div>
+
+    <!-- CONTENIDO PRINCIPAL -->
+    <div id="content-row">
+
+      <!-- LISTA -->
+      <div id="lista-panel">
+        <div class="lista-hdr">
+          <h2>👥 Dotación Activa por Empresa</h2>
+          <span class="count-badge" id="lista-count">0 personas</span>
+        </div>
+        <div id="lista-body"></div>
+      </div>
+
+      <!-- PANEL LATERAL -->
+      <div id="side-panel">
+        <div class="stats-card">
+          <div class="stats-hdr ger">
+            📊 Por Gerencia
+            <span class="stats-chip" id="ger-chip">0</span>
+          </div>
+          <div class="stats-body" id="ger-body"></div>
+        </div>
+        <div class="stats-card">
+          <div class="stats-hdr supe">
+            🔧 Por Superintendencia
+            <span class="stats-chip" id="sup-chip">0</span>
+          </div>
+          <div class="stats-body" id="sup-body"></div>
+        </div>
+      </div>
+
+    </div>
+  </div><!-- /main-panel -->
+
+</div><!-- /app-main -->
+
+<script>
+/* ══════════════════════════════════════════════════════════════════
+   PC HOTELERÍA — PANEL DOTACIÓN EXCEL (Vanilla JS)
+   Sin dependencias CDN pesadas — solo SheetJS (local)
+══════════════════════════════════════════════════════════════════ */
+
+// ── ESTADO GLOBAL ────────────────────────────────────────────────
+const state = {
+  rawData:     [],
+  turnoActivo: 'TODOS',
+  filtroFecha: false,   // false = mostrar todos; true = solo activos hoy
+  fileName:    null,
+  expanded:    {}  // empresa → true/false (expandido)
+};
+
+const TURNOS = ['TODOS', '7x7', '4x3', '14x14', '5x2', '8x6'];
+const GER_COLORS  = ['#3b82f6','#06b6d4','#8b5cf6','#f59e0b','#10b981','#e63946','#ec4899','#f43f5e','#14b8a6'];
+const SUP_COLORS  = ['#8b5cf6','#7c3aed','#6d28d9','#4c1d95','#a78bfa','#818cf8','#6366f1','#4f46e5','#4338ca'];
+
+// ── HEADER FECHA ────────────────────────────────────────────────
+(function updateClock() {
+  const el = document.getElementById('hdr-date');
+  const dias  = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
+  const meses = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+  function tick() {
+    const n = new Date();
+    el.innerHTML = '<strong>' + dias[n.getDay()] + ' ' + n.getDate() + ' ' + meses[n.getMonth()] + ' ' + n.getFullYear() + '</strong>'
+                 + n.toLocaleTimeString('es-CL', {hour:'2-digit', minute:'2-digit'}) + ' hrs';
+  }
+  tick();
+  setInterval(tick, 30000);
+})();
+
+// ── UTILIDADES ──────────────────────────────────────────────────
+function hoy() { return new Date().toLocaleDateString('en-CA'); }
+
+function toDateStr(val) {
+  if (!val) return null;
+  if (typeof val === 'number') {
+    const d = new Date(Math.round((val - 25569) * 86400 * 1000));
+    return d.toISOString().split('T')[0];
+  }
+  const s = String(val).trim();
+  const mDMY = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+  if (mDMY) return mDMY[3] + '-' + mDMY[2].padStart(2,'0') + '-' + mDMY[1].padStart(2,'0');
+  const mYMD = s.match(/^(\d{4})[\/\-]\d{1,2}[\/\-]\d{1,2}/);
+  if (mYMD) return s.substring(0,10);
+  return null;
+}
+
+function inferSector(hab) {
+  const h = String(hab || '').toUpperCase().trim();
+  if (!h) return 'REF';
+  if (h.startsWith('COPC')) return 'COPC';
+  return 'REF';
+}
+
+function showError(msg) {
+  const el = document.getElementById('error-banner');
+  if (msg) { el.innerHTML = '⚠️ ' + msg; el.style.display = 'block'; }
+  else { el.style.display = 'none'; }
+}
+
+function parsearExcel(buffer) {
+  if (!window.XLSX) throw new Error('SheetJS aún no cargó. Espera 2 segundos e intenta de nuevo.');
+
+  const wb  = XLSX.read(buffer, { type: 'array' });
+  const ws  = wb.Sheets[wb.SheetNames[0]];
+  const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+
+  // ── DETECCIÓN ROBUSTA DE LA FILA CABECERA ──────────────────────────────────
+  let hIdx = 2; // default: fila 3 (índice 2)
+  for (let i = 0; i < Math.min(raw.length, 10); i++) {
+    const row    = raw[i];
+    const texts  = row.map(c => String(c).toUpperCase().trim());
+    // Condición primaria: 'EMPRESA' exacto Y alguna celda con 'NOMBRE COMPLETO'
+    const hasEmpresaExact  = texts.some(t => t === 'EMPRESA');
+    const hasNombreComplet = texts.some(t => t.includes('NOMBRE COMPLETO'));
+    if (hasEmpresaExact && hasNombreComplet) { hIdx = i; break; }
+    // Condición secundaria: 'EMPRESA' exacto Y 'GERENCIA' exacto
+    const hasGerenciaExact = texts.some(t => t === 'GERENCIA');
+    if (hasEmpresaExact && hasGerenciaExact) { hIdx = i; break; }
+  }
+
+  const hdrs = raw[hIdx] || [];
+
+  // ── Normalizar texto: minúsculas + sin tildes + sin espacios extra ──────────
+  // Permite que 'GERENCIA', 'Gerencia', 'gerencía' sean equivalentes
+  const norm = s => String(s).toUpperCase().trim()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')  // quita tildes
+    .replace(/\s+/g, ' ');                           // normaliza espacios
+
+  // Búsqueda flexible: prioriza coincidencia exacta, luego parcial
+  function fi(...kws) {
+    // Primero: coincidencia EXACTA (columna cuyo nombre normalizado === keyword)
+    for (const kw of kws) {
+      const kwN = norm(kw);
+      const idx = hdrs.findIndex(h => norm(h) === kwN);
+      if (idx >= 0) return idx;
+    }
+    // Segundo: coincidencia PARCIAL (columna cuyo nombre contiene la keyword)
+    for (const kw of kws) {
+      const kwN = norm(kw);
+      const idx = hdrs.findIndex(h => norm(h).includes(kwN));
+      if (idx >= 0) return idx;
+    }
+    return -1;
+  }
+
+  // ── Detectar índices dinámicamente con TODAS las variantes conocidas ────────
+  let IDX = {
+    // Empresa contratista
+    empresa: fi(
+      'EMPRESA', 'CONTRATISTA', 'RAZON SOCIAL', 'RAZON_SOCIAL',
+      'EMPRESA CONTRATISTA', 'NOMBRE EMPRESA', 'SOCIEDAD', 'COMPANIA', 'COMPANY'
+    ),
+    // Número de contrato
+    contrato: fi(
+      'N CONTRATO', 'NRO CONTRATO', 'NUM CONTRATO', 'NUMERO CONTRATO',
+      'N DE CONTRATO', 'N° CONTRATO', 'CONTRATO', 'CONTRACT', 'COD CONTRATO'
+    ),
+    // Gerencia
+    gerencia: fi(
+      'GERENCIA', 'GCIA', 'AREA GERENCIA', 'NOMBRE GERENCIA',
+      'GERENCIA RESPONSABLE', 'GER'
+    ),
+    // Superintendencia
+    super: fi(
+      'SUPERINTENDENCIA', 'SUPTCIA', 'SUPERINT', 'SUPER INTENDENCIA',
+      'SUP INTENDENCIA', 'SUPERINTEND', 'SUPERIN', 'NOMBRE SUPERINTENDENCIA'
+    ),
+    // Nombre trabajador
+    nombre: fi(
+      'NOMBRE COMPLETO', 'NOMBRE DEL TRABAJADOR', 'NOMBRE TRABAJADOR',
+      'NOMBRE HUESPED', 'NOMBRES Y APELLIDOS', 'TRABAJADOR',
+      'NOM COMPLETO', 'NOMBRE'
+    ),
+    // RUT / identificación
+    rut: fi(
+      'RUT TRABAJADOR', 'RUT', 'RUN', 'NUMERO RUT', 'NRO RUT',
+      'DNI', 'CEDULA', 'ID TRABAJADOR', 'PT', 'EMPLOYEE ID', 'NUM TRAB'
+    ),
+    // Habitación
+    habitacion: fi(
+      'N HAB', 'N° HAB', 'NRO HAB', 'NUM HAB', 'NUMERO HAB',
+      'HABITACION', 'HABITACIÓN', 'PIEZA', 'DEPTO',
+      'N PIE', 'NRO PIEZA', 'HAB', 'CAMA', 'ROOM', 'BED'
+    ),
+    // Turno sistema (7x7, 4x3…)
+    turno: fi(
+      'TURNO SISTEMA', 'SISTEMA TURNO', 'TIPO TURNO', 'TURNO ROTACION',
+      'ROTACION', 'SHIFT TYPE', 'TURNO', 'SHIFT'
+    ),
+    // Tipo (día / noche)
+    tipo: fi(
+      'DIA NOCHE', 'TIPO JORNADA', 'JORNADA', 'DIA/NOCHE', 'D/N', 'TIPO'
+    ),
+    // Estado
+    estado: fi('ESTADO', 'STATUS', 'ESTADO SOLICITUD'),
+    // Fecha inicio / llegada
+    fechaIni: fi(
+      'FECHA INICIO', 'FECHA DE INICIO', 'FECHA LLEGADA',
+      'FECHA DE LLEGADA', 'F INICIO', 'CHECK IN', 'CHECKIN',
+      'INICIO TURNO', 'LLEGADA', 'INICIO'
+    ),
+    // Fecha término / salida
+    fechaFin: fi(
+      'FECHA TERMINO', 'FECHA TÉRMINO', 'FECHA FIN', 'FECHA DE TERMINO',
+      'FECHA DE TÉRMINO', 'FECHA SALIDA', 'FECHA DE SALIDA', 'F TERMINO',
+      'CHECK OUT', 'CHECKOUT', 'FIN TURNO', 'SALIDA', 'TERMINO', 'TERMIN'
+    ),
+  };
+
+  // ── FALLBACK POR POSICIÓN FIJA: solo si la detección por nombre falló ───────
+  // NUNCA sobreescribir un índice detectado correctamente por nombre de columna.
+  const OFFICIAL_POS = {
+    empresa:1, contrato:2, gerencia:3, super:4, nombre:5,
+    rut:6, habitacion:8, turno:9, tipo:11, estado:12, fechaIni:13, fechaFin:14
+  };
+  Object.keys(OFFICIAL_POS).forEach(k => {
+    if (IDX[k] === -1) IDX[k] = OFFICIAL_POS[k];
+  });
+
+  // ── Diagnóstico: muestra en consola qué columna se mapeó a cada campo ───────
+  console.log('[Panel Dotación] 🗂️ Cabeceras:', hdrs.slice(0,20).map((h,i)=>`[${i}]${String(h).substring(0,15)}`).join(' | '));
+  console.log('[Panel Dotación] 📋 Mapeo:', Object.entries(IDX).map(([k,i])=>`${k}→col${i}(${String(hdrs[i]||'?').substring(0,12)})`).join(' | '));
+
+  function get(row, k) {
+    const i = IDX[k];
+    return (i >= 0 && i < row.length) ? String(row[i] ?? '').trim() : '';
+  }
+
+  const rows = [];
+  for (let i = hIdx + 1; i < raw.length; i++) {
+    const row = raw[i];
+    if (!row || !row.length) continue;
+    const nombre = get(row, 'nombre');
+    if (!nombre || nombre.length < 3) continue;
+    // Saltar filas que parezcan sub-cabeceras
+    if (nombre.toUpperCase() === 'NOMBRE COMPLETO' || nombre.toUpperCase() === 'NOMBRE') continue;
+
+    rows.push({
+      empresa:    get(row, 'empresa')  || 'Sin empresa',
+      contrato:   get(row, 'contrato') || '—',
+      gerencia:   get(row, 'gerencia') || 'Sin gerencia',
+      super:      get(row, 'super')    || 'Sin superintendencia',
+      nombre:     nombre,
+      rut:        get(row, 'rut'),           // G=6 RUT
+      habitacion: get(row, 'habitacion'),
+      turno:      get(row, 'turno').toUpperCase().replace(/\s/g,'') || 'N/D',
+      tipo:       get(row, 'tipo')     || 'Dia',
+      estado:     get(row, 'estado')   || 'Pendiente',
+      fechaIni:   toDateStr(raw[i][IDX.fechaIni]),
+      fechaFin:   toDateStr(raw[i][IDX.fechaFin]),
+      sector:     inferSector(get(row, 'habitacion')),
+    });
+  }
+  return rows;
+}
+
+// ── FILTRAR ────────────────────────────────────────────────────
+function filtrar(data, turno) {
+  let d = data;
+
+  // Filtro de fecha (solo si el toggle está activo)
+  if (state.filtroFecha) {
+    const h = hoy();
+    d = d.filter(r => {
+      if (!r.fechaIni && !r.fechaFin) return true; // sin fechas → incluir siempre
+      const ini = r.fechaIni || '0000-01-01';
+      const fin = r.fechaFin || '9999-12-31';
+      return h >= ini && h <= fin;
+    });
+  }
+
+  // Filtro de turno
+  if (turno !== 'TODOS') {
+    d = d.filter(r => r.turno.toUpperCase() === turno.toUpperCase());
+  }
+  return d;
+}
+
+// ── AGRUPAR ────────────────────────────────────────────────────
+function agruparPorEmpresa(data) {
+  const mapa = new Map();
+  data.forEach(r => {
+    if (!mapa.has(r.empresa)) mapa.set(r.empresa, []);
+    mapa.get(r.empresa).push(r);
+  });
+  return new Map([...mapa].sort((a,b) => a[0].localeCompare(b[0], 'es')));
+}
+
+function contarPorCampo(data, campo) {
+  const mapa = new Map();
+  data.forEach(r => {
+    const k = r[campo] || 'Sin datos';
+    mapa.set(k, (mapa.get(k)||0) + 1);
+  });
+  return new Map([...mapa].sort((a,b) => b[1]-a[1]));
+}
+
+// ── RENDER TURNO BUTTONS ────────────────────────────────────────
+function renderTurnoBtns() {
+  const cont = document.getElementById('turno-btns');
+  cont.innerHTML = '';
+  TURNOS.forEach(t => {
+    const btn = document.createElement('button');
+    btn.className = 't-btn' + (state.turnoActivo === t ? ' active' : '');
+    btn.setAttribute('data-t', t);
+    btn.textContent = t === 'TODOS' ? '📋 Todos' : t;
+    btn.onclick = () => {
+      state.turnoActivo = t;
+      render();
+    };
+    cont.appendChild(btn);
+  });
+}
+
+// ── RENDER PRINCIPAL ────────────────────────────────────────────
+function render() {
+  const filtered = filtrar(state.rawData, state.turnoActivo);
+  const isConf = r => r.estado.toLowerCase() === 'confirmado';
+
+  // KPIs
+  const total  = filtered.filter(isConf).length;
+  const refC   = filtered.filter(r => isConf(r) && r.sector === 'REF').length;
+  const copcC  = filtered.filter(r => isConf(r) && r.sector === 'COPC').length;
+  const noche  = filtered.filter(r => isConf(r) && r.tipo.toLowerCase().includes('noche')).length;
+
+  document.getElementById('kpi-total').textContent = total.toLocaleString('es-CL');
+  document.getElementById('kpi-ref').textContent   = refC.toLocaleString('es-CL');
+  document.getElementById('kpi-copc').textContent  = copcC.toLocaleString('es-CL');
+  document.getElementById('kpi-noche').textContent = noche.toLocaleString('es-CL');
+  document.getElementById('kpi-total-sub').textContent = 'de ' + filtered.length + ' activos' + (state.turnoActivo !== 'TODOS' ? ' (' + state.turnoActivo + ')' : '');
+
+  // Filter info + toggle fecha
+  const totalBase = state.rawData.length;
+  const filterLabel = state.filtroFecha
+    ? '📅 Activos hoy: <strong>' + filtered.length + '</strong> de ' + totalBase
+    : '📋 Total cargados: <strong>' + filtered.length + '</strong>';
+  document.getElementById('filter-info').innerHTML =
+    filterLabel +
+    ' &nbsp;<button id="btn-toggle-fecha" style="' +
+      'padding:4px 12px;border-radius:99px;border:2px solid ' + (state.filtroFecha ? '#3b82f6' : '#e2e8f0') + ';' +
+      'background:' + (state.filtroFecha ? '#eff6ff' : '#f8fafc') + ';' +
+      'color:' + (state.filtroFecha ? '#1d4ed8' : '#64748b') + ';' +
+      'font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;transition:all .15s;' +
+    '">' + (state.filtroFecha ? '✅ Solo hoy' : '📅 Filtrar hoy') + '</button>' +
+    ' <button id="btn-cambiar" style="background:none;border:none;color:#94a3b8;cursor:pointer;font-size:11px;font-weight:600;font-family:inherit;margin-left:6px;">✕ Cambiar</button>' +
+    (state.fileName ? '<span style="font-size:10px;color:#cbd5e1;margin-left:6px">(' + state.fileName + ')</span>' : '');
+  document.getElementById('btn-cambiar')?.addEventListener('click', resetPanel);
+  document.getElementById('btn-toggle-fecha')?.addEventListener('click', () => {
+    state.filtroFecha = !state.filtroFecha;
+    render();
+  });
+
+  // Botones turno
+  document.querySelectorAll('.t-btn').forEach(b => {
+    b.classList.toggle('active', b.getAttribute('data-t') === state.turnoActivo);
+  });
+
+  // Lista por empresa
+  renderLista(filtered);
+
+  // Paneles laterales
+  renderStats('ger', contarPorCampo(filtered, 'gerencia'), GER_COLORS, 'ger-chip', 'ger-body');
+  renderStats('sup', contarPorCampo(filtered, 'super'),    SUP_COLORS, 'sup-chip', 'sup-body');
+}
+
+function renderLista(filtered) {
+  const body   = document.getElementById('lista-body');
+  const count  = document.getElementById('lista-count');
+  count.textContent = filtered.length.toLocaleString('es-CL') + ' personas';
+
+  if (filtered.length === 0) {
+    body.innerHTML = '<div class="empty"><div class="ei">🔍</div><p>Sin resultados para este filtro.</p><p style="font-size:12px;margin-top:6px;color:#cbd5e1">Prueba cambiando el turno o verifica las fechas del Excel.</p></div>';
+    return;
+  }
+
+  const grupos = agruparPorEmpresa(filtered);
+  let html = '';
+  grupos.forEach((trabajadores, empresa) => {
+    const conf   = trabajadores.filter(t => t.estado.toLowerCase() === 'confirmado').length;
+    const pend   = trabajadores.length - conf;
+    const isOpen = state.expanded[empresa] !== false;
+    const bodyId = 'emp-' + btoa(encodeURIComponent(empresa)).replace(/=/g,'').substring(0,12);
+
+    html += '<div class="emp-group">';
+    html += '<div class="emp-hdr" onclick="toggleEmpresa(\'' + bodyId + '\', \'' + empresa.replace(/'/g,"\\'") + '\')">';
+    html += '<div class="emp-name"><span class="emp-pill">' + trabajadores.length + '</span>' + esc(empresa) + '</div>';
+    html += '<div class="emp-stats">';
+    html += '<span class="emp-conf">✅ ' + conf + '</span>';
+    html += '<span class="emp-pend">⏳ ' + pend + '</span>';
+    html += '<span class="emp-arr">' + (isOpen ? '▲' : '▼') + '</span>';
+    html += '</div></div>';
+    html += '<div id="' + bodyId + '" class="emp-body' + (isOpen ? '' : ' collapsed') + '">';
+
+    trabajadores.forEach(t => {
+      const conf2 = t.estado.toLowerCase() === 'confirmado';
+      html += '<div class="w-row ' + (conf2 ? 'conf' : 'pend') + '">';
+      html += '<div class="w-name">' + esc(t.nombre) + '</div>';
+      html += '<div class="w-meta">📊 ' + esc(t.gerencia) + '</div>';
+      html += '<div class="w-meta">🔧 ' + esc(t.super) + '</div>';
+      html += '<div style="display:flex;align-items:center;gap:8px">';
+      html += '<div class="w-cont">' + esc(t.contrato) + '</div>';
+      html += '<div class="w-st ' + (conf2 ? 'c' : 'p') + '">' + (conf2 ? '✅ CONF.' : '⏳ PEND.') + '</div>';
+      html += '</div></div>';
+    });
+
+    html += '</div></div>';
+  });
+  body.innerHTML = html;
+}
+
+function renderStats(prefix, mapa, colors, chipId, bodyId) {
+  document.getElementById(chipId).textContent = mapa.size;
+  const max = Math.max(...mapa.values(), 1);
+  if (mapa.size === 0) {
+    document.getElementById(bodyId).innerHTML = '<div class="empty"><p>Sin datos</p></div>';
+    return;
+  }
+  let html = '';
+  let i = 0;
+  mapa.forEach((cnt, name) => {
+    const color = colors[i % colors.length];
+    const barW = Math.round((cnt / max) * 6) + 3;
+    html += '<div class="s-row">';
+    html += '<div class="s-bar" style="background:' + color + ';width:' + barW + 'px"></div>';
+    html += '<div class="s-name" title="' + esc(name) + '">' + esc(name) + '</div>';
+    html += '<div class="s-cnt" style="color:' + color + '">' + cnt + '</div>';
+    html += '</div>';
+    i++;
+  });
+  document.getElementById(bodyId).innerHTML = html;
+}
+
+// ── TOGGLE EMPRESA ─────────────────────────────────────────────
+window.toggleEmpresa = function(bodyId, empresa) {
+  const el = document.getElementById(bodyId);
+  if (!el) return;
+  const isOpen = !el.classList.contains('collapsed');
+  el.classList.toggle('collapsed', isOpen);
+  state.expanded[empresa] = !isOpen;
+  // Actualizar flecha
+  const hdr = el.previousElementSibling;
+  const arr = hdr?.querySelector('.emp-arr');
+  if (arr) arr.textContent = isOpen ? '▼' : '▲';
+};
+
+// ── ESCAPE HTML ────────────────────────────────────────────────
+function esc(str) {
+  return String(str||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── RESET ──────────────────────────────────────────────────────
+function resetPanel() {
+  state.rawData = [];
+  state.fileName = null;
+  state.turnoActivo = 'TODOS';
+  state.expanded = {};
+  document.getElementById('main-panel').style.display = 'none';
+  document.getElementById('upload-zone').style.display = 'block';
+  showError(null);
+}
+
+// ── SETUP UPLOAD ────────────────────────────────────────────────
+function setupUpload() {
+  const zone  = document.getElementById('upload-zone');
+  const input = document.getElementById('file-input');
+
+  function handleFile(file) {
+    if (!file) return;
+    if (!/\.(xlsx|xls)$/i.test(file.name)) {
+      showError('Solo se aceptan archivos Excel (.xlsx o .xls).');
+      return;
+    }
+
+    showError(null);
+    // Mostrar spinner
+    zone.innerHTML = '<div class="spinner"></div><p style="text-align:center;color:#64748b;font-size:13px;font-weight:600">Procesando Excel...</p>';
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      try {
+        const data = parsearExcel(new Uint8Array(e.target.result));
+        if (data.length === 0) {
+          restoreUploadZone();
+          showError('No se encontraron filas de datos. Verifica que el Excel sea la plantilla oficial de carga.');
+          return;
+        }
+        state.rawData     = data;
+        state.fileName    = file.name;
+        state.expanded    = {};
+        state.turnoActivo = 'TODOS';
+
+        // Mostrar panel principal
+        document.getElementById('upload-zone').style.display = 'none';
+        const panel = document.getElementById('main-panel');
+        panel.style.display = 'block';
+
+        // Construir botones de turno (solo una vez)
+        renderTurnoBtns();
+        render();
+      } catch(err) {
+        console.error('[Panel Dotación]', err);
+        restoreUploadZone();
+        showError('Error al leer el Excel: ' + err.message);
+      }
+    };
+    reader.onerror = function() {
+      restoreUploadZone();
+      showError('No se pudo leer el archivo.');
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  input.addEventListener('change', e => { handleFile(e.target.files[0]); e.target.value = ''; });
+
+  zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('drag'));
+  zone.addEventListener('drop', e => {
+    e.preventDefault();
+    zone.classList.remove('drag');
+    handleFile(e.dataTransfer.files[0]);
+  });
+}
+
+function restoreUploadZone() {
+  document.getElementById('upload-zone').innerHTML = `
+    <input type="file" id="file-input" accept=".xlsx,.xls">
+    <div class="up-icon">📂</div>
+    <div class="up-title">Cargar Excel de Dotación</div>
+    <div class="up-hint">Arrastra y suelta o haz click para seleccionar el archivo Excel oficial.</div>
+    <div class="col-tags">
+      <span class="col-tag">EMPRESA</span><span class="col-tag">GERENCIA</span>
+      <span class="col-tag">SUPERINTENDENCIA</span><span class="col-tag">NOMBRE COMPLETO</span>
+      <span class="col-tag">RUT</span><span class="col-tag">TURNO</span><span class="col-tag">TIPO</span>
+      <span class="col-tag">ESTADO</span><span class="col-tag">FECHA INICIO</span>
+      <span class="col-tag">FECHA TÉRMINO</span>
+    </div>`;
+  setupUpload();
+}
+
+// ── SUPABASE CLIENT (para Importar al Sistema) ──────────────────
+const SB_URL = 'https://pnkajjduvadcxealodcp.supabase.co';
+const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBua2FqamR1dmFkY3hlYWxvZGNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUyNDQ1MzIsImV4cCI6MjA5MDgyMDUzMn0.NsL16NP16MVEwTSN-1ggAtwzTA-2tDPF7Ndbcsdl-Ro';
+
+function getSB() {
+  if (window._sbClient) return window._sbClient;
+  if (!window.supabase?.createClient) {
+    throw new Error('Supabase SDK no cargó todavía. Espera un momento y reintenta.');
+  }
+  window._sbClient = window.supabase.createClient(SB_URL, SB_KEY);
+  return window._sbClient;
+}
+
+// ── NORMALIZAR RUT ──────────────────────────────────────────────
+function normRut(rut) {
+  return String(rut || '').replace(/[\.\-\s]/g, '').toUpperCase().slice(0, 12);
+}
+
+// ── IMPORTAR AL SISTEMA ─────────────────────────────────────────
+async function importarASistema() {
+  if (!state.rawData.length) {
+    alert('Primero carga un archivo Excel.');
+    return;
+  }
+
+  // Obtener filas filtradas según turno activo (o todas si TODOS)
+  const filtered = filtrar(state.rawData, state.turnoActivo);
+
+  if (!filtered.length) {
+    alert('No hay filas visibles para importar con el filtro actual.');
+    return;
+  }
+
+  const confirmado = confirm(
+    `¿Importar ${filtered.length} trabajador${filtered.length !== 1 ? 'es' : ''} al sistema?\n\n` +
+    `• Se crearán o actualizarán en Solicitudes B2B\n` +
+    `• Se guardarán: Empresa, Gerencia, Superintendencia, Turno, Tipo, Contrato, Habitación, Fechas\n` +
+    `• Si el RUT ya existe se actualizará (no se duplica)\n\n` +
+    `Archivo: ${state.fileName || 'sin nombre'}`
+  );
+  if (!confirmado) return;
+
+  // Deshabilitar botón mientras importa
+  const btn = document.getElementById('btn-importar');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Importando...'; }
+  showError(null);
+
+  let ok = 0, act = 0, err = 0, errores = [];
+
+  try {
+    const sb = getSB();
+    const LOTE = 50;
+
+    for (let i = 0; i < filtered.length; i += LOTE) {
+      const lote = filtered.slice(i, i + LOTE);
+
+      // Construir payload de cada registro
+      const registros = lote.map(r => {
+        const rutNorm = normRut(r.rut);
+        // Gerencia y Superintendencia van en columnas SEPARADAS
+        const gerVal = (r.gerencia && r.gerencia !== 'Sin gerencia')       ? r.gerencia : null;
+        const supVal = (r.super    && r.super    !== 'Sin superintendencia') ? r.super    : null;
+        return {
+          nombre_trabajador: r.nombre,
+          rut_trabajador:    rutNorm || null,
+          empresa:           r.empresa !== 'Sin empresa' ? r.empresa : null,
+          gerencia:          gerVal,
+          origen:            supVal,           // superintendencia → columna libre 'origen' en Supabase
+          n_contrato:        r.contrato !== '—' ? r.contrato : null,
+          hab_solicitada:    r.habitacion || null,
+          shift_type:        r.turno !== 'N/D' ? r.turno : null,
+          fecha_llegada:     r.fechaIni  || null,
+          fecha_salida:      r.fechaFin  || null,
+          status:            'aceptada',
+        };
+      });
+
+      // ── PASO 1: Consultar cuáles RUTs ya existen en la tabla ────────────
+      const ruts = registros.map(r => r.rut_trabajador).filter(Boolean);
+      let existentes = new Map();  // RUT → id
+      if (ruts.length) {
+        const { data: ex } = await sb
+          .from('v2_solicitudes_b2b')
+          .select('id, rut_trabajador')
+          .in('rut_trabajador', ruts);
+        (ex || []).forEach(e => existentes.set(e.rut_trabajador, e.id));
+      }
+
+      // ── PASO 2: INSERT los nuevos / UPDATE los existentes ────────────────
+      for (const reg of registros) {
+        try {
+          const existeId = existentes.get(reg.rut_trabajador);
+          if (existeId) {
+            // UPDATE — actualizar datos del turno/gerencia/superintendencia
+            const { error: eU } = await sb
+              .from('v2_solicitudes_b2b')
+              .update({
+                nombre_trabajador: reg.nombre_trabajador,
+                empresa:           reg.empresa,
+                gerencia:          reg.gerencia,
+                shift_name:        reg.shift_name,        // turno rotación (7x7 etc)
+                origen:            reg.origen,            // superintendencia
+                n_contrato:        reg.n_contrato,
+                hab_solicitada:    reg.hab_solicitada,
+                shift_type:        reg.shift_type,
+                fecha_llegada:     reg.fecha_llegada,
+                fecha_salida:      reg.fecha_salida,
+                status:            reg.status,
+              })
+              .eq('id', existeId);
+            if (eU) { err++; errores.push(reg.nombre_trabajador + ' (update): ' + eU.message); }
+            else act++;
+          } else {
+            // INSERT nuevo
+            const { error: eI } = await sb
+              .from('v2_solicitudes_b2b')
+              .insert(reg);
+            if (eI) { err++; errores.push(reg.nombre_trabajador + ' (insert): ' + eI.message); }
+            else ok++;
+          }
+        } catch(ex) {
+          err++;
+          errores.push(reg.nombre_trabajador + ': ' + ex.message);
+        }
+      }
+
+      // Progreso en botón
+      if (btn) btn.textContent = `⏳ ${ok + act + err}/${filtered.length}`;
+    }
+
+  } catch (e) {
+    console.error('[Importar]', e);
+    showError('Error de conexión: ' + e.message);
+    if (btn) { btn.disabled = false; btn.textContent = '📤 Importar al Sistema'; }
+    return;
+  }
+
+  // Restaurar botón
+  if (btn) { btn.disabled = false; btn.textContent = '📤 Importar al Sistema'; }
+
+  // Resultado final
+  const total = ok + act;
+  if (err === 0) {
+    showImportToast(
+      `✅ ${ok} nuevos + ${act} actualizados = ${total} trabajadores importados correctamente.`,
+      'success'
+    );
+  } else {
+    showImportToast(
+      `⚠️ ${total} importados, ${err} con error.\n` + errores.slice(0,4).join('\n'),
+      'warn'
+    );
+    console.warn('[Importar] Errores:', errores);
+  }
+}
+
+// ── TOAST DE IMPORTACIÓN ────────────────────────────────────────
+function showImportToast(msg, tipo) {
+  const t = document.createElement('div');
+  t.style.cssText = `
+    position:fixed;bottom:28px;right:28px;z-index:9999;
+    background:${tipo === 'success' ? 'linear-gradient(135deg,#059669,#10b981)' : 'linear-gradient(135deg,#d97706,#f59e0b)'};
+    color:#fff;padding:16px 24px;border-radius:16px;
+    font-size:13px;font-weight:700;max-width:380px;
+    box-shadow:0 8px 32px rgba(0,0,0,.25);
+    animation:fadeUp .35s ease both;
+    white-space:pre-line;line-height:1.5;
+  `;
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 6000);
+}
+
+// ── BOOT ────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', setupUpload);
+</script>
+</body>
+</html>

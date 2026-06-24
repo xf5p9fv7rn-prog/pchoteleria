@@ -6,6 +6,8 @@
   <title>Censo de Camas · PC Hotelería</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <!-- ✅ Supabase UMD — carga global window.supabase (evita CORS en iOS/Safari) -->
+  <script src="https://unpkg.com/@supabase/supabase-js@2.49.4/dist/umd/supabase.js"></script>
   <style>
     :root {
       --indigo: #6366f1; --purple: #8b5cf6; --amber: #f59e0b;
@@ -23,8 +25,6 @@
       box-shadow: 0 4px 20px rgba(99,102,241,.4);
     }
     .header-inner { max-width: 600px; margin: 0 auto; display: flex; align-items: center; gap: 12px; }
-    .h-logo { width: 38px; height: 38px; background: rgba(255,255,255,.15); border-radius: 10px;
-               display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0; }
     .h-title { font-size: 15px; font-weight: 800; }
     .h-sub   { font-size: 11px; opacity: .75; margin-top: 1px; }
     .h-date  { margin-left: auto; text-align: right; }
@@ -102,10 +102,8 @@
     .radio-opt.opt-2_noche     input:checked + .radio-pill { background: #dc2626; }
     .radio-opt.opt-3_dia       input:checked + .radio-pill { background: #0891b2; }
     .radio-opt.opt-3_noche     input:checked + .radio-pill { background: #4a1d96; }
-    /* Borde especial para opciones de cama 3 (sin seleccionar) */
     .radio-opt.opt-3_dia  .radio-pill,
     .radio-opt.opt-3_noche .radio-pill { border-color: #7c3aed; color: #7c3aed; font-weight:700; }
-    /* Separador visual entre grupo Día y grupo Noche */
     .radio-opt.opt-noche { margin-left: 6px; }
     .radio-opt.opt-noche .radio-pill { border-left: 3px solid #e9d5ff; }
 
@@ -209,9 +207,6 @@
 
 <main class="main">
 
-  <!-- ══ SCREEN 1: acceso directo (sin identificador) ══ -->
-  <!-- SCREEN s-ident ya no se usa, se salta directo a s-select -->
-
   <!-- ══ SCREEN 2: Selección Edificio / Pabellón ══ -->
   <div class="screen active" id="s-select">
     <div class="card">
@@ -238,7 +233,6 @@
           <option value="">— Todos los pisos —</option>
         </select>
       </div>
-      <!-- Botón de recarga manual (secundario, ya es automático) -->
       <button class="btn" id="btn-cargar" onclick="cargarHabitaciones()"
         style="background:var(--gray-100);color:var(--gray-700);border:1.5px solid var(--gray-200);font-size:13px">
         🔄 Actualizar lista
@@ -266,8 +260,6 @@
     <button class="btn btn-success" id="btn-guardar" onclick="guardarCenso()" style="flex:1">
       💾 Guardar Censo del Piso
     </button>
-    <button class="btn btn-amber" id="btn-pdf" onclick="exportarPDF()" title="Exportar PDF del Censo"
-      style="padding:14px 16px;min-width:50px;flex:0 0 auto">📄</button>
   </div>
 </div>
 
@@ -277,8 +269,11 @@
   <button class="draft-close" onclick="descartarDraft()">Descartar</button>
 </div>
 
-<script type="module">
-import { supabase } from './js/supabaseClient.js';
+<script>
+// ✅ Supabase cliente desde UMD global (cargado en <head>)
+const _SUPA_URL = 'https://pnkajjduvadcxealodcp.supabase.co';
+const _SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBua2FqamR1dmFkY3hlYWxvZGNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUyNDQ1MzIsImV4cCI6MjA5MDgyMDUzMn0.NsL16NP16MVEwTSN-1ggAtwzTA-2tDPF7Ndbcsdl-Ro';
+const supabase = window.supabase.createClient(_SUPA_URL, _SUPA_KEY);
 
 // ── State ─────────────────────────────────────────────────────────────
 let _nombre    = '';
@@ -301,15 +296,15 @@ function _actualizarBannerPeriodo() {
   const ms = dl - now;
   const hh = Math.floor(ms / 3600000);
   const mm = Math.floor((ms % 3600000) / 60000);
-  const cntd = ms > 0 ? `Cierra en ${hh}h ${mm}m` : '¡Período cerrado!';
+  const cntd = ms > 0 ? 'Cierra en ' + hh + 'h ' + mm + 'm' : '¡Período cerrado!';
 
   const banner = document.getElementById('period-banner');
   if (!banner) return;
-  banner.className = `period-banner ${p}`;
+  banner.className = 'period-banner ' + p;
   document.getElementById('pb-title').textContent    = p === 'dia' ? '🌞 Período Día' : '🌙 Período Noche';
   document.getElementById('pb-deadline').textContent = p === 'dia'
-    ? `Turno diurno · Registrar antes de las 12:00 · ${cntd}`
-    : `Turno nocturno · Registrar antes de las 00:00 · ${cntd}`;
+    ? 'Turno diurno · Registrar antes de las 12:00 · ' + cntd
+    : 'Turno nocturno · Registrar antes de las 00:00 · ' + cntd;
 }
 _actualizarBannerPeriodo();
 setInterval(_actualizarBannerPeriodo, 60000);
@@ -318,8 +313,8 @@ setInterval(_actualizarBannerPeriodo, 60000);
 (function() {
   const now = new Date();
   const el  = document.getElementById('hdr-date');
-  el.innerHTML = `<div class="h-day">${now.getDate().toString().padStart(2,'0')}</div>
-                  <div class="h-mon">${now.toLocaleDateString('es-CL',{month:'short',year:'numeric'})}</div>`;
+  el.innerHTML = '<div class="h-day">' + now.getDate().toString().padStart(2,'0') + '</div>' +
+                 '<div class="h-mon">' + now.toLocaleDateString('es-CL',{month:'short',year:'numeric'}) + '</div>';
 })();
 
 // ── Screen helpers ─────────────────────────────────────────────────────
@@ -337,84 +332,102 @@ window.showTab = function(tab) {
 };
 
 // ── Toast ───────────────────────────────────────────────────────────────
-function toast(msg, dur = 2400) {
+function toast(msg, dur) {
+  dur = dur || 2400;
   const t = document.getElementById('toast');
   t.textContent = msg; t.classList.add('show');
-  setTimeout(() => t.classList.remove('show'), dur);
+  setTimeout(function() { t.classList.remove('show'); }, dur);
 }
 
-// ── Inicio directo: sin identificador ──────────────────────────────────────
-// El portal arranca directamente en la selección de pabellón
+// ── Inicio directo ──────────────────────────────────────────────────────
 _nombre = 'Terreno';
 cargarEdificios();
 
 // ── Step 2a: Load edificios ─────────────────────────────────────────────
 async function cargarEdificios() {
-  // Cargar edificios
-  const { data: edifs } = await supabase.from('v2_edificios').select('id,nombre').order('nombre');
-  const sel = document.getElementById('sel-edif');
-  sel.innerHTML = '<option value="">— Todos los edificios —</option>' +
-    (edifs || []).map(e => `<option value="${e.id}">${e.nombre}</option>`).join('');
-
-  // Cargar TODOS los pabellones agrupados desde el inicio
-  await _cargarTodosPabellones();
+  try {
+    const { data: edifs, error } = await supabase.from('v2_edificios').select('id,nombre').order('nombre');
+    if (error) throw error;
+    const sel = document.getElementById('sel-edif');
+    sel.innerHTML = '<option value="">— Todos los edificios —</option>' +
+      (edifs || []).map(e => '<option value="' + e.id + '">' + e.nombre + '</option>').join('');
+    await _cargarTodosPabellones();
+  } catch(e) {
+    console.error('[cargarEdificios]', e);
+    document.getElementById('sel-edif').innerHTML = '<option value="">⚠️ Error cargando edificios</option>';
+  }
 }
 
-// Carga todos los pabellones agrupados por edificio (sin filtro)
+// ── Carga todos los pabellones agrupados por edificio (sin join) ────────
 async function _cargarTodosPabellones() {
-  const { data } = await supabase
-    .from('v2_pabellones')
-    .select('id,nombre,edificio_id,v2_edificios(nombre)')
-    .order('nombre');
+  const [{ data: pabs, error: ep }, { data: edifs, error: ee }] = await Promise.all([
+    supabase.from('v2_pabellones').select('id,nombre,edificio_id').order('nombre'),
+    supabase.from('v2_edificios').select('id,nombre')
+  ]);
 
   const sel = document.getElementById('sel-pab');
+
+  if (ep || ee) {
+    sel.innerHTML = '<option value="">⚠️ Error cargando pabellones</option>';
+    console.error('[_cargarTodosPabellones]', ep || ee);
+    return;
+  }
+
+  if (!(pabs || []).length) {
+    sel.innerHTML = '<option value="">⚠️ Sin pabellones configurados</option>';
+    return;
+  }
+
+  // Mapa edificio_id → nombre
+  const edifMap = {};
+  (edifs || []).forEach(e => { edifMap[e.id] = e.nombre; });
+
   // Agrupar por edificio
   const grupos = {};
-  (data || []).forEach(p => {
-    const edNombre = p.v2_edificios?.nombre || 'Sin edificio';
+  (pabs || []).forEach(p => {
+    const edNombre = edifMap[p.edificio_id] || 'Sin edificio';
     if (!grupos[edNombre]) grupos[edNombre] = [];
     grupos[edNombre].push(p);
   });
 
   sel.innerHTML = '<option value="">— Seleccionar pabellón —</option>' +
-    Object.entries(grupos).sort((a,b)=>a[0].localeCompare(b[0],'es')).map(([edNombre, pabs]) =>
-      `<optgroup label="📍 ${edNombre}">${pabs.map(p =>
-        `<option value="${p.id}">${p.nombre}</option>`).join('')}</optgroup>`
-    ).join('');
+    Object.entries(grupos).sort(function(a,b){ return a[0].localeCompare(b[0],'es'); }).map(function(entry) {
+      const edNombre = entry[0];
+      const pabsGrupo = entry[1];
+      return '<optgroup label="📍 ' + edNombre + '">' +
+        pabsGrupo.map(p => '<option value="' + p.id + '">' + p.nombre + '</option>').join('') +
+        '</optgroup>';
+    }).join('');
 }
 
 // ── Step 2b: Filter pabellones by edificio ──────────────────────────────
 window.cargarPabellones = async function() {
   _edificioId = document.getElementById('sel-edif').value;
   if (!_edificioId) {
-    // Sin filtro → mostrar todos
     await _cargarTodosPabellones();
     return;
   }
   const sel = document.getElementById('sel-pab');
   sel.innerHTML = '<option value="">— Seleccionar pabellón —</option>';
-  document.getElementById('btn-cargar').disabled = true;
   const { data } = await supabase.from('v2_pabellones')
     .select('id,nombre').eq('edificio_id', _edificioId).order('nombre');
   sel.innerHTML = '<option value="">— Seleccionar pabellón —</option>' +
-    (data || []).map(p => `<option value="${p.id}">${p.nombre}</option>`).join('');
+    (data || []).map(p => '<option value="' + p.id + '">' + p.nombre + '</option>').join('');
 };
 
 window.selPabChanged = async function() {
   const v = document.getElementById('sel-pab').value;
   _pabellonId = v || null;
-  _pabNombre  = document.getElementById('sel-pab').selectedOptions[0]?.text || '';
+  _pabNombre  = document.getElementById('sel-pab').selectedOptions[0] ? document.getElementById('sel-pab').selectedOptions[0].text : '';
   const divNivel = document.getElementById('div-nivel');
   const selNivel = document.getElementById('sel-nivel');
   if (!v) { divNivel.style.display = 'none'; return; }
-  // Cargar niveles disponibles en este pabellón
   const { data: niveles } = await supabase.from('v2_habitaciones')
     .select('nivel').eq('pabellon_id', v).not('nivel','is',null);
-  const unicos = [...new Set((niveles||[]).map(n=>n.nivel).filter(Boolean))].sort();
+  const unicos = Array.from(new Set((niveles||[]).map(n=>n.nivel).filter(Boolean))).sort();
   selNivel.innerHTML = '<option value="">— Todos los pisos —</option>' +
-    unicos.map(n => `<option value="${n}">${n}</option>`).join('');
+    unicos.map(n => '<option value="' + n + '">' + n + '</option>').join('');
   divNivel.style.display = unicos.length > 1 ? 'block' : 'none';
-  // ✅ AUTO-CARGA: cargar habitaciones automáticamente
   await cargarHabitaciones();
 };
 
@@ -424,7 +437,7 @@ window.cargarHabitaciones = async function() {
   panel.innerHTML = '<div class="spin"></div>';
   document.getElementById('bottom-bar').style.display = 'none';
 
-  const nivelFil = document.getElementById('sel-nivel')?.value || '';
+  const nivelFil = document.getElementById('sel-nivel') ? document.getElementById('sel-nivel').value : '';
 
   let habQ = supabase.from('v2_habitaciones')
     .select('id_custom,numero_hab,nivel,cantidad_camas')
@@ -432,7 +445,6 @@ window.cargarHabitaciones = async function() {
     .order('numero_hab');
   if (nivelFil) habQ = habQ.eq('nivel', nivelFil);
 
-  // ── Cargar hab, censo existente (filtrado por período) y camas-3 ────────
   const periodoActual = getPeriodo();
   const [{ data: habs }, censoRes, cama3Res] = await Promise.all([
     habQ,
@@ -440,8 +452,7 @@ window.cargarHabitaciones = async function() {
       .select('habitacion_id,estado')
       .eq('fecha', todayISO())
       .eq('pabellon_id', _pabellonId)
-      .eq('periodo', periodoActual),   // ← solo el período activo
-    // Camas con numero_cama=3 que NO están Deshabilitadas
+      .eq('periodo', periodoActual),
     supabase.from('v2_camas')
       .select('habitacion_id, estado')
       .eq('numero_cama', 3)
@@ -450,7 +461,6 @@ window.cargarHabitaciones = async function() {
 
   _habitaciones = habs || [];
 
-  // Set de habitacion_ids que tienen cama 3 activa
   window._habsCon3 = new Set(
     (cama3Res.data || []).map(c => c.habitacion_id)
   );
@@ -458,31 +468,27 @@ window.cargarHabitaciones = async function() {
   _censoHoy = {};
 
   if (censoRes.error) {
-    panel.innerHTML = `
-      <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:12px;padding:14px;margin-bottom:12px;font-size:12px;color:#92400e">
-        <strong>⚠️ Tabla v2_censo_registros no encontrada.</strong><br>
-        Ejecuta el archivo <code>sql/censo_periodos_migration.sql</code> en Supabase para habilitar el guardado.
-      </div>`;
+    panel.innerHTML =
+      '<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:12px;padding:14px;margin-bottom:12px;font-size:12px;color:#92400e">' +
+      '<strong>⚠️ Tabla v2_censo_registros no encontrada.</strong><br>' +
+      'Ejecuta el archivo <code>sql/censo_periodos_migration.sql</code> en Supabase para habilitar el guardado.' +
+      '</div>';
   } else {
     (censoRes.data || []).forEach(r => { _censoHoy[r.habitacion_id] = r.estado; });
   }
 
   if (!_habitaciones.length) {
-    panel.innerHTML += `<div class="card" style="text-align:center;color:var(--gray-500)">Sin habitaciones en este piso</div>`;
+    panel.innerHTML += '<div class="card" style="text-align:center;color:var(--gray-500)">Sin habitaciones en este piso</div>';
     return;
   }
 
-  // 💾 Pre-cargar borrador de censo
   restaurarDraft();
-
   renderHabitaciones(panel);
-
   document.getElementById('bottom-bar').style.display = 'block';
   actualizarContador();
 };
 
-// ── Opciones de censo: se muestran TODAS (día + noche) siempre ──────────
-// El período queda en el campo 'periodo' del registro guardado.
+// ── Opciones de censo ──────────────────────────────────────────────────
 const OPCIONES_TODAS = [
   { val: 'sin_ocupar', lbl: '🚫 Sin Ocupar'    },
   { val: 'dia',        lbl: '☀️ 1 Día'          },
@@ -494,9 +500,8 @@ const OPCION_3_DIA   = { val: '3_dia',   lbl: '☀️ 3 Día'     };
 const OPCION_3_NOCHE = { val: '3_noche', lbl: '🌙 3 Nocheros' };
 
 function opcionesHab(h) {
-  const tieneC3 = window._habsCon3?.has(h.id_custom);
+  const tieneC3 = window._habsCon3 && window._habsCon3.has(h.id_custom);
   if (tieneC3) {
-    // Sin Ocupar · 1 Día · 2 Día · 3 Día · 1 Nochero · 2 Nocheros · 3 Nocheros
     return [
       OPCIONES_TODAS[0],
       OPCIONES_TODAS[1], OPCIONES_TODAS[2], OPCION_3_DIA,
@@ -506,65 +511,63 @@ function opcionesHab(h) {
   return OPCIONES_TODAS;
 }
 
-
 function renderHabitaciones(panel) {
   const hoy = todayISO();
   const p   = getPeriodo();
   const pLabel = p === 'dia' ? '🌞 Turno Día' : '🌙 Turno Noche';
   const pColor = p === 'dia' ? '#1d4ed8' : '#7c3aed';
-  panel.innerHTML = `
-    <div class="sec-title" style="flex-wrap:wrap;gap:8px">
-      🏠 <span>${_pabNombre}</span>
-      <span class="badge">${_habitaciones.length} hab.</span>
-      <span style="font-size:11px;color:var(--gray-500);font-weight:400">${hoy}</span>
-      <span style="background:${pColor};color:#fff;border-radius:99px;font-size:11px;font-weight:800;padding:2px 10px;margin-left:auto">${pLabel}</span>
-    </div>` +
-    _habitaciones.map(h => {
+  panel.innerHTML =
+    '<div class="sec-title" style="flex-wrap:wrap;gap:8px">' +
+      '🏠 <span>' + _pabNombre + '</span>' +
+      '<span class="badge">' + _habitaciones.length + ' hab.</span>' +
+      '<span style="font-size:11px;color:var(--gray-500);font-weight:400">' + hoy + '</span>' +
+      '<span style="background:' + pColor + ';color:#fff;border-radius:99px;font-size:11px;font-weight:800;padding:2px 10px;margin-left:auto">' + pLabel + '</span>' +
+    '</div>' +
+    _habitaciones.map(function(h) {
       const est  = _censoHoy[h.id_custom] || '';
       const done = !!est;
       const ops  = opcionesHab(h);
-      const tiene3 = window._habsCon3?.has(h.id_custom) || false;
-      const rads = ops.map(op => `
-        <label class="radio-opt opt-${op.val}">
-          <input type="radio" name="hab_${h.id_custom}" value="${op.val}"
-            ${est === op.val ? 'checked' : ''}
-            onchange="onRadioChange('${h.id_custom}', this.value)">
-          <span class="radio-pill">${op.lbl}</span>
-        </label>`).join('');
-      return `
-        <div class="room-card ${done ? 'done' : ''}" id="rc-${h.id_custom}">
-          <div class="room-head">
-            <div>
-              <div class="rnum">Habitación ${h.numero_hab}
-                ${tiene3 ? '<span style="background:#7c3aed;color:#fff;font-size:9px;font-weight:800;border-radius:6px;padding:1px 6px;margin-left:6px;vertical-align:middle">🛏️ C3</span>' : ''}
-              </div>
-              <div class="rid">${h.id_custom}${h.nivel ? ' · Nivel ' + h.nivel : ''}${tiene3 ? ' · Cama 3 habilitada' : ''}</div>
-            </div>
-            <div class="tick" id="tick-${h.id_custom}">${done ? '✅' : '⬜'}</div>
-          </div>
-          <div class="room-body">
-            <div class="radio-grid">${rads}</div>
-          </div>
-        </div>`;
+      const tiene3 = window._habsCon3 && window._habsCon3.has(h.id_custom);
+      const rads = ops.map(function(op) {
+        return '<label class="radio-opt opt-' + op.val + '">' +
+          '<input type="radio" name="hab_' + h.id_custom + '" value="' + op.val + '"' +
+            (est === op.val ? ' checked' : '') +
+            ' onchange="onRadioChange(\'' + h.id_custom + '\', this.value)">' +
+          '<span class="radio-pill">' + op.lbl + '</span>' +
+        '</label>';
+      }).join('');
+      return '<div class="room-card ' + (done ? 'done' : '') + '" id="rc-' + h.id_custom + '">' +
+        '<div class="room-head">' +
+          '<div>' +
+            '<div class="rnum">Habitación ' + h.numero_hab +
+              (tiene3 ? ' <span style="background:#7c3aed;color:#fff;font-size:9px;font-weight:800;border-radius:6px;padding:1px 6px;margin-left:6px;vertical-align:middle">🛏️ C3</span>' : '') +
+            '</div>' +
+            '<div class="rid">' + h.id_custom + (h.nivel ? ' · Nivel ' + h.nivel : '') + (tiene3 ? ' · Cama 3 habilitada' : '') + '</div>' +
+          '</div>' +
+          '<div class="tick" id="tick-' + h.id_custom + '">' + (done ? '✅' : '⬜') + '</div>' +
+        '</div>' +
+        '<div class="room-body"><div class="radio-grid">' + rads + '</div></div>' +
+      '</div>';
     }).join('');
 }
 
 // ── Radio change ────────────────────────────────────────────────────────
 window.onRadioChange = function(habId, estado) {
   _censoHoy[habId] = estado;
-  const rc = document.getElementById(`rc-${habId}`);
-  const tk = document.getElementById(`tick-${habId}`);
-  rc.classList.add('done');
-  tk.textContent = '✅';
+  const rc = document.getElementById('rc-' + habId);
+  const tk = document.getElementById('tick-' + habId);
+  if (rc) rc.classList.add('done');
+  if (tk) tk.textContent = '✅';
   actualizarContador();
-  autoGuardar(); // 💾 Auto-guardado en borrador
+  autoGuardar();
 };
 
 function actualizarContador() {
   const total     = _habitaciones.length;
-  const marcadas  = Object.keys(_censoHoy).filter(k =>
-    _habitaciones.find(h => h.id_custom === k)).length;
-  document.getElementById('counter-text').textContent = `${marcadas} / ${total} marcadas`;
+  const marcadas  = Object.keys(_censoHoy).filter(function(k) {
+    return _habitaciones.find(function(h) { return h.id_custom === k; });
+  }).length;
+  document.getElementById('counter-text').textContent = marcadas + ' / ' + total + ' marcadas';
   document.getElementById('btn-guardar').disabled = marcadas === 0;
 }
 
@@ -576,13 +579,18 @@ window.guardarCenso = async function() {
   btn.textContent = '⏳ Guardando…';
   const fecha = todayISO();
   const rows = Object.entries(_censoHoy)
-    .filter(([id]) => _habitaciones.find(h => h.id_custom === id))
-    .map(([habitacion_id, estado]) => ({
-      fecha, habitacion_id, estado, periodo,
-      pabellon_id:   _pabellonId,
-      edificio_id:   _edificioId,
-      registrado_por: _nombre
-    }));
+    .filter(function(entry) { return _habitaciones.find(function(h) { return h.id_custom === entry[0]; }); })
+    .map(function(entry) {
+      return {
+        fecha: fecha,
+        habitacion_id: entry[0],
+        estado: entry[1],
+        periodo: periodo,
+        pabellon_id:   _pabellonId,
+        edificio_id:   _edificioId,
+        registrado_por: _nombre
+      };
+    });
 
   const { error } = await supabase.from('v2_censo_registros')
     .upsert(rows, { onConflict: 'habitacion_id,fecha,periodo' });
@@ -594,17 +602,17 @@ window.guardarCenso = async function() {
     return;
   }
   const pLabel = periodo === 'dia' ? 'Turno Día' : 'Turno Noche';
-  toast(`✅ ${rows.length} hab. guardadas (${pLabel})`);
+  toast('✅ ' + rows.length + ' hab. guardadas (' + pLabel + ')');
   btn.textContent = '💾 Guardar Censo del Piso';
   btn.disabled = false;
   clearDraft();
 };
 
-// ── Cambio de Sábanas — próximos 7 días (agrupado por habitación) ─────────
+// ── Cambio de Sábanas ─────────────────────────────────────────────────
 async function cargarBajadas() {
   const panel = document.getElementById('panel-bajadas');
   if (!_pabellonId) {
-    panel.innerHTML = `<div class="card" style="text-align:center;color:var(--gray-500)">Selecciona un pabellón primero</div>`;
+    panel.innerHTML = '<div class="card" style="text-align:center;color:var(--gray-500)">Selecciona un pabellón primero</div>';
     return;
   }
   panel.innerHTML = '<div class="spin"></div>';
@@ -613,10 +621,9 @@ async function cargarBajadas() {
   const desde    = todayISO();
   const hasta    = new Date(hoy); hasta.setDate(hoy.getDate() + 6);
   const hastaISO = hasta.toLocaleDateString('en-CA');
-  const nivelFil = document.getElementById('sel-nivel')?.value || '';
+  const nivelFil = document.getElementById('sel-nivel') ? document.getElementById('sel-nivel').value : '';
 
   try {
-    // PASO 1: habitaciones del pabellón (+ nivel si aplica)
     let qH = supabase.from('v2_habitaciones')
       .select('id_custom, numero_hab, nivel, cantidad_camas')
       .eq('pabellon_id', _pabellonId);
@@ -627,7 +634,6 @@ async function cargarBajadas() {
     const habMap = {};
     (habs || []).forEach(h => { habMap[h.id_custom] = h; });
 
-    // PASO 2: asignaciones con salida en los próximos 7 días
     const { data: proximas, error: eA } = await supabase
       .from('v2_asignaciones')
       .select('fecha_salida_programada, id_cama')
@@ -636,30 +642,28 @@ async function cargarBajadas() {
       .is('fecha_checkout', null);
     if (eA) throw eA;
 
-    // Filtrar y mapear a habitación
     const filtradas = (proximas || [])
-      .map(b => {
+      .map(function(b) {
         const partes = (b.id_cama || '').split('-');
         const habId  = partes.length > 1 ? partes.slice(0, -1).join('-') : b.id_cama;
         return { fecha: b.fecha_salida_programada, hab: habMap[habId] || null };
       })
-      .filter(b => b.hab !== null);
+      .filter(function(b) { return b.hab !== null; });
 
-    const nivelLabel = nivelFil ? ` · Piso ${nivelFil}` : '';
+    const nivelLabel = nivelFil ? ' · Piso ' + nivelFil : '';
 
     if (!filtradas.length) {
-      panel.innerHTML = `
-        <div class="card" style="text-align:center">
-          <div style="font-size:36px;margin-bottom:8px">🛏️</div>
-          <div style="font-weight:700;color:var(--gray-700)">Sin cambios próximos</div>
-          <div style="font-size:12px;color:var(--gray-500);margin-top:4px">No hay salidas en los próximos 7 días para ${_pabNombre}${nivelLabel}</div>
-        </div>`;
+      panel.innerHTML =
+        '<div class="card" style="text-align:center">' +
+          '<div style="font-size:36px;margin-bottom:8px">🛏️</div>' +
+          '<div style="font-weight:700;color:var(--gray-700)">Sin cambios próximos</div>' +
+          '<div style="font-size:12px;color:var(--gray-500);margin-top:4px">No hay salidas en los próximos 7 días para ' + _pabNombre + nivelLabel + '</div>' +
+        '</div>';
       return;
     }
 
-    // Agrupar: fecha → habitacion_id → conteo de camas
     const porFecha = {};
-    filtradas.forEach(b => {
+    filtradas.forEach(function(b) {
       const f   = b.fecha;
       const hid = b.hab.id_custom;
       if (!porFecha[f]) porFecha[f] = {};
@@ -668,76 +672,74 @@ async function cargarBajadas() {
     });
 
     const diasLabel = ['Hoy','Mañana','Pasado mañana','En 3 días','En 4 días','En 5 días','En 6 días'];
-
     const totalGeneral = filtradas.length;
 
     panel.innerHTML =
-      `<div class="sec-title">🛏️ Cambio de sábanas · ${_pabNombre}${nivelLabel} <span class="badge">${totalGeneral} camas</span></div>` +
-      Object.entries(porFecha).sort().map(([fecha, habs]) => {
+      '<div class="sec-title">🛏️ Cambio de sábanas · ' + _pabNombre + nivelLabel + ' <span class="badge">' + totalGeneral + ' camas</span></div>' +
+      Object.entries(porFecha).sort().map(function(entry) {
+        const fecha = entry[0];
+        const habsObj = entry[1];
         const diffMs   = new Date(fecha+'T12:00:00') - new Date(desde+'T00:00:00');
         const diffD    = Math.round(diffMs / 86400000);
-        const etiq     = diasLabel[diffD] || `En ${diffD} días`;
+        const etiq     = diasLabel[diffD] || 'En ' + diffD + ' días';
         const fmtFecha = new Date(fecha+'T12:00:00').toLocaleDateString('es-CL',{weekday:'long',day:'numeric',month:'long'});
-        const totalDia = Object.values(habs).reduce((s,h) => s + h.count, 0);
+        const totalDia = Object.values(habsObj).reduce(function(s,h) { return s + h.count; }, 0);
         const col      = diffD === 0 ? '#ef4444' : diffD === 1 ? '#f59e0b' : '#6366f1';
-
-        // Ordenar habitaciones por número
-        const habsOrdenadas = Object.values(habs).sort((a,b) => a.hab.numero_hab.localeCompare(b.hab.numero_hab, 'es', {numeric:true}));
-
-        return `
-          <div style="margin-bottom:14px">
-            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-              <span style="background:${col};color:white;border-radius:8px;padding:4px 12px;font-size:12px;font-weight:800">${etiq}</span>
-              <span style="font-size:12px;color:var(--gray-500)">${fmtFecha}</span>
-              <span style="margin-left:auto;font-size:14px;font-weight:900;color:${col}">🛏️ ${totalDia} cambios</span>
-            </div>
-            <div class="card" style="padding:10px 14px">
-              <div style="display:grid;grid-template-columns:1fr auto auto;gap:6px 12px;align-items:center">
-                <div style="font-size:10px;font-weight:800;color:var(--gray-400);text-transform:uppercase">Habitación</div>
-                <div style="font-size:10px;font-weight:800;color:var(--gray-400);text-transform:uppercase">Piso</div>
-                <div style="font-size:10px;font-weight:800;color:var(--gray-400);text-transform:uppercase;text-align:right">Camas</div>
-                ${habsOrdenadas.map(({hab, count}) => `
-                  <div style="font-size:14px;font-weight:800;color:var(--gray-900)">${hab.numero_hab}</div>
-                  <div style="font-size:12px;color:var(--gray-500)">${hab.nivel || '—'}</div>
-                  <div style="font-size:15px;font-weight:900;color:${col};text-align:right">${count}</div>
-                `).join('')}
-              </div>
-              <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--gray-100);display:flex;justify-content:space-between;align-items:center">
-                <span style="font-size:11px;color:var(--gray-500)">${habsOrdenadas.length} habitaciones</span>
-                <span style="font-size:13px;font-weight:900;color:${col}">${totalDia} sábanas a cambiar</span>
-              </div>
-            </div>
-          </div>`;
+        const habsOrdenadas = Object.values(habsObj).sort(function(a,b) {
+          return a.hab.numero_hab.localeCompare(b.hab.numero_hab, 'es', {numeric:true});
+        });
+        return '<div style="margin-bottom:14px">' +
+          '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">' +
+            '<span style="background:' + col + ';color:white;border-radius:8px;padding:4px 12px;font-size:12px;font-weight:800">' + etiq + '</span>' +
+            '<span style="font-size:12px;color:var(--gray-500)">' + fmtFecha + '</span>' +
+            '<span style="margin-left:auto;font-size:14px;font-weight:900;color:' + col + '">🛏️ ' + totalDia + ' cambios</span>' +
+          '</div>' +
+          '<div class="card" style="padding:10px 14px">' +
+            '<div style="display:grid;grid-template-columns:1fr auto auto;gap:6px 12px;align-items:center">' +
+              '<div style="font-size:10px;font-weight:800;color:var(--gray-400);text-transform:uppercase">Habitación</div>' +
+              '<div style="font-size:10px;font-weight:800;color:var(--gray-400);text-transform:uppercase">Piso</div>' +
+              '<div style="font-size:10px;font-weight:800;color:var(--gray-400);text-transform:uppercase;text-align:right">Camas</div>' +
+              habsOrdenadas.map(function(item) {
+                return '<div style="font-size:14px;font-weight:800;color:var(--gray-900)">' + item.hab.numero_hab + '</div>' +
+                       '<div style="font-size:12px;color:var(--gray-500)">' + (item.hab.nivel || '—') + '</div>' +
+                       '<div style="font-size:15px;font-weight:900;color:' + col + ';text-align:right">' + item.count + '</div>';
+              }).join('') +
+            '</div>' +
+            '<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--gray-100);display:flex;justify-content:space-between;align-items:center">' +
+              '<span style="font-size:11px;color:var(--gray-500)">' + habsOrdenadas.length + ' habitaciones</span>' +
+              '<span style="font-size:13px;font-weight:900;color:' + col + '">' + totalDia + ' sábanas a cambiar</span>' +
+            '</div>' +
+          '</div>' +
+        '</div>';
       }).join('');
 
   } catch(err) {
     console.error('[bajadas]', err);
-    panel.innerHTML = `<div class="card" style="color:#ef4444;font-weight:700">⚠️ ${err.message}</div>`;
+    panel.innerHTML = '<div class="card" style="color:#ef4444;font-weight:700">⚠️ ' + err.message + '</div>';
   }
 }
 
 // ── Utils ───────────────────────────────────────────────────────────────
 function todayISO() {
-  return new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD
+  return new Date().toLocaleDateString('en-CA');
 }
 
 // ── Claves de localStorage ────────────────────────────────────────────────
-function draftKey() { return `censo_draft_${_pabellonId}_${todayISO()}`; }
+function draftKey() { return 'censo_draft_' + _pabellonId + '_' + todayISO(); }
 
-// ── Auto-guardado: guarda _censoHoy en localStorage cada cambio ──────────
 function autoGuardar() {
   try { localStorage.setItem(draftKey(), JSON.stringify(_censoHoy)); } catch(_) {}
 }
 
-// ── Restaurar borrador guardado al cargar el pabellón ────────────────────
 function restaurarDraft() {
   try {
     const raw = localStorage.getItem(draftKey());
     if (!raw) return;
     const saved = JSON.parse(raw);
     let restored = 0;
-    Object.entries(saved).forEach(([hId, estado]) => {
-      if (_habitaciones.find(h => h.id_custom === hId)) {
+    Object.entries(saved).forEach(function(entry) {
+      const hId = entry[0]; const estado = entry[1];
+      if (_habitaciones.find(function(h) { return h.id_custom === hId; })) {
         _censoHoy[hId] = estado;
         restored++;
       }
@@ -748,14 +750,12 @@ function restaurarDraft() {
   } catch(_) {}
 }
 
-// ── Limpiar borrador tras guardar en Supabase ─────────────────────────────
 function clearDraft() {
   try { localStorage.removeItem(draftKey()); } catch(_) {}
   const b = document.getElementById('draft-banner');
   if (b) b.style.display = 'none';
 }
 
-// ── Descartar borrador manualmente ───────────────────────────────────────
 window.descartarDraft = function() {
   clearDraft();
   _censoHoy = {};
@@ -764,107 +764,137 @@ window.descartarDraft = function() {
   actualizarContador();
 };
 
-// ── Exportar PDF del Censo (con fallback offline) ───────────────────────
-window.exportarPDF = async function() {
-  const btn = document.getElementById('btn-pdf');
+// ── Exportar Excel del Censo ────────────────────────────────────────────
+// Columnas: Habitación · Fecha · Empresa · Cantidad Ocupantes · Turno
+window.exportarExcel = async function() {
+  const btn = document.getElementById('btn-excel');
   if (!_habitaciones.length) { toast('⚠️ No hay habitaciones cargadas', 2000); return; }
   if (btn) { btn.textContent = '⏳'; btn.disabled = true; }
 
-  // ── Construir contenido HTML del census ──
-  const fecha    = todayISO();
-  const marcadas = Object.keys(_censoHoy).filter(k => _habitaciones.find(h => h.id_custom === k)).length;
-  const estadoLbl = { sin_ocupar:'Sin Ocupar', dia:'Día', noche:'Noche', '2_dia':'2 Día', '2_noche':'2 Noche', '3_dia':'3 Día', '3_noche':'3 Noche' };
-  const rows = _habitaciones.map((h,i) => {
-    const est = _censoHoy[h.id_custom];
-    const bg  = i % 2 === 0 ? '#ffffff' : '#f8fafc';
-    return `<tr style="background:${bg}">
-      <td style="padding:6px 10px;font-weight:700;border:1px solid #e2e8f0">${h.numero_hab}</td>
-      <td style="padding:6px 10px;font-weight:600;color:${est?'#1e293b':'#94a3b8'};border:1px solid #e2e8f0">${estadoLbl[est]||'—'}</td>
-    </tr>`;
-  }).join('');
-
-  const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
-  <title>Censo ${_pabNombre} · ${fecha}</title>
-  <style>
-    body{font-family:Arial,sans-serif;padding:20px;color:#1e293b;}
-    @media print{
-      button{display:none!important;}
-      body{padding:10px;}
-    }
-  ${'<' + '/style>'}
-  ${'<' + '/head>'}<body>
-  <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #6366f1;padding-bottom:14px;margin-bottom:16px">
-    <div>
-      <h1 style="font-size:20px;font-weight:900;margin:0;color:#1e1b4b">Censo de Camas — PC Hotería</h1>
-      <p style="margin:4px 0 0;font-size:12px;color:#64748b">${_pabNombre} · ${fecha} · ${_nombre}</p>
-    </div>
-    <div style="text-align:right">
-      <div style="font-size:28px;font-weight:900;color:#6366f1">${marcadas}/${_habitaciones.length}</div>
-      <div style="font-size:10px;color:#64748b">habitaciones censadas</div>
-    </div>
-  </div>
-  <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:16px">
-    <div style="background:#f1f5f9;border-radius:8px;padding:8px;text-align:center"><div style="font-size:18px;font-weight:900;color:#6366f1">${marcadas}</div><div style="font-size:9px;color:#64748b;text-transform:uppercase;font-weight:700">Censadas</div></div>
-    <div style="background:#f1f5f9;border-radius:8px;padding:8px;text-align:center"><div style="font-size:18px;font-weight:900;color:#64748b">${_habitaciones.length - marcadas}</div><div style="font-size:9px;color:#64748b;text-transform:uppercase;font-weight:700">Sin registrar</div></div>
-  </div>
-  <table style="width:100%;border-collapse:collapse;font-size:12px">
-    <thead><tr style="background:#1e1b4b;color:white">
-      <th style="padding:7px 10px;text-align:left;border:1px solid #312e81">Habitación</th>
-      <th style="padding:7px 10px;text-align:left;border:1px solid #312e81">Estado Censo</th>
-    </tr></thead>
-    <tbody>${rows}</tbody>
-  ${'<' + '/table>'}
-  <p style="margin-top:14px;font-size:9px;color:#94a3b8;text-align:center">PC Hotería · Aramark Chile · ${new Date().toLocaleString('es-CL')}</p>
-  ${'<' + '/body>'}${'<' + '/html>'}`;
-
-
   try {
-    // ── Intentar con html2pdf (si hay internet) ──
-    if (!window.html2pdf) {
-      await Promise.race([
-        new Promise((res, rej) => {
-          const s = document.createElement('script');
-          s.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
-          s.onload = res;
-          s.onerror = () => rej(new Error('sin internet'));
-          document.head.appendChild(s);
-        }),
-        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 5000))
-      ]);
+    // ── 1. Cargar librería XLSX ──────────────────────────────────────────
+    if (!window.XLSX) {
+      await new Promise(function(res, rej) {
+        var s = document.createElement('script');
+        s.src = '/js/xlsx.full.min.js';
+        s.onload = res;
+        s.onerror = function() {
+          var s2 = document.createElement('script');
+          s2.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+          s2.onload = res;
+          s2.onerror = rej;
+          document.head.appendChild(s2);
+        };
+        document.head.appendChild(s);
+      });
     }
 
-    // html2pdf cargó OK — descarga directa
-    const wrapper = document.createElement('div');
-    wrapper.innerHTML = html;
-    document.body.appendChild(wrapper);
-    await html2pdf().set({
-      margin: 6,
-      filename: `censo_${_pabNombre.replace(/\s+/g,'_')}_${fecha}.pdf`,
-      image: { type: 'jpeg', quality: 0.95 },
-      html2canvas: { scale: 2, useCORS: true, logging: false },
-      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
-    }).from(wrapper).save();
-    document.body.removeChild(wrapper);
-    toast('📄 PDF descargado', 2000);
+    const fecha   = todayISO();
+    const periodo = getPeriodo();
+    const habIds  = _habitaciones.map(function(h) { return h.id_custom; });
 
-  } catch(_) {
-    // ── Fallback offline: abrir ventana e imprimir (Cmd+P → Guardar como PDF) ──
-    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
-    const url  = URL.createObjectURL(blob);
-    const win  = window.open(url, '_blank');
-    if (win) {
-      toast('📄 Se abrió el censo — presiona ⌘P y elige "Guardar como PDF"', 5000);
-    } else {
-      // Último recurso: descarga directa del HTML
-      const a = document.createElement('a');
-      a.href = url; a.download = `censo_${_pabNombre.replace(/\s+/g,'_')}_${fecha}.html`;
-      a.click();
-      toast('📄 Archivo descargado (abrir con Word o Chrome)', 4000);
+    // ── 2. Obtener camas del pabellón ────────────────────────────────────
+    const { data: camas } = await supabase.from('v2_camas')
+      .select('id_cama, habitacion_id')
+      .in('habitacion_id', habIds);
+
+    // ── 3. Obtener asignaciones activas con empresa ───────────────────────
+    const camaIds = (camas || []).map(function(c) { return c.id_cama; });
+    var asigs = [];
+    if (camaIds.length) {
+      const LOTE = 300;
+      for (let i = 0; i < camaIds.length; i += LOTE) {
+        const { data } = await supabase.from('v2_asignaciones')
+          .select('id_cama, empresa_id, v2_empresas!empresa_id(nombre)')
+          .in('id_cama', camaIds.slice(i, i + LOTE))
+          .is('fecha_checkout', null);
+        asigs = asigs.concat(data || []);
+      }
     }
-    setTimeout(() => URL.revokeObjectURL(url), 10000);
+
+    // ── 4. Mapas auxiliares ───────────────────────────────────────────────
+    const camaToHab = {};
+    (camas || []).forEach(function(c) { camaToHab[c.id_cama] = c.habitacion_id; });
+
+    const habEmpresas = {};
+    asigs.forEach(function(a) {
+      const habId = camaToHab[a.id_cama];
+      if (!habId) return;
+      if (!habEmpresas[habId]) habEmpresas[habId] = new Set();
+      habEmpresas[habId].add(a.v2_empresas ? a.v2_empresas.nombre || 'Sin empresa' : 'Sin empresa');
+    });
+
+    // ── 5. Decodificar estado de censo ───────────────────────────────────
+    function decode(est) {
+      const m = {
+        'sin_ocupar': { cant: 0, turno: 'Sin Ocupar' },
+        'dia':        { cant: 1, turno: 'Dia'        },
+        '2_dia':      { cant: 2, turno: 'Dia'        },
+        '3_dia':      { cant: 3, turno: 'Dia'        },
+        'noche':      { cant: 1, turno: 'Noche'      },
+        '2_noche':    { cant: 2, turno: 'Noche'      },
+        '3_noche':    { cant: 3, turno: 'Noche'      },
+      };
+      return m[est] || { cant: 0, turno: 'Sin censar' };
+    }
+
+    // ── 6. Construir filas Excel ─────────────────────────────────────────
+    const periodoLabel = periodo === 'dia' ? 'Dia' : 'Noche';
+    const excelRows = _habitaciones.map(function(h) {
+      const estado  = _censoHoy[h.id_custom] || null;
+      const dec = estado ? decode(estado) : { cant: 0, turno: '—' };
+      const empresa = habEmpresas[h.id_custom]
+        ? Array.from(habEmpresas[h.id_custom]).join(' / ')
+        : '—';
+      return {
+        'Habitacion':       h.numero_hab,
+        'ID Habitacion':    h.id_custom,
+        'Nivel/Piso':       h.nivel || '—',
+        'Fecha':            fecha,
+        'Periodo':          periodoLabel,
+        'Turno':            dec.turno,
+        'Cant. Ocupantes':  dec.cant,
+        'Empresa':          empresa,
+        'Estado':           estado || 'sin_censar',
+      };
+    });
+
+    // ── 7. Crear workbook ────────────────────────────────────────────────
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(excelRows);
+    ws['!cols'] = [
+      { wch: 14 }, { wch: 20 }, { wch: 10 }, { wch: 12 },
+      { wch: 10 }, { wch: 12 }, { wch: 16 }, { wch: 35 }, { wch: 14 },
+    ];
+    XLSX.utils.book_append_sheet(wb, ws, 'Censo Terreno');
+
+    // ── 8. Hoja resumen ──────────────────────────────────────────────────
+    const habConCenso = excelRows.filter(function(r) { return r['Estado'] !== 'sin_censar'; });
+    const totalOcup   = habConCenso.reduce(function(s, r) {
+      return s + (typeof r['Cant. Ocupantes'] === 'number' ? r['Cant. Ocupantes'] : 0);
+    }, 0);
+    const resumenRows = [
+      { 'Detalle': 'Pabellon',              'Valor': _pabNombre },
+      { 'Detalle': 'Fecha',                 'Valor': fecha },
+      { 'Detalle': 'Periodo',               'Valor': periodoLabel },
+      { 'Detalle': 'Total Habitaciones',    'Valor': _habitaciones.length },
+      { 'Detalle': 'Habitaciones Censadas', 'Valor': habConCenso.length },
+      { 'Detalle': 'Total Ocupantes',       'Valor': totalOcup },
+    ];
+    const wsR = XLSX.utils.json_to_sheet(resumenRows);
+    wsR['!cols'] = [{ wch: 24 }, { wch: 30 }];
+    XLSX.utils.book_append_sheet(wb, wsR, 'Resumen');
+
+    const nombre_archivo = 'censo_' + _pabNombre.replace(/\s+/g,'_') + '_' + fecha + '_' + periodoLabel + '.xlsx';
+    XLSX.writeFile(wb, nombre_archivo);
+    toast('📊 Excel descargado', 2500);
+
+  } catch(e) {
+    console.error('[Excel censo]', e);
+    toast('❌ Error: ' + e.message, 4000);
   }
 
-  if (btn) { btn.textContent = '📄'; btn.disabled = false; }
+  if (btn) { btn.textContent = '📊'; btn.disabled = false; }
 };
 </script>
 

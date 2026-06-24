@@ -9,7 +9,7 @@ async function run() {
     let res = await fetch(`${url}/rest/v1/v2_empresas?nombre=ilike.*HUALPEN*`, { headers: { apikey: key, Authorization: `Bearer ${key}` } });
     let empresas = await res.json();
     let empIds = empresas.map(e => e.id);
-    
+
     // 2. Get active assignments for 09, 10
     let res2 = await fetch(`${url}/rest/v1/v2_asignaciones?empresa_id=in.(${empIds.join(',')})&fecha_checkin=in.(2026-06-09,2026-06-10)&fecha_checkout=is.null`, { headers: { apikey: key, Authorization: `Bearer ${key}` } });
     let asignaciones = await res2.json();
@@ -18,7 +18,7 @@ async function run() {
     if (asignaciones.length > 0) {
         let camasIds = [...new Set(asignaciones.map(a => a.id_cama).filter(Boolean))];
         let asigIds = asignaciones.map(a => a.id);
-        
+
         // 3. Free beds
         if (camasIds.length > 0) {
             console.log(`Liberando ${camasIds.length} camas...`);
@@ -28,7 +28,7 @@ async function run() {
                 body: JSON.stringify({ estado: 'Disponible' })
             });
         }
-        
+
         // 4. Delete assignments
         console.log(`Borrando ${asigIds.length} asignaciones...`);
         await fetch(`${url}/rest/v1/v2_asignaciones?id=in.(${asigIds.join(',')})`, {
@@ -43,7 +43,7 @@ async function run() {
         method: 'DELETE',
         headers: { apikey: key, Authorization: `Bearer ${key}` }
     });
-    
+
     console.log("¡Todo limpio!");
 }
 run();

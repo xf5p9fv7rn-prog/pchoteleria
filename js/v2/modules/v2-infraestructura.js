@@ -462,14 +462,24 @@ async function renderGrid(camasArrIn = null, habTagMapIn = null, solicCacheIn = 
             ));
         } catch(_) { /* si falla, no filtramos */ }
 
-        const { data: solics } = await supabase
-            .from('v2_solicitudes_b2b')
-            .select('id, nombre_trabajador, rut_trabajador, empresa, fecha_llegada, fecha_salida, hab_solicitada')
-            .in('status', ['aceptada', 'aceptada_asignada'])
-            .gte('fecha_llegada', hoy2)
-            .order('fecha_llegada')
-            .limit(500);
-        (solics || []).forEach(s => {
+        // 📄 Fetch PAGINADO de solicitudes B2B (sin límite de 500)
+        let allSolics = [];
+        let solPage = 0;
+        while (true) {
+            const { data: solBatch } = await supabase
+                .from('v2_solicitudes_b2b')
+                .select('id, nombre_trabajador, rut_trabajador, empresa, fecha_llegada, fecha_salida, hab_solicitada')
+                .in('status', ['aceptada', 'aceptada_asignada'])
+                .gte('fecha_llegada', hoy2)
+                .order('fecha_llegada')
+                .range(solPage * 1000, solPage * 1000 + 999);
+            if (!solBatch?.length) break;
+            allSolics = allSolics.concat(solBatch);
+            if (solBatch.length < 1000) break;
+            solPage++;
+            if (solPage > 20) break; // seguridad: máx 20000 solicitudes
+        }
+        allSolics.forEach(s => {
             const k = String(s.hab_solicitada);
             if (!numHabsSet.has(k)) return;
             const rutNorm = String(s.rut_trabajador || '').toUpperCase().replace(/\./g, '');
@@ -531,7 +541,11 @@ async function renderGrid(camasArrIn = null, habTagMapIn = null, solicCacheIn = 
             empId = emp?.[0]?.id || null;
         }
 
-        // 3. Crear asignación
+        // 3. Crear asignación — activa si llega hoy o antes, pre_asignado si es futura
+        const hoyStr = new Date().toISOString().split('T')[0];
+        const esHoyOAntes = !sol.fecha_llegada || sol.fecha_llegada <= hoyStr;
+        const estadoAsig = esHoyOAntes ? 'activa' : 'pre_asignado';
+
         const { error: errA } = await supabase.from('v2_asignaciones').insert({
             id_cama:                camaId,
             rut_huesped:            (sol.rut_trabajador || '').replace(/\./g,'').toUpperCase().slice(0, 12) || null,
@@ -539,15 +553,15 @@ async function renderGrid(camasArrIn = null, habTagMapIn = null, solicCacheIn = 
             empresa_id:             empId,
             fecha_checkin:          sol.fecha_llegada,
             fecha_salida_programada: sol.fecha_salida || null,
-            estado_asignacion:      'pre_asignado',
+            estado_asignacion:      estadoAsig,
             huesped_confirmo:       false,
             autorizado_checkin:     false,
         });
         if (errA) { btnEl.textContent = '❌ ' + errA.message; btnEl.disabled = false; return; }
 
-        // 4. ✅ FIX: La cama debe quedar Disponible para que se muestre como "Pre-asignada"
-        //    getCamas() detecta preAsignado cuando estado='Disponible' + asignación 'pre_asignado'
-        await supabase.from('v2_camas').update({ estado: 'Disponible' }).eq('id_cama', camaId).neq('estado', 'Deshabilitada');
+        // 4. Actualizar estado de la cama según si es hoy o futura
+        const estadoCama = esHoyOAntes ? 'Ocupada' : 'Disponible';
+        await supabase.from('v2_camas').update({ estado: estadoCama }).eq('id_cama', camaId).neq('estado', 'Deshabilitada');
 
         // 5. Marcar solicitud como aceptada
         await supabase.from('v2_solicitudes_b2b').update({ status: 'aceptada' }).eq('id', sol.id);
@@ -790,7 +804,10 @@ async function renderGrid(camasArrIn = null, habTagMapIn = null, solicCacheIn = 
                     <div style="font-size:10px;color:#b45309;font-weight:700;margin-top:2px">📅 ${llegD} &nbsp;→&nbsp; 🔚 ${salD}</div>
                   </div>
                   <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0;align-items:flex-end">
-                    <span style="display:inline-flex;align-items:center;gap:3px;background:#a855f7;color:white;border-radius:6px;padding:3px 7px;font-size:10px;font-weight:800">P Pre-asig.</span>
+                    ${s.fecha_llegada === new Date().toISOString().split('T')[0]
+                      ? `<span style="display:inline-flex;align-items:center;gap:3px;background:#16a34a;color:white;border-radius:6px;padding:3px 7px;font-size:10px;font-weight:800">✅ Llega hoy</span>`
+                      : `<span style="display:inline-flex;align-items:center;gap:3px;background:#a855f7;color:white;border-radius:6px;padding:3px 7px;font-size:10px;font-weight:800">P Pre-asig.</span>`
+                    }
                     <button onclick="window._v2iAsignarPreAsig('${h.numero_hab}',${idx},this)"
                       style="background:#f97316;color:white;border:none;border-radius:6px;padding:3px 9px;font-size:10px;font-weight:800;cursor:pointer;white-space:nowrap">
                       ⚡ Asignar
@@ -850,18 +867,12 @@ async function openCamaModal(ev, idCama) {
     // 🔧 Bloqueo por habitación en mantención
     const hab = _habitaciones.find(h => h.id_custom === info.habitacion_id);
     if (hab?.en_mantencion) {
-        const t = Object.assign(document.createElement('div'), {
-            textContent: '🔧 Habitación en Mantención — no disponible para check-in',
-        });
-        t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:99999;padding:12px 24px;border-radius:12px;font-weight:700;font-size:13px;background:#f59e0b;color:#fff;box-shadow:0 4px 20px rgba(0,0,0,.3);white-space:nowrap';
-        document.body.appendChild(t);
-        setTimeout(() => { t.style.opacity='0'; t.style.transition='opacity .5s'; setTimeout(() => t.remove(), 500); }, 2500);
+        _mantToast('🔧 Habitación en Mantención — no disponible para check-in', 'warn');
         return;
     }
 
     const estado = info.estado || 'Disponible';
-    await abrirPopover(card, idCama, estado, async (tipo) => {
-        // Invalidar caché del pabellón actual y refrescar vista
+    await abrirPopover(card, idCama, estado, async () => {
         if (_selPabellon) {
             delete _cachePorPab[_selPabellon];
             const scrollY = window.scrollY;
@@ -874,56 +885,75 @@ async function openCamaModal(ev, idCama) {
 function closeModal() { cerrarPopover(); }
 
 // ─── MANTENIMIENTO DE HABITACIÓN ─────────────────────────────────────────────
-window._v2iToggleMantencionHab = async function(habId, poner) {
-    // Confirmación cuando se pone en mantención
-    if (poner) {
-        const hab = _habitaciones.find(h => h.id_custom === habId);
-        const numHab = hab?.numero_hab || habId;
-        // Verificar si hay huéspedes activos
-        const tieneOcupantes = Object.values(_camaData)
-            .filter(c => c.habitacion_id === habId)
-            .some(c => c.estado === 'Ocupada');
-        if (tieneOcupantes) {
-            if (!confirm(`⚠️ La habitación ${numHab} tiene camas ocupadas.\n\n¿Poner igual en mantención? Las camas seguirán ocupadas en el sistema.`)) return;
-        } else {
-            if (!confirm(`¿Poner habitación ${numHab} en mantención?\n\nQuedará bloqueada para nuevos check-ins.`)) return;
-        }
-    }
+// Toast visual de estado (reemplaza confirm/alert)
+function _mantToast(msg, tipo = 'info') {
+    const colors = { info:'#6366f1', ok:'#10b981', error:'#ef4444', warn:'#f59e0b' };
+    const t = Object.assign(document.createElement('div'), { textContent: msg });
+    t.style.cssText = `position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:99999;padding:14px 24px;border-radius:14px;font-weight:800;font-size:14px;background:${colors[tipo]||colors.info};color:#fff;box-shadow:0 6px 30px rgba(0,0,0,.35);white-space:nowrap;transition:opacity .5s`;
+    document.body.appendChild(t);
+    setTimeout(() => { t.style.opacity='0'; setTimeout(() => t.remove(), 500); }, tipo==='error'?5000:3000);
+}
 
+window._v2iToggleMantencionHab = async function(habId, poner, skipConfirm = false) {
     try {
+        _mantToast(poner ? '🔧 Bloqueando habitación…' : '⚙️ Reactivando habitación…', 'info');
+
         const { error } = await supabase
             .from('v2_habitaciones')
             .update({ en_mantencion: poner })
             .eq('id_custom', habId);
 
-        if (error) throw error;
+        if (error) {
+            _mantToast('❌ Error: ' + error.message, 'error');
+            console.error('[Mant] Error Supabase:', error);
+            return;
+        }
 
         // Actualizar en memoria para reflejo inmediato
-        const hab = _habitaciones.find(h => h.id_custom === habId);
-        if (hab) hab.en_mantencion = poner;
+        const habRef = _habitaciones.find(h => h.id_custom === habId);
+        if (habRef) habRef.en_mantencion = poner;
 
         // Invalidar caché de este pabellón y refrescar
         if (_selPabellon) {
             delete _cachePorPab[_selPabellon];
             const scrollY = window.scrollY;
             await selectPabellon(_selPabellon);
+            // CRÍTICO: selectPabellon sobrescribe _habitaciones con datos de DB.
+            // Forzar el estado correcto después del refresh, en caso de que Supabase
+            // devuelva dato viejo por cache HTTP.
+            const habRefreshed = _habitaciones.find(h => h.id_custom === habId);
+            if (habRefreshed) {
+                if (habRefreshed.en_mantencion !== poner) {
+                    console.warn('[Mant] DB devolvió en_mantencion=' + habRefreshed.en_mantencion + ' al refrescar. Forzando a ' + poner);
+                    habRefreshed.en_mantencion = poner;
+                    // Re-renderizar para que se vea el estado correcto
+                    await renderGrid(_camasCache, _habTagCache, _solicCache || {});
+                }
+            }
             requestAnimationFrame(() => window.scrollTo({ top: scrollY, behavior: 'instant' }));
         }
 
-        // Toast de confirmación
-        const msg = poner ? '🔧 Habitación en mantención' : '✅ Habitación reactivada';
-        const t = Object.assign(document.createElement('div'), { textContent: msg });
-        t.style.cssText = `position:fixed;bottom:24px;right:24px;z-index:99999;padding:12px 20px;border-radius:12px;font-weight:700;font-size:13px;background:${poner?'#f59e0b':'#10b981'};color:#fff;box-shadow:0 4px 20px rgba(0,0,0,.25);transition:opacity .5s`;
-        document.body.appendChild(t);
-        setTimeout(() => { t.style.opacity='0'; setTimeout(() => t.remove(), 500); }, 3000);
+        _mantToast(poner ? '🔧 Habitación bloqueada por mantención' : '✅ Habitación reactivada', poner ? 'warn' : 'ok');
+
+        // Verificar en DB que el cambio quedó grabado
+        supabase.from('v2_habitaciones').select('en_mantencion').eq('id_custom', habId).maybeSingle()
+            .then(({ data: v }) => {
+                const val = v?.en_mantencion;
+                console.log('[Mant] Verificación DB → en_mantencion=' + val + ' (esperado: ' + poner + ')');
+                if (val !== poner) {
+                    _mantToast('⚠️ DB no guardó el cambio (RLS o permiso). Contacta al admin.', 'error');
+                }
+            });
 
         // Actualizar lista del panel
         _v2iMantActualizarLista();
 
     } catch(e) {
-        alert('Error al cambiar estado de habitación: ' + e.message);
+        _mantToast('❌ Excepción: ' + e.message, 'error');
+        console.error('[Mant] Excepción:', e);
     }
 };
+
 
 // ─── PANEL DE MANTENIMIENTO RÁPIDO ───────────────────────────────────────────
 
@@ -959,27 +989,76 @@ window._v2iAbrirMant = function() {
 window._v2iMantBloquear = async function() {
     const input = document.getElementById('v2i-mant-input');
     const numStr = input?.value?.trim();
-    if (!numStr) { input?.focus(); return; }
+    if (!numStr) {
+        _mantToast('❗ Escribe el número de habitación primero', 'warn');
+        input?.focus();
+        return;
+    }
 
-    // Buscar en todos los pabellones del edificio actual
+    // Indicar que estamos buscando
+    _mantToast('🔍 Buscando habitación ' + numStr + '…', 'info');
+
+    // 1º: Buscar en caché local (pabellones ya visitados)
     const todasHabs = Object.values(_cachePorPab).flatMap(p => p.habs || []);
-    // También incluir las habitaciones del pabellón activo
     const habsPool = [..._habitaciones, ...todasHabs].filter((h, i, arr) => arr.findIndex(x => x.id_custom === h.id_custom) === i);
-    const hab = habsPool.find(h => String(h.numero_hab) === numStr);
+    let hab = habsPool.find(h => String(h.numero_hab) === numStr);
 
+    // 2º: Si no está en caché local, consultar Supabase directamente
     if (!hab) {
-        const input = document.getElementById('v2i-mant-input');
-        if (input) { input.style.borderColor = '#ef4444'; setTimeout(() => input.style.borderColor = '#f59e0b', 2000); }
-        alert(`No se encontró la habitación ${numStr} en los pabellones cargados.\nNavega primero al pabellón que la contiene.`);
-        return;
+        const { data: habDB, error: errDB } = await supabase
+            .from('v2_habitaciones')
+            .select('id_custom,numero_hab,en_mantencion')
+            .eq('numero_hab', parseInt(numStr))
+            .maybeSingle();
+        if (errDB) {
+            _mantToast('❌ Error buscando: ' + errDB.message, 'error');
+            return;
+        }
+        if (!habDB) {
+            if (input) { input.style.borderColor = '#ef4444'; setTimeout(() => input.style.borderColor = '#f59e0b', 2000); }
+            _mantToast('❌ Habitación ' + numStr + ' no existe en el sistema', 'error');
+            return;
+        }
+        hab = habDB;
     }
+
     if (hab.en_mantencion) {
-        alert(`La habitación ${numStr} ya está en mantención.`);
+        _mantToast('⚠️ Habitación ' + numStr + ' ya está bloqueada', 'warn');
         return;
     }
-    await window._v2iToggleMantencionHab(hab.id_custom, true);
-    if (input) input.value = '';
+
+    // Confirmación visual sin confirm() nativo
+    const habLocal = _habitaciones.find(h => h.id_custom === hab.id_custom);
+    const tieneOcupantes = habLocal ? Object.values(_camaData)
+        .filter(c => c.habitacion_id === hab.id_custom)
+        .some(c => c.estado === 'Ocupada') : false;
+    const aviso = tieneOcupantes
+        ? `⚠️ Hab. ${numStr} tiene camas ocupadas. ¿Bloquear igual?`
+        : `¿Bloquear habitación ${numStr} por mantención?`;
+
+    _mostrarConfirmBloqueo(aviso, async () => {
+        await window._v2iToggleMantencionHab(hab.id_custom, true, true);
+        if (input) input.value = '';
+    });
 };
+
+// Cuadro de confirmación inline (sin confirm() del navegador)
+function _mostrarConfirmBloqueo(mensaje, onConfirm) {
+    document.getElementById('_mant-confirm-box')?.remove();
+    const box = document.createElement('div');
+    box.id = '_mant-confirm-box';
+    box.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:99999;background:#fff;border:2px solid #f59e0b;border-radius:16px;padding:24px 28px;box-shadow:0 12px 40px rgba(0,0,0,.35);min-width:260px;max-width:340px;text-align:center';
+    box.innerHTML = `
+        <div style="font-size:28px;margin-bottom:10px">🔧</div>
+        <div style="font-size:14px;font-weight:700;color:#1e293b;margin-bottom:18px">${mensaje}</div>
+        <div style="display:flex;gap:10px;justify-content:center">
+            <button id="_mant-confirm-ok" style="background:#f59e0b;color:#fff;border:none;border-radius:10px;padding:10px 24px;font-size:14px;font-weight:800;cursor:pointer">🔒 Bloquear</button>
+            <button id="_mant-confirm-cancel" style="background:#e2e8f0;color:#475569;border:none;border-radius:10px;padding:10px 24px;font-size:14px;font-weight:700;cursor:pointer">Cancelar</button>
+        </div>`;
+    document.body.appendChild(box);
+    document.getElementById('_mant-confirm-ok').onclick = () => { box.remove(); onConfirm(); };
+    document.getElementById('_mant-confirm-cancel').onclick = () => box.remove();
+}
 
 // Reparar habitación por número
 window._v2iMantReparar = async function() {
@@ -987,14 +1066,23 @@ window._v2iMantReparar = async function() {
     const numStr = input?.value?.trim();
     if (!numStr) { input?.focus(); return; }
 
+    // 1º: Buscar en caché local
     const todasHabs = Object.values(_cachePorPab).flatMap(p => p.habs || []);
     const habsPool = [..._habitaciones, ...todasHabs].filter((h, i, arr) => arr.findIndex(x => x.id_custom === h.id_custom) === i);
-    const hab = habsPool.find(h => String(h.numero_hab) === numStr);
+    let hab = habsPool.find(h => String(h.numero_hab) === numStr);
 
+    // 2º: Fallback a Supabase si no está en caché
     if (!hab) {
-        alert(`No se encontró la habitación ${numStr} en los pabellones cargados.\nNavega primero al pabellón que la contiene.`);
-        return;
+        const { data: habDB, error: errDB } = await supabase
+            .from('v2_habitaciones')
+            .select('id_custom,numero_hab,en_mantencion')
+            .eq('numero_hab', parseInt(numStr))
+            .maybeSingle();
+        if (errDB) { _mantToast('❌ Error buscando: ' + errDB.message, 'error'); return; }
+        if (!habDB) { _mantToast('❌ Habitación ' + numStr + ' no existe en el sistema', 'error'); return; }
+        hab = habDB;
     }
+
     if (!hab.en_mantencion) {
         alert(`La habitación ${numStr} no está en mantención.`);
         return;
@@ -1002,6 +1090,7 @@ window._v2iMantReparar = async function() {
     await window._v2iToggleMantencionHab(hab.id_custom, false);
     if (input) input.value = '';
 };
+
 
 async function handleCheckin(idCama) {
     const msg  = (t,c) => { const e=document.getElementById('ci-msg'); if(e){e.textContent=t;e.style.color=c;} };
@@ -1075,7 +1164,10 @@ async function handleCheckout(asigId, idCama) {
     try {
         await doCheckout(asigId);
         // Actualizar caché en memoria — render instantáneo sin "Cargando camas"
-        _actualizarCamaEnCache(idCama, { estado: 'Disponible', nombre_huesped: null, empresa: null, numero_contrato: null });
+        // Preservar estado 'Deshabilitada' (camas C3 sin instalar físicamente)
+        const estadoActual = _camaData[idCama]?.estado;
+        const nuevoEstado = estadoActual === 'Deshabilitada' ? 'Deshabilitada' : 'Disponible';
+        _actualizarCamaEnCache(idCama, { estado: nuevoEstado, nombre_huesped: null, empresa: null, numero_contrato: null });
         closeModal();
         if (_selPabellon) {
             const scrollY = window.scrollY;
@@ -1084,6 +1176,7 @@ async function handleCheckout(asigId, idCama) {
         }
     } catch(e) { alert('❌ '+e.message); }
 }
+
 
 // Actualiza un cama dentro de _camasCache sin limpiar todo el caché
 function _actualizarCamaEnCache(idCama, cambios) {
@@ -1275,9 +1368,12 @@ window._v2iRepararAsignaciones = async function() {
             });
 
             if (!errI) {
-                // Marcar cama según estado
+                // Marcar cama según estado — NUNCA reactivar una cama C3 Deshabilitada
                 const estadoCama = estadoAsig === 'activa' ? 'Ocupada' : 'Disponible';
-                await supabase.from('v2_camas').update({ estado: estadoCama }).eq('id_cama', camaId);
+                await supabase.from('v2_camas')
+                    .update({ estado: estadoCama })
+                    .eq('id_cama', camaId)
+                    .neq('estado', 'Deshabilitada');
                 creadas++;
             } else {
                 console.warn('[Reparar] Error insertando', sol.nombre_trabajador, errI.message);

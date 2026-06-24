@@ -337,7 +337,7 @@
 </main>
 
 <!-- Supabase SDK -->
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="https://unpkg.com/@supabase/supabase-js@2.49.4/dist/umd/supabase.js"></script>
 <script>
   // ── Supabase ──────────────────────────────────────────────────────────────
   const SUPA_URL = 'https://pnkajjduvadcxealodcp.supabase.co';
@@ -463,16 +463,16 @@
     btn.disabled = true; btn.textContent = '⏳ Registrando…';
 
     const hoy = new Date().toISOString().split('T')[0];
+    const rut = _asignacion.rut_huesped;
 
-    // Verificar si ya registró hoy
-    const { data: yaReg } = await sb.from('v2_censo_trabajadores')
-      .select('id')
+    // 🛡️ ESCUDO ANTI-DUPLICADO: verificar en Supabase antes de insertar
+    const { count } = await sb.from('v2_censo_trabajadores')
+      .select('id', { count: 'exact', head: true })
       .eq('numero_hab', HAB_NUM)
-      .eq('rut_trabajador', _asignacion.rut_huesped)
-      .eq('fecha_scan', hoy)
-      .limit(1);
+      .eq('rut_trabajador', rut)
+      .eq('fecha_scan', hoy);
 
-    if (yaReg && yaReg.length) {
+    if (count && count > 0) {
       btn.disabled = false; btn.textContent = '✅ Confirmar mi presencia';
       document.getElementById('confirm-section').classList.remove('show');
       document.getElementById('confirm-done').classList.add('show');
@@ -483,18 +483,25 @@
 
     // Insertar censo
     const { error } = await sb.from('v2_censo_trabajadores').insert([{
-      numero_hab:       HAB_NUM,
-      rut_trabajador:   _asignacion.rut_huesped,
+      numero_hab:        HAB_NUM,
+      rut_trabajador:    rut,
       nombre_trabajador: _asignacion.nombre_huesped,
-      empresa:          _asignacion.v2_empresas?.nombre || null,
-      fecha_scan:       hoy,
-      asignacion_id:    _asignacion.id,
+      empresa:           _asignacion.v2_empresas?.nombre || null,
+      fecha_scan:        hoy,
+      asignacion_id:     _asignacion.id,
     }]);
 
     btn.disabled = false; btn.textContent = '✅ Confirmar mi presencia';
 
     if (error) {
-      // Si la tabla no existe aún, avisar
+      // Código 23505 = violación de unique constraint (carrera entre 2 clicks simultáneos)
+      if (error.code === '23505') {
+        document.getElementById('confirm-section').classList.remove('show');
+        document.getElementById('confirm-done').classList.add('show');
+        document.getElementById('confirm-msg-sub').textContent =
+          'Ya registraste tu presencia hoy. ¡Gracias!';
+        return;
+      }
       if (error.code === '42P01') {
         document.getElementById('confirm-section').classList.remove('show');
         document.getElementById('confirm-done').classList.add('show');

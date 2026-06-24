@@ -6,6 +6,7 @@
  */
 import { supabase } from '../../supabaseClient.js';
 import { CampDataEngine, localDateStr, todayLocal, POR_ASIGNAR, SIN_EMPRESA } from '../engine/v2-data-engine.js';
+import { classifyAll, classifyBed, lookupRoom, numHabInt, CAT, RULES, RULES_SUMMARY } from '../engine/v2-bed-classifier.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 async function fetchAll(table, select, filterFn = null) {
@@ -65,15 +66,18 @@ function resolveHabNum(asig, habMap) {
   return stripped || rawId || '—';
 }
 
-// ── Chart.js loader singleton ─────────────────────────────────────────────────
+// ── Chart.js loader singleton ─────────────────────────────────────────────────────
 let _chartLoaded = false;
 async function loadChart() {
   if (_chartLoaded || window.Chart) { _chartLoaded = true; return; }
-  await new Promise((res, rej) => {
+  // NO bloqueante: si el CDN falla (red bloqueada, timeout), continuamos sin chart
+  await new Promise((res) => {
     const s = document.createElement('script');
     s.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js';
     s.onload = () => { _chartLoaded = true; res(); };
-    s.onerror = rej;
+    s.onerror = () => { console.warn('[v2-detalle] Chart.js no disponible (CDN bloqueado) — gráfico desactivado'); res(); };
+    // Timeout de 5s: si no carga, continuamos igualmente
+    setTimeout(res, 5000);
     document.head.appendChild(s);
   });
 }
@@ -84,10 +88,168 @@ let _turnoFiltro = null;
 let _empresaFiltro = null;
 let _supFiltro = null;   // filtro por superintendencia
 let _data = null;
+let _container = null;   // referencia al container para poder recargar
+let _lastLoad = null;    // timestamp de la última carga de datos
+
+// Caché de motivos de camas perdidas (id habitacion → motivo)
+let _cpMotivos = {};     // habitacion_id → { motivo, motivo_texto }
+let _cpMotivosLoaded = false; // evitar re-fetch innecesario
 
 // Estado de filtros para tab No Ocupado
-let _libreFiltroPab = '';   // pabellón seleccionado ('' = todos)
+let _libreFiltroPab  = '';   // pabellón seleccionado ('' = todos)
 let _libreFiltroPiso = '';   // piso seleccionado     ('' = todos)
+
+// ── RESERVA TÉCNICA (solo admin) ──────────────────────────────────────────────
+// Sistema oculto de buffer: reduce el número visible de camas disponibles.
+// Solo accesible con PIN. No afecta los datos reales de Supabase.
+const _RT_KEY     = '_rt_cfg_v1';     // localStorage key (no obvio)
+const _RT_PIN_KEY = '_rt_pin_v1';     // PIN hash key
+let   _rtUnlocked = false;             // sesión de admin activa (solo esta pestaña)
+let   _rtBuffer   = 0;                 // % reserva activa (0-30)
+let   _rtChannel  = null;              // canal Supabase Broadcast
+
+// ── Usuarios con acceso al panel de Reserva Técnica ────────────────────────
+// Solo estos dos usuarios ven el candado 🔒
+const _RT_ADMIN_USERS = ['juan garrido', 'guissele barrera'];
+
+/** Devuelve true si el usuario actual es admin (Juan o Guissele) */
+function _rtIsAdmin() {
+  try {
+    const raw = sessionStorage.getItem('cm_session_v2');
+    if (!raw) return false;
+    const session = JSON.parse(raw);
+    const name = (session.username || session.displayName || '').toLowerCase().trim();
+    return _RT_ADMIN_USERS.some(a => name.includes(a.split(' ')[0])); // match por primer nombre
+  } catch { return false; }
+}
+
+// ── Sincronización INSTANTÁNEA via Supabase Broadcast ─────────────────────
+// Usa WebSocket de Supabase Realtime (canal Broadcast, no postgres_changes).
+// NO requiere que la tabla esté en ninguna publicación — funciona out of the box.
+
+/** Cargar buffer desde Supabase v2_config al montar el módulo */
+async function _rtLoadFromDB() {
+  try {
+    const { data, error } = await supabase
+      .from('v2_config')
+      .select('value')
+      .eq('key', 'rt_buffer')
+      .single();
+    if (!error && data) {
+      const pct = Math.min(30, Math.max(0, Number(data.value || 0)));
+      _rtBuffer = pct;
+      localStorage.setItem(_RT_KEY, JSON.stringify({ pct }));
+      console.log('[RT] ✅ Buffer cargado desde Supabase:', pct + '%');
+      return true;
+    }
+  } catch {}
+  // Fallback a localStorage si Supabase no responde
+  try {
+    const cfg = JSON.parse(localStorage.getItem(_RT_KEY) || '{}');
+    _rtBuffer = Math.min(30, Math.max(0, Number(cfg.pct || 0)));
+  } catch { _rtBuffer = 0; }
+  return false;
+}
+
+/** Guardar buffer en Supabase + Broadcast instantáneo a todos los dispositivos */
+async function _rtSaveToDB(pct) {
+  // 1. Persistir en base de datos (para dispositivos que carguen después)
+  try {
+    await supabase
+      .from('v2_config')
+      .upsert({ key: 'rt_buffer', value: String(pct), updated_at: new Date().toISOString() });
+    console.log('[RT] ✅ Buffer guardado en Supabase:', pct + '%');
+  } catch (e) {
+    console.warn('[RT] ⚠️ Error guardando en Supabase:', e.message);
+  }
+
+  // 2. Broadcast instantáneo: todos los dispositivos conectados lo reciben en <1s
+  try {
+    if (_rtChannel) {
+      await _rtChannel.send({
+        type: 'broadcast',
+        event: 'rt_update',
+        payload: { pct }
+      });
+      console.log('[RT] 📡 Broadcast enviado:', pct + '%');
+    }
+  } catch (e) {
+    console.warn('[RT] ⚠️ Error en broadcast:', e.message);
+  }
+}
+
+/** Suscribirse al canal Broadcast — recibe actualizaciones INSTANTÁNEAS */
+function _rtSubscribeRealtime() {
+  if (_rtChannel) return; // ya suscrito
+
+  _rtChannel = supabase.channel('rt-sync-v1', {
+    config: { broadcast: { self: false } } // no recibir el propio broadcast
+  });
+
+  _rtChannel
+    .on('broadcast', { event: 'rt_update' }, ({ payload }) => {
+      const newPct = Math.min(30, Math.max(0, Number(payload?.pct ?? 0)));
+      if (newPct !== _rtBuffer) {
+        _rtBuffer = newPct;
+        localStorage.setItem(_RT_KEY, JSON.stringify({ pct: _rtBuffer }));
+        console.log('[RT] ⚡ Buffer actualizado INSTANTÁNEO:', _rtBuffer + '%');
+        renderTab(null); // re-renderizar con el nuevo valor
+      }
+    })
+    .subscribe((status) => {
+      console.log('[RT] Canal Broadcast:', status);
+    });
+}
+
+
+// Cargar buffer guardado al inicializar el módulo (desde localStorage primero, luego Supabase)
+;(() => {
+  try {
+    const cfg = JSON.parse(localStorage.getItem(_RT_KEY) || '{}');
+    _rtBuffer = Math.min(30, Math.max(0, Number(cfg.pct || 0)));
+  } catch { _rtBuffer = 0; }
+  // Pre-configurar PIN por defecto si no existe ninguno todavía
+  // (Hash SHA-256 del PIN — el valor real nunca se almacena en texto plano)
+  if (!localStorage.getItem(_RT_PIN_KEY)) {
+    localStorage.setItem(_RT_PIN_KEY,
+      '6b0f184f14930ed2aab00d963792fac1cf7c8439503cb58ac06dde647c456940');
+  }
+})();
+
+
+
+/** Aplica el buffer a una cantidad real → cantidad visible */
+const _rtApply = (real) => Math.max(0, Math.floor(real * (1 - _rtBuffer / 100)));
+
+/** Hash SHA-256 de texto → hex string */
+const _rtHash = async (text) => {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2,'0')).join('');
+};
+
+/** Verifica PIN contra el hash guardado */
+const _rtCheckPin = async (pin) => {
+  const saved = localStorage.getItem(_RT_PIN_KEY);
+  if (!saved) return false;               // no hay PIN configurado
+  const h = await _rtHash(pin);
+  return h === saved;
+};
+
+/** Guarda PIN como hash */
+const _rtSetPin = async (pin) => {
+  const h = await _rtHash(pin);
+  localStorage.setItem(_RT_PIN_KEY, h);
+};
+
+/** Guarda la configuración del buffer */
+const _rtSaveCfg = (pct) => {
+  _rtBuffer = Math.min(30, Math.max(0, pct));
+  localStorage.setItem(_RT_KEY, JSON.stringify({ pct: _rtBuffer }));
+};
+
+/** ¿Existe ya un PIN configurado? */
+const _rtHasPin = () => !!localStorage.getItem(_RT_PIN_KEY);
+
 
 // Formato numero_hab: [Pab][Piso][HH] ej: "1302" → P1, Piso 3, Hab 02
 function _extraerPabellon(numHab) {
@@ -101,24 +263,122 @@ function _extraerPiso(numHab) {
 
 // ── Render principal ──────────────────────────────────────────────────────────
 export async function renderV2Detalle(container) {
+  // Auto-retry: si falla por red o CDN, reintenta hasta 3 veces con 2s de espera
+  let lastErr;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      await _renderV2DetalleInner(container);
+      return; // éxito
+    } catch (err) {
+      lastErr = err;
+      console.warn(`[v2-detalle] intento ${attempt} falló:`, err.message);
+      if (attempt < 3) {
+        container.innerHTML = `
+          <div style="padding:24px;text-align:center;color:var(--text-muted)">
+            <div style="font-size:32px;margin-bottom:12px">🔄</div>
+            <div style="font-size:14px;font-weight:700">Reintentando conexión... (${attempt}/3)</div>
+            <div style="font-size:12px;margin-top:4px">Cargando datos del campamento</div>
+          </div>`;
+        await new Promise(r => setTimeout(r, 2000));
+      }
+    }
+  }
+  // Si agotó todos los intentos, mostrar error
+  console.error('[v2-detalle] Error tras 3 intentos:', lastErr);
+  container.innerHTML = `
+    <div style="padding:24px;text-align:center">
+      <div style="font-size:48px;margin-bottom:16px">❌</div>
+      <div style="font-size:16px;font-weight:700;color:var(--text-primary);margin-bottom:8px">Error al cargar datos</div>
+      <div style="font-size:13px;color:var(--text-muted);margin-bottom:16px">${lastErr?.message || 'Error desconocido'}</div>
+      <button onclick="window.__v2ReTab && window.__v2ReTab()"
+        style="padding:10px 20px;background:#10b981;color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer">
+        🔄 Reintentar
+      </button>
+    </div>`;
+}
+
+async function _renderV2DetalleInner(container) {
+  _container = container;  // guardar referencia para recargas
   container.innerHTML = skeletonHTML();
   await loadChart();
+
+  // Sincronizar Reserva Tecnica desde Supabase (misma config en todos los dispositivos)
+  await _rtLoadFromDB();
+  _rtSubscribeRealtime();
 
   try {
     // ── Carga masiva en paralelo ──────────────────────────────────────────
     const [camasAll, habitacionesAll, asigRaw, habSimple] = await Promise.all([
       fetchAll('v2_camas', 'id_cama,estado,numero_cama,habitacion_id'),
-      // COLUMNAS VÁLIDAS ONLY: pabellon_id (FK) hace join a v2_pabellones, sin columnas 'pabellon'/'sector' (no existen)
-      fetchAll('v2_habitaciones', 'id_custom,numero_hab,estado,motivo_bloqueo,fecha_bloqueo,en_mantencion,v2_pabellones(nombre,v2_edificios(nombre))'),
+      // FIX: usar pabellon_id directo (sin join a v2_pabellones — falla para anon por RLS)
+      fetchAll('v2_habitaciones', 'id_custom,numero_hab,estado,en_mantencion,pabellon_id,nivel,cantidad_camas'),
       fetchAll('v2_asignaciones',
         'id,id_cama,nombre_huesped,rut_huesped,fecha_checkin,fecha_salida_programada,huesped_confirmo,estado_asignacion,numero_contrato,v2_empresas(nombre,turno,v2_gerencias(nombre)),v2_camas(numero_cama,habitacion_id,v2_habitaciones(id_custom,numero_hab))',
         q => q.is('fecha_checkout', null)
       ),
-      // fetch simple para habMap — solo columnas que realmente existen
-      fetchAll('v2_habitaciones', 'id_custom,numero_hab'),
+      fetchAll('v2_habitaciones', 'id_custom,numero_hab,en_mantencion'),
     ]);
 
-    // ── Fetch de distribución — usa fetchAll (mismo helper que otras tablas) ──
+    // FALLBACK CRÍTICO: si habitacionesAll está vacío (query falló),
+    // poblar desde habSimple que siempre funciona (ahora incluye en_mantencion).
+    if (habitacionesAll.length === 0 && habSimple?.length > 0) {
+      habitacionesAll.push(...habSimple.map(h => ({ ...h })));
+      console.log('[v2-detalle] ℹ️ Fallback: habitacionesAll desde habSimple:', habSimple.length,
+        '| bloqueadas en habSimple:', habSimple.filter(h => h.en_mantencion === true).length);
+    } else {
+      console.log('[v2-detalle] ✅ habitacionesAll cargado:', habitacionesAll.length,
+        '| en_mantencion=true:', habitacionesAll.filter(h => h.en_mantencion === true).length);
+    }
+
+    // Fetch pabellones y edificios para nombres de display (query separada, sin join)
+    let pabMap = {}, edifMap = {};
+    try {
+      const [pabs, edifs] = await Promise.all([
+        fetchAll('v2_pabellones', 'id,nombre,edificio_id'),
+        fetchAll('v2_edificios', 'id,nombre'),
+      ]);
+      edifs.forEach(e => { edifMap[e.id] = e.nombre; });
+      pabs.forEach(p => {
+        pabMap[p.id] = { nombre: p.nombre, edificio: edifMap[p.edificio_id] || '' };
+      });
+      // Enriquecer habitacionesAll con nombres de pabellón
+      habitacionesAll.forEach(h => {
+        const pab = pabMap[h.pabellon_id];
+        if (pab) {
+          h.v2_pabellones = { nombre: pab.nombre, v2_edificios: { nombre: pab.edificio } };
+          h.pabellon = pab.nombre;
+        }
+      });
+      console.log('[v2-detalle] 🏗️ Pabellones cargados:', pabs.length, '| Edificios:', edifs.length);
+    } catch(ePab) {
+      console.warn('[v2-detalle] ❌ Error fetch pabellones:', ePab.message);
+    }
+
+
+    // ── QUERY DIRECTA: habitaciones con en_mantencion=true ───────────────────
+    // Query sin join (solo campos directos) para evitar fallo RLS en v2_pabellones
+    try {
+      const { data: habsBloqDB, error: errBloq } = await supabase
+        .from('v2_habitaciones')
+        .select('id_custom,numero_hab,estado,en_mantencion,pabellon_id')
+        .eq('en_mantencion', true);
+
+      if (!errBloq && habsBloqDB?.length) {
+        console.log('[v2-detalle] 🔧 Bloqueadas en DB:', habsBloqDB.length,
+          habsBloqDB.map(h => `Hab.${h.numero_hab}`).join(', '));
+        // Merge: actualizar registros existentes y agregar los que falten
+        const bloqIds = new Set(habsBloqDB.map(h => h.id_custom));
+        habitacionesAll.forEach(h => { if (bloqIds.has(h.id_custom)) h.en_mantencion = true; });
+        habsBloqDB.forEach(hb => {
+          if (!habitacionesAll.find(h => h.id_custom === hb.id_custom)) habitacionesAll.push(hb);
+        });
+      } else {
+        console.log('[v2-detalle] 🔧 Bloqueadas en DB: 0 (ninguna en mantención)', errBloq?.message || '');
+      }
+    } catch(eBloq) {
+      console.warn('[v2-detalle] ❌ Error fetch bloqueadas:', eBloq.message);
+    }
+
     let distribucion = [];
     try {
       distribucion = await fetchAll('v2_distribucion_camas', 'id_cama,tipo');
@@ -390,8 +650,18 @@ export async function renderV2Detalle(container) {
       _bal.isBalanced ? 'color:#10b981;font-weight:700' : 'color:#ef4444;font-weight:700'
     );
 
+    _lastLoad = new Date();  // registrar hora de carga
     renderShell(container);
     renderTab(container);
+
+    // Registrar handler global de recarga completa
+    window._detReloadAll = async () => {
+      try {
+        await _renderV2DetalleInner(_container);
+      } catch(e) {
+        console.error('[v2-detalle] Error al recargar:', e.message);
+      }
+    };
 
   } catch (err) {
     console.error('[v2-detalle]', err);
@@ -403,141 +673,308 @@ export async function renderV2Detalle(container) {
 function renderShell(container) {
   container.innerHTML = `
     <style>
-      #det-root { min-height:100vh; background:var(--bg); }
+      /* ══ PORTAL DETALLE — Design System ══════════════════════════════════════ */
+      #det-root {
+        min-height: 100vh;
+        background: var(--bg);
+        font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      }
 
-      /* Header */
+      /* ── Header ─────────────────────────────────────────────────────────────── */
       #det-header {
-        background: linear-gradient(135deg,#0f172a,#1e1b4b,#312e81);
-        padding: 20px 28px; display:flex; align-items:center; justify-content:space-between;
-        flex-wrap:wrap; gap:12px; position:sticky; top:0; z-index:100;
-        box-shadow: 0 4px 24px rgba(30,27,75,.5);
+        background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 60%, #312e81 100%);
+        padding: 16px 20px 14px;
+        position: sticky; top: 0; z-index: 110;
+        box-shadow: 0 4px 30px rgba(30,27,75,.55);
       }
-      #det-header h1 { font-size:20px; font-weight:900; color:#fff; margin:0; }
-      #det-header .det-subtitle { font-size:11px; color:#a5b4fc; margin-top:2px; }
+      #det-header-row1 {
+        display: flex; align-items: center; justify-content: space-between;
+        gap: 12px; flex-wrap: wrap; margin-bottom: 12px;
+      }
+      #det-header h1 {
+        font-size: 18px; font-weight: 900; color: #fff; margin: 0;
+        letter-spacing: -.02em;
+      }
+      #det-header .det-subtitle { font-size: 10px; color: #a5b4fc; margin-top: 2px; }
 
-      /* Tabs */
-      #det-tabs {
-        display: flex; gap:6px; overflow-x:auto;
-        padding: 16px 20px 0; background:var(--bg-card);
-        border-bottom: 2px solid var(--border);
-        scrollbar-width: none;
-        position: sticky; top: 72px; z-index: 99;
+      /* ── Search bar ─────────────────────────────────────────────────────────── */
+      #det-search-wrap {
+        position: relative;
+        max-width: 640px; width: 100%;
       }
-      #det-tabs::-webkit-scrollbar { display:none; }
+      #det-search {
+        width: 100%; box-sizing: border-box;
+        padding: 10px 16px 10px 40px;
+        border-radius: 12px; border: 1.5px solid rgba(255,255,255,.18);
+        background: rgba(255,255,255,.10);
+        color: #fff; font-size: 14px; font-weight: 500;
+        backdrop-filter: blur(8px);
+        transition: border-color .2s, background .2s;
+        outline: none;
+      }
+      #det-search::placeholder { color: rgba(255,255,255,.45); }
+      #det-search:focus {
+        border-color: #818cf8; background: rgba(255,255,255,.15);
+      }
+      #det-search-icon {
+        position: absolute; left: 13px; top: 50%; transform: translateY(-50%);
+        font-size: 15px; opacity: .6; pointer-events: none;
+      }
+      #det-search-clear {
+        position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+        background: rgba(255,255,255,.2); border: none; border-radius: 50%;
+        width: 20px; height: 20px; cursor: pointer; color: #fff; font-size: 11px;
+        display: none; align-items: center; justify-content: center;
+        line-height: 1;
+      }
+      #det-search:not(:placeholder-shown) ~ #det-search-clear { display: flex; }
+
+      /* ── Tabs ────────────────────────────────────────────────────────────────── */
+      #det-tabs {
+        display: flex; gap: 4px; overflow-x: auto;
+        padding: 0 20px 0;
+        background: rgba(15,23,42,.85);
+        backdrop-filter: blur(10px);
+        border-bottom: 1px solid rgba(255,255,255,.08);
+        position: sticky; top: 130px; z-index: 99;
+        scrollbar-width: none;
+      }
+      #det-tabs::-webkit-scrollbar { display: none; }
+
       .det-tab {
-        padding: 10px 20px; border-radius:10px 10px 0 0;
-        border: 2px solid transparent; background:transparent;
-        font-size:13px; font-weight:700; color:var(--text-muted);
-        cursor:pointer; transition:all .2s; white-space:nowrap;
-        flex-shrink:0;
+        padding: 10px 16px; border: none; background: transparent;
+        font-size: 12px; font-weight: 700; color: rgba(255,255,255,.45);
+        cursor: pointer; transition: all .2s; white-space: nowrap;
+        flex-shrink: 0; border-bottom: 2.5px solid transparent;
+        display: flex; align-items: center; gap: 6px; min-height: 44px;
+      }
+      .det-tab:hover:not(.active) {
+        color: rgba(255,255,255,.8);
+        background: rgba(255,255,255,.06);
       }
       .det-tab.active {
-        background: var(--bg); border-color: var(--border);
-        border-bottom-color: var(--bg); color:var(--accent);
-        margin-bottom: -2px;
+        color: #818cf8; border-bottom-color: #818cf8;
+        background: rgba(129,140,248,.08);
       }
-      .det-tab:hover:not(.active) { background:var(--bg); color:var(--text-primary); }
+      .det-tab-badge {
+        background: rgba(255,255,255,.12); color: rgba(255,255,255,.7);
+        font-size: 10px; font-weight: 800; padding: 1px 6px;
+        border-radius: 99px; line-height: 1.4;
+      }
+      .det-tab.active .det-tab-badge {
+        background: rgba(129,140,248,.25); color: #c7d2fe;
+      }
 
-      /* Body */
-      #det-body { padding: 24px 20px; max-width:1400px; margin:0 auto; }
+      /* ── Body ────────────────────────────────────────────────────────────────── */
+      #det-body {
+        padding: 20px 16px;
+        max-width: 1400px; margin: 0 auto;
+      }
+      @media(min-width: 768px) { #det-body { padding: 24px 28px; } }
 
-      /* KPI cards */
-      .det-kpis { display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:12px; margin-bottom:20px; }
+      /* ── KPI Cards ───────────────────────────────────────────────────────────── */
+      .det-kpis {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+        gap: 10px; margin-bottom: 20px;
+      }
+      @media(max-width: 480px) {
+        .det-kpis { grid-template-columns: repeat(2, 1fr); }
+      }
       .det-kpi {
-        background:var(--bg-card); border:1px solid var(--border);
-        border-radius:16px; padding:16px; text-align:center;
+        background: var(--bg-card); border: 1px solid var(--border);
+        border-radius: 16px; padding: 14px 12px; text-align: center;
         transition: transform .15s, box-shadow .15s;
+        position: relative; overflow: hidden;
       }
-      .det-kpi:hover { transform:translateY(-2px); box-shadow:0 8px 24px rgba(0,0,0,.15); }
-      .det-kpi-icon { font-size:22px; margin-bottom:6px; }
-      .det-kpi-val  { font-size:28px; font-weight:900; line-height:1; margin-bottom:4px; }
-      .det-kpi-lbl  { font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--text-muted); }
+      .det-kpi::before {
+        content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+        background: var(--kpi-color, #6366f1);
+      }
+      .det-kpi:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,.18); }
+      .det-kpi-icon { font-size: 20px; margin-bottom: 6px; }
+      .det-kpi-val  { font-size: 26px; font-weight: 900; line-height: 1; margin-bottom: 4px; }
+      .det-kpi-lbl  { font-size: 9px; font-weight: 700; text-transform: uppercase;
+                      letter-spacing: .06em; color: var(--text-muted); }
 
-      /* Turnos filtro */
-      .det-turno-btns { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:20px; }
+      /* ── Turno buttons ───────────────────────────────────────────────────────── */
+      .det-turno-btns { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; }
       .det-turno-btn {
-        padding: 8px 18px; border-radius:99px; border:2px solid var(--border);
-        background:var(--bg-card); font-size:13px; font-weight:700; cursor:pointer;
-        transition: all .2s; color:var(--text-secondary);
+        padding: 7px 16px; border-radius: 99px; border: 1.5px solid var(--border);
+        background: var(--bg-card); font-size: 12px; font-weight: 700; cursor: pointer;
+        transition: all .2s; color: var(--text-muted); min-height: 36px;
       }
       .det-turno-btn.active {
-        background: linear-gradient(135deg,#6366f1,#8b5cf6);
-        border-color: transparent; color:#fff;
-        box-shadow: 0 4px 12px rgba(99,102,241,.4);
+        background: linear-gradient(135deg, #6366f1, #8b5cf6);
+        border-color: transparent; color: #fff;
+        box-shadow: 0 4px 12px rgba(99,102,241,.35);
       }
 
-      /* Tabla */
-      .det-table-wrap { overflow-x:auto; border-radius:14px; border:1px solid var(--border); }
-      .det-table { width:100%; border-collapse:collapse; min-width:700px; }
-      .det-table thead { background:linear-gradient(135deg,#1e1b4b,#312e81); }
+      /* ── Tables ──────────────────────────────────────────────────────────────── */
+      .det-table-wrap { overflow-x: auto; border-radius: 14px; border: 1px solid var(--border); }
+      .det-table { width: 100%; border-collapse: collapse; min-width: 600px; }
+      .det-table thead { background: linear-gradient(135deg, #1e1b4b, #312e81); }
       .det-table th {
-        padding:12px 14px; text-align:left; font-size:11px; font-weight:700;
-        color:#a5b4fc; text-transform:uppercase; letter-spacing:.05em; white-space:nowrap;
+        padding: 11px 14px; text-align: left; font-size: 10px; font-weight: 700;
+        color: #a5b4fc; text-transform: uppercase; letter-spacing: .05em; white-space: nowrap;
       }
-      .det-table td { padding:11px 14px; font-size:13px; border-bottom:1px solid var(--border); }
-      .det-table tbody tr:hover { background:var(--bg); }
-      .det-table tbody tr:last-child td { border-bottom:none; }
+      .det-table td { padding: 10px 14px; font-size: 13px; border-bottom: 1px solid var(--border); }
+      .det-table tbody tr:hover { background: var(--bg); }
+      .det-table tbody tr:last-child td { border-bottom: none; }
       .det-badge {
-        display:inline-block; padding:3px 10px; border-radius:99px;
-        font-size:11px; font-weight:700; white-space:nowrap;
+        display: inline-block; padding: 3px 10px; border-radius: 99px;
+        font-size: 11px; font-weight: 700; white-space: nowrap;
       }
 
-      /* Sector headers */
+      /* ── Sector headers ──────────────────────────────────────────────────────── */
       .det-sector-hdr {
-        font-size:13px; font-weight:900; color:var(--text-primary);
-        padding:10px 0; margin:16px 0 8px; border-bottom:2px solid var(--border);
-        display:flex; align-items:center; gap:8px;
+        font-size: 13px; font-weight: 900; color: var(--text-primary);
+        padding: 10px 0; margin: 16px 0 10px; border-bottom: 2px solid var(--border);
+        display: flex; align-items: center; gap: 8px;
       }
 
-      /* Cards de habitación libres */
-      .det-hab-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(168px,1fr)); gap:10px; }
+      /* ══ HABITACIÓN CARDS — Universo de Camas ═══════════════════════════════ */
+      .det-hab-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: 10px;
+      }
+      @media(max-width: 480px) {
+        .det-hab-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+      }
+      @media(min-width: 1200px) {
+        .det-hab-grid { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+      }
+
       .det-hab-card {
-        background:var(--bg-card); border:2px solid var(--border);
-        border-radius:12px; padding:12px 14px;
-        transition: transform .15s; cursor:default;
+        background: var(--bg-card); border: 2px solid var(--border);
+        border-radius: 14px; padding: 13px 14px;
+        transition: transform .15s, box-shadow .15s; cursor: default;
+        position: relative; overflow: hidden;
       }
-      .det-hab-card:hover { transform:translateY(-2px); }
-      .det-hab-num { font-size:13px; font-weight:900; color:var(--text-primary); }
-      .det-hab-sub { font-size:11px; color:var(--text-muted); margin-top:3px; }
-      .det-hab-emp { font-size:11px; font-weight:700; color:#6366f1; margin-top:4px; }
+      .det-hab-card:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,0,0,.15); }
+      .det-hab-num { font-size: 15px; font-weight: 900; color: var(--text-primary); }
+      .det-hab-sub { font-size: 10px; color: var(--text-muted); margin-top: 2px; }
+      .det-hab-emp { font-size: 10px; font-weight: 700; color: #6366f1; margin-top: 4px; }
 
-      /* Gráfico */
+      /* ── Bed dots ────────────────────────────────────────────────────────────── */
+      .bed-dots {
+        display: flex; gap: 5px; flex-wrap: wrap; margin-top: 8px; align-items: center;
+      }
+      .bed-dot {
+        width: 20px; height: 20px; border-radius: 50%;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 9px; font-weight: 800; letter-spacing: 0;
+        flex-shrink: 0; border: 2px solid transparent;
+        title: 'Cama';
+      }
+      .bed-dot--free     { background: #10b981; border-color: #059669; color: #fff; }
+      .bed-dot--occupied { background: #ef4444; border-color: #dc2626; color: #fff; }
+      .bed-dot--reserved { background: #8b5cf6; border-color: #7c3aed; color: #fff; }
+      .bed-dot--blocked  { background: #f59e0b; border-color: #d97706; color: #fff; }
+      .bed-dot-lbl { font-size: 10px; color: var(--text-muted); font-weight: 600; margin-left: 2px; }
+
+      /* ── Leyenda dots ─────────────────────────────────────────────────────────── */
+      .dot-legend {
+        display: flex; gap: 12px; flex-wrap: wrap; align-items: center;
+        margin-bottom: 14px; padding: 10px 14px;
+        background: var(--bg-card); border-radius: 10px; border: 1px solid var(--border);
+        font-size: 11px; font-weight: 600; color: var(--text-muted);
+      }
+      .dot-legend-item { display: flex; align-items: center; gap: 5px; }
+
+      /* ── Filter chips ────────────────────────────────────────────────────────── */
+      .filter-chips {
+        display: flex; gap: 6px; flex-wrap: wrap;
+        margin-bottom: 14px; align-items: center;
+      }
+      .filter-chip {
+        padding: 5px 12px; border-radius: 99px; border: 1.5px solid var(--border);
+        background: var(--bg-card); color: var(--text-muted);
+        font-size: 11px; font-weight: 700; cursor: pointer; transition: all .15s;
+        white-space: nowrap; min-height: 32px; display: flex; align-items: center;
+      }
+      .filter-chip.active {
+        background: rgba(16,185,129,.15); border-color: #10b981; color: #10b981;
+      }
+      .filter-chip-label {
+        font-size: 10px; font-weight: 800; color: var(--text-muted);
+        text-transform: uppercase; letter-spacing: .06em; align-self: center;
+      }
+
+      /* ── Search result highlight ─────────────────────────────────────────────── */
+      .det-hab-card.search-match { border-color: #818cf8; }
+      .det-hab-card.search-hidden { display: none; }
+
+      /* ── Chart ────────────────────────────────────────────────────────────────── */
       .det-chart-wrap {
-        background:var(--bg-card); border:1px solid var(--border);
-        border-radius:16px; padding:20px; margin-bottom:20px;
-        display:grid; grid-template-columns:260px 1fr; gap:24px; align-items:center;
+        background: var(--bg-card); border: 1px solid var(--border);
+        border-radius: 16px; padding: 20px; margin-bottom: 20px;
+        display: grid; grid-template-columns: 240px 1fr; gap: 24px; align-items: center;
       }
-      @media(max-width:640px) { .det-chart-wrap { grid-template-columns:1fr; } }
-      .det-chart-canvas { position:relative; width:100%; max-width:240px; margin:0 auto; }
+      @media(max-width: 640px) { .det-chart-wrap { grid-template-columns: 1fr; } }
+      .det-chart-canvas { position: relative; width: 100%; max-width: 220px; margin: 0 auto; }
 
-      /* Empty state */
-      .det-empty { text-align:center; padding:60px 20px; color:var(--text-muted); }
-      .det-empty-icon { font-size:48px; margin-bottom:12px; }
-      .det-empty-text { font-size:15px; font-weight:700; }
+      /* ── Empty state ──────────────────────────────────────────────────────────── */
+      .det-empty { text-align: center; padding: 48px 20px; color: var(--text-muted); }
+      .det-empty-icon { font-size: 44px; margin-bottom: 10px; }
+      .det-empty-text { font-size: 15px; font-weight: 700; }
+      .det-empty-sub  { font-size: 12px; margin-top: 6px; }
+
+      /* ── Piso section header ─────────────────────────────────────────────────── */
+      .piso-header {
+        display: flex; align-items: center; gap: 10px; margin-bottom: 10px;
+        padding: 8px 14px; background: var(--bg-card); border-radius: 10px;
+        border-left: 3px solid #10b981;
+      }
+      .piso-header-title { font-size: 14px; font-weight: 900; color: #10b981; }
+      .piso-header-sub   { font-size: 12px; color: var(--text-muted); }
+
+      /* ── Responsive adjustments ──────────────────────────────────────────────── */
+      @media(max-width: 480px) {
+        #det-header h1 { font-size: 16px; }
+        #det-tabs { top: 116px; }
+        .det-tab { padding: 8px 12px; font-size: 11px; }
+      }
     </style>
 
     <div id="det-root">
+      <!-- Header con búsqueda -->
       <div id="det-header">
-        <div>
-          <h1>📋 Detalle del Campamento</h1>
-          <div class="det-subtitle">PC HOTELERÍA · Datos en vivo · ${new Date().toLocaleString('es-CL')}</div>
+        <div id="det-header-row1">
+          <div>
+            <h1>📋 Detalle del Campamento</h1>
+            <div class="det-subtitle">PC HOTELERÍA · Datos en vivo · ${new Date().toLocaleString('es-CL')}</div>
+          </div>
+          <button onclick="window.navigate('v2detalle')"
+            style="padding:9px 16px;border:1.5px solid rgba(255,255,255,.2);border-radius:10px;
+                   background:rgba(255,255,255,.1);color:#fff;font-weight:700;
+                   font-size:12px;cursor:pointer;backdrop-filter:blur(8px);
+                   transition:background .2s;white-space:nowrap">
+            🔄 Actualizar
+          </button>
         </div>
-        <button onclick="window.navigate('v2detalle')"
-          style="padding:10px 18px;border:none;border-radius:10px;
-                 background:rgba(255,255,255,.15);color:#fff;font-weight:700;
-                 font-size:13px;cursor:pointer;">
-          🔄 Actualizar
-        </button>
+        <!-- Búsqueda global -->
+        <div id="det-search-wrap">
+          <span id="det-search-icon">🔍</span>
+          <input id="det-search" type="search" autocomplete="off" spellcheck="false"
+            placeholder="Buscar habitación, pabellón, piso, empresa..."
+            oninput="window._detSearch(this.value)"
+            onsearch="window._detSearch(this.value)">
+          <button id="det-search-clear" onclick="document.getElementById('det-search').value='';window._detSearch('')">✕</button>
+        </div>
       </div>
 
+      <!-- Tabs -->
       <div id="det-tabs">
         ${[
-      { k: 'total', icon: '🏨', lbl: 'Total Habitaciones' },
-      { k: 'ocupadas', icon: '🔴', lbl: 'Ocupadas' },
-      { k: 'reserva', icon: '📌', lbl: 'Reserva' },
-      { k: 'libre', icon: '🟢', lbl: 'No Ocupado' },
-      { k: 'bloqueadas', icon: '🔒', lbl: 'Bloqueadas' },
-    ].map(t => `
+        { k: 'total',          icon: '🏨', lbl: 'Total' },
+        { k: 'ocupadas',       icon: '🔴', lbl: 'Ocupadas' },
+        { k: 'reserva',        icon: '📌', lbl: 'Reserva' },
+        { k: 'libre',          icon: '🟢', lbl: 'No Ocupado' },
+        { k: 'bloqueadas',     icon: '🔒', lbl: 'Bloqueadas' },
+        { k: 'camas_perdidas', icon: '🛏️', lbl: 'Camas Perdidas' },
+      ].map(t => `
           <button class="det-tab ${_tab === t.k ? 'active' : ''}"
                   onclick="window._detSetTab('${t.k}')">
             ${t.icon} ${t.lbl}
@@ -548,6 +985,36 @@ function renderShell(container) {
       <div id="det-body"></div>
     </div>`;
 
+  // ── Handler búsqueda global ─────────────────────────────────────────────────
+  let _searchTimer;
+  window._detSearch = (q) => {
+    clearTimeout(_searchTimer);
+    _searchTimer = setTimeout(() => {
+      const query = (q || '').toLowerCase().trim();
+      // Aplicar a cards de habitación (clase det-hab-card)
+      document.querySelectorAll('.det-hab-card').forEach(card => {
+        const text = card.textContent.toLowerCase();
+        if (!query || text.includes(query)) {
+          card.classList.remove('search-hidden');
+          card.classList.toggle('search-match', !!query && text.includes(query));
+        } else {
+          card.classList.add('search-hidden');
+          card.classList.remove('search-match');
+        }
+      });
+      // Ocultar secciones de piso vacías
+      document.querySelectorAll('.piso-section').forEach(sec => {
+        const visible = sec.querySelectorAll('.det-hab-card:not(.search-hidden)').length;
+        sec.style.display = visible ? '' : 'none';
+      });
+      // Mostrar/ocultar resultados en tabs de tabla (ocupadas, reserva, bloqueadas)
+      document.querySelectorAll('.det-table tbody tr').forEach(row => {
+        const text = row.textContent.toLowerCase();
+        row.style.display = !query || text.includes(query) ? '' : 'none';
+      });
+    }, 150);
+  };
+
   window._detSetTab = (key) => {
     _tab = key;
     _turnoFiltro = null;
@@ -556,18 +1023,23 @@ function renderShell(container) {
     // Resetear filtros de No Ocupado al cambiar de tab
     _libreFiltroPab = '';
     _libreFiltroPiso = '';
+    // Limpiar búsqueda
+    const si = document.getElementById('det-search');
+    if (si) si.value = '';
     document.querySelectorAll('.det-tab').forEach(el => el.classList.remove('active'));
     document.querySelector(`.det-tab[onclick*="'${key}'"]`)?.classList.add('active');
     renderTab(document.getElementById('det-body')?.closest('#page-content') || document.body);
   };
 
   // Filtros del tab No Ocupado (accesibles desde onclick en HTML generado)
-  window.v2DetSetPab = (val) => { _libreFiltroPab = val; };
+  window.v2DetSetPab  = (val) => { _libreFiltroPab  = val; };
   window.v2DetSetPiso = (val) => { _libreFiltroPiso = val; };
   window.__v2ReTab = () => {
     renderTab(document.getElementById('det-body')?.closest('#page-content') || document.body);
   };
 }
+
+
 
 // ── Renderizar tab activo ─────────────────────────────────────────────────────
 function renderTab(container) {
@@ -575,11 +1047,12 @@ function renderTab(container) {
   if (!body || !_data) return;
 
   switch (_tab) {
-    case 'total': body.innerHTML = renderTotal(); break;
-    case 'ocupadas': body.innerHTML = renderOcupadas(); break;
-    case 'reserva': body.innerHTML = renderReserva(); break;
-    case 'libre': body.innerHTML = renderLibre(); break;
-    case 'bloqueadas': body.innerHTML = renderBloqueadas(); break;
+    case 'total':          body.innerHTML = renderTotal(); break;
+    case 'ocupadas':       body.innerHTML = renderOcupadas(); break;
+    case 'reserva':        body.innerHTML = renderReserva(); break;
+    case 'libre':          body.innerHTML = renderLibre(); break;
+    case 'bloqueadas':     body.innerHTML = renderBloqueadas(); break;
+    case 'camas_perdidas': body.innerHTML = renderCamasPerdidas(); attachCPEvents(); _loadCPMotivos(); break;
   }
   if (_tab === 'total') renderChartTotal();
 }
@@ -588,60 +1061,265 @@ function renderTab(container) {
 // TAB A — TOTAL HABITACIONES
 // ══════════════════════════════════════════════════════════════════════════════
 function renderTotal() {
-  const { camas, camasCOPC, camasR220, habsCOPC, habsR220,
-          totalCamasDia, totalCamasNoche, totalNocheAnglo, totalNochePura,
-          engine } = _data;
-
+  const { camas, camasCOPC, camasR220, camaById, habMap, engine } = _data;
 
   const total = camas.length;
-  const copc = camasCOPC.length;
-  const r220 = camasR220.length;
-  const pctCopc = total > 0 ? Math.round(copc / total * 100) : 0;
-  const pctR220 = total > 0 ? Math.round(r220 / total * 100) : 0;
+  const copc  = camasCOPC.length;
+  const r220  = camasR220.length;
 
-  const pctDia = total > 0 ? Math.round(totalCamasDia / total * 100) : 0;
-  const pctNoche = total > 0 ? Math.round(totalCamasNoche / total * 100) : 0;
+  // ── MOTOR UNIFICADO ──────────────────────────────────────────────────────
+  // classifyAll() es la única fuente de verdad para TODA clasificación de camas.
+  // Las mismas reglas aplican en renderLibre() y renderChartTotal().
+  const r220IdSet = new Set(camasR220.map(c => String(c.id_cama)));
+  const cls       = classifyAll(camas, habMap, camaById, r220IdSet);
 
-  // ── ECUACIÓN DE BALANCE LOGÍSTICO ───────────────────────────────────────
-  const bal = engine.getBalance();
-  const balColor = bal.isBalanced ? '#10b981' : '#f59e0b';
-  const balBg    = bal.isBalanced ? 'rgba(16,185,129,.08)' : 'rgba(245,158,11,.08)';
-  const balBord  = bal.isBalanced ? '#10b981' : '#f59e0b';
-  const balIcon  = bal.isBalanced ? '✅' : '⚠️';
-  const balMsg   = bal.isBalanced
-    ? `Balance perfecto: ninguna cama sin clasificar`
-    : `Δ=${bal.delta} cama${Math.abs(bal.delta)!==1?'s':''} sin clasificar (posible dato inconsistente en BD)`;
-  const balHTML = `
-    <div style="background:${balBg};border:1.5px solid ${balBord};border-radius:14px;
-                padding:14px 18px;margin-bottom:20px">
+  // Guardar para chart y búsqueda de habitación
+  _data._cls    = cls;
+  _data._r220IdSet = r220IdSet;
+
+  const pct = v => total > 0 ? Math.round(v / total * 100) : 0;
+
+  // ── BALANCE LOGÍSTICO ────────────────────────────────────────────────────
+  const bal      = engine.getBalance();
+  const balOk    = bal.isBalanced;
+  const balColor = balOk ? '#10b981' : '#f59e0b';
+  const balHTML  = `
+    <div style="background:${balOk?'rgba(16,185,129,.07)':'rgba(245,158,11,.07)'};
+                border:1.5px solid ${balColor};border-radius:14px;padding:14px 18px;margin-bottom:18px">
       <div style="font-size:11px;font-weight:800;color:${balColor};text-transform:uppercase;
-                  letter-spacing:.06em;margin-bottom:8px">${balIcon} Ecuación de Balance Logístico</div>
-      <div style="font-size:13px;font-weight:700;color:var(--text-primary);line-height:1.8">
+                  letter-spacing:.06em;margin-bottom:8px">${balOk?'✅':'⚠️'} Ecuación de Balance Logístico</div>
+      <div style="font-size:13px;font-weight:700;color:var(--text-primary);line-height:2">
         <strong style="font-size:22px;color:${balColor}">${bal.total.toLocaleString('es-CL')}</strong>
-        <span style="color:var(--text-muted)"> camas totales =</span>
-        <span style="color:#ef4444"> ${bal.ocupadas.toLocaleString('es-CL')} Ocupadas</span>
-        <span style="color:var(--text-muted)"> +</span>
-        <span style="color:#8b5cf6"> ${bal.reservas.toLocaleString('es-CL')} Reservadas</span>
-        <span style="color:var(--text-muted)"> +</span>
-        <span style="color:#10b981"> ${bal.libres.toLocaleString('es-CL')} Libres</span>
-        <span style="color:var(--text-muted)"> +</span>
+        <span style="color:var(--text-muted)"> camas =</span>
+        <span style="color:#ef4444"> ${bal.ocupadas.toLocaleString('es-CL')} Ocupadas</span> +
+        <span style="color:#8b5cf6"> ${bal.reservas.toLocaleString('es-CL')} Reservadas</span> +
+        <span style="color:#10b981"> ${bal.libres.toLocaleString('es-CL')} Libres</span> +
         <span style="color:#f59e0b"> ${bal.bloqueadas.toLocaleString('es-CL')} Bloqueadas</span>
       </div>
-      <div style="font-size:11px;color:${balColor};margin-top:6px;font-weight:600">${balMsg}</div>
+      ${!balOk ? `<div style="font-size:11px;color:#f59e0b;margin-top:4px;font-weight:600">
+        Δ=${bal.delta} — revisar datos inconsistentes en BD</div>` : ''}
     </div>`;
+
+  // ── ALERTA NO CLASIFICADO ────────────────────────────────────────────────
+  const noClasifHTML = cls.noClasif.length === 0 ? '' : `
+    <div style="background:rgba(239,68,68,.08);border:2px solid #ef4444;border-radius:14px;
+                padding:14px 18px;margin-bottom:18px">
+      <div style="font-size:12px;font-weight:800;color:#ef4444;text-transform:uppercase;
+                  letter-spacing:.06em;margin-bottom:8px">
+        ⛔ ${cls.noClasif.length} cama${cls.noClasif.length!==1?'s':''} SIN REGLA — No Clasificada${cls.noClasif.length!==1?'s':''}
+      </div>
+      <div style="font-size:11px;color:#fca5a5;margin-bottom:8px">
+        Estas camas no entran en ninguna regla de infraestructura. Revisar número de habitación en la fuente de datos.
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:5px;max-height:120px;overflow-y:auto">
+        ${cls.noClasif.slice(0, 60).map(nc =>
+          `<span style="padding:2px 8px;background:rgba(239,68,68,.15);border:1px solid #ef444440;
+                        border-radius:16px;font-size:10px;font-weight:700;color:#ef4444">
+            Hab.${nc.numHab || '?'} C${nc.numCama}
+           </span>`
+        ).join('')}
+        ${cls.noClasif.length > 60 ? `<span style="font-size:10px;color:#ef4444">…y ${cls.noClasif.length-60} más</span>` : ''}
+      </div>
+    </div>`;
+
+  // ── TABLA DIAGNÓSTICO POR PABELLÓN ───────────────────────────────────────
+  const catLabel = {
+    [CAT.ANGLO_DIA]:   '☀️ Anglo Día',
+    [CAT.ANGLO_NOCHE]: '🌙 Anglo Noche',
+    [CAT.DIA]:         '☀️ Día',
+    [CAT.ESSE_NOCHE]:  '🌙 ESSE Noche',
+    [CAT.NO_CLASIF]:   '⛔ No Clasif.',
+  };
+  const diagRows = Object.values(cls.porPab)
+    .sort((a, b) => a.pabNum - b.pabNum)
+    .map(p => `
+      <tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:7px 10px;font-weight:900;color:${p.ruleColor};font-size:13px">${p.pabKey}</td>
+        <td style="padding:7px 10px">
+          <span style="background:${p.ruleColor}18;border:1px solid ${p.ruleColor}55;border-radius:8px;
+                       padding:2px 8px;font-size:10px;font-weight:700;color:${p.ruleColor}">${p.ruleId}: ${p.ruleLabel}</span>
+        </td>
+        <td style="padding:7px 10px;text-align:right;font-weight:700;color:#d97706">${p.angloDia||'—'}</td>
+        <td style="padding:7px 10px;text-align:right;font-weight:700;color:#6366f1">${p.angloNoche||'—'}</td>
+        <td style="padding:7px 10px;text-align:right;font-weight:700;color:#059669">${p.dia||'—'}</td>
+        <td style="padding:7px 10px;text-align:right;font-weight:700;color:#7c3aed">${p.esseNoche||'—'}</td>
+        ${p.noClasif ? `<td style="padding:7px 10px;text-align:right;font-weight:700;color:#ef4444">${p.noClasif}</td>` : '<td style="padding:7px 10px"></td>'}
+        <td style="padding:7px 10px;text-align:right;font-weight:700;color:var(--text-muted)">${p.total.toLocaleString('es-CL')}</td>
+      </tr>`).join('');
+
+  const diagHTML = `
+    <details style="margin-bottom:18px;border:1px solid var(--border);border-radius:14px;overflow:hidden" open>
+      <summary style="background:var(--bg-card);padding:12px 18px;cursor:pointer;font-size:12px;
+                      font-weight:800;color:var(--text-muted);text-transform:uppercase;
+                      letter-spacing:.06em;display:flex;align-items:center;gap:8px;list-style:none">
+        🔬 Trazabilidad — Desglose exacto por Pabellón y Regla Aplicada
+        <span style="margin-left:auto;font-size:10px;opacity:.7">▼ expandir/colapsar</span>
+      </summary>
+      <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <thead>
+            <tr style="background:var(--bg-card);border-bottom:2px solid var(--border)">
+              <th style="padding:8px 10px;text-align:left;font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase">Pabellón</th>
+              <th style="padding:8px 10px;text-align:left;font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase">Regla de Infraestructura</th>
+              <th style="padding:8px 10px;text-align:right;font-size:10px;font-weight:700;color:#d97706">☀️ Anglo Día</th>
+              <th style="padding:8px 10px;text-align:right;font-size:10px;font-weight:700;color:#6366f1">🌙 Anglo Noche</th>
+              <th style="padding:8px 10px;text-align:right;font-size:10px;font-weight:700;color:#059669">☀️ ESSE Día</th>
+              <th style="padding:8px 10px;text-align:right;font-size:10px;font-weight:700;color:#7c3aed">🌙 ESSE Noche</th>
+              <th style="padding:8px 10px;text-align:right;font-size:10px;font-weight:700;color:#ef4444">⛔ No Clasif.</th>
+              <th style="padding:8px 10px;text-align:right;font-size:10px;font-weight:700;color:var(--text-muted)">Total</th>
+            </tr>
+          </thead>
+          <tbody>${diagRows}</tbody>
+          <tfoot>
+            <tr style="background:var(--bg-card);border-top:2px solid var(--border);font-weight:900">
+              <td colspan="2" style="padding:8px 10px;font-size:12px">TOTALES</td>
+              <td style="padding:8px 10px;text-align:right;color:#d97706">${cls.angloDia.toLocaleString('es-CL')}</td>
+              <td style="padding:8px 10px;text-align:right;color:#6366f1">${cls.angloNoche.toLocaleString('es-CL')}</td>
+              <td style="padding:8px 10px;text-align:right;color:#059669">${cls.dia.toLocaleString('es-CL')}</td>
+              <td style="padding:8px 10px;text-align:right;color:#7c3aed">${cls.esseNoche.toLocaleString('es-CL')}</td>
+              <td style="padding:8px 10px;text-align:right;color:#ef4444">${cls.noClasif.length > 0 ? cls.noClasif.length : '—'}</td>
+              <td style="padding:8px 10px;text-align:right">${cls.totalValidas.toLocaleString('es-CL')}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </details>`;
+
+  // ── PANEL DE AUDITORÍA: BÚSQUEDA DE HABITACIÓN ───────────────────────────
+  // El usuario ingresa un número de hab → sistema muestra qué regla aplica para C1, C2, C3.
+  const auditHTML = `
+    <details style="margin-bottom:18px;border:1.5px solid #6366f1;border-radius:14px;overflow:hidden">
+      <summary style="background:linear-gradient(135deg,rgba(99,102,241,.15),rgba(99,102,241,.05));
+                      padding:12px 18px;cursor:pointer;font-size:12px;font-weight:800;
+                      color:#6366f1;text-transform:uppercase;letter-spacing:.06em;
+                      display:flex;align-items:center;gap:8px;list-style:none">
+        🔍 Panel de Auditoría — "¿Qué se contó y cómo?"
+        <span style="margin-left:auto;font-size:10px;opacity:.7">▼ expandir</span>
+      </summary>
+      <div style="padding:16px 18px;background:var(--bg-card)">
+
+        <!-- Buscador de habitación -->
+        <div style="font-size:11px;font-weight:700;color:var(--text-muted);
+                    text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">
+          Verificar clasificación de una habitación específica
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
+          <input id="det-audit-input" type="number" placeholder="Ej: 3410"
+            style="padding:8px 12px;border-radius:10px;border:1.5px solid #6366f1;
+                   background:var(--bg);color:var(--text);font-size:14px;font-weight:700;
+                   width:140px;outline:none"
+            oninput="window._detAuditBuscar(this.value)" />
+          <span style="font-size:11px;color:var(--text-muted)">→ resultado en tiempo real</span>
+        </div>
+        <div id="det-audit-result" style="font-size:12px;color:var(--text-muted);
+                                          font-style:italic;min-height:24px">
+          Ingresa un número de habitación para ver cómo la clasifica el sistema.
+        </div>
+
+        <!-- Matriz de reglas vigentes -->
+        <div style="margin-top:16px;font-size:11px;font-weight:700;color:var(--text-muted);
+                    text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">
+          Matriz de Reglas de Infraestructura Vigentes
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:8px">
+          ${RULES_SUMMARY.map(r => `
+            <div style="padding:10px 12px;background:${r.color}12;border:1px solid ${r.color}40;
+                        border-radius:10px;border-left:3px solid ${r.color}">
+              <div style="font-size:10px;font-weight:900;color:${r.color};text-transform:uppercase;
+                          letter-spacing:.06em;margin-bottom:2px">${r.id}</div>
+              <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:2px">${r.label}</div>
+              <div style="font-size:10px;color:var(--text-muted)">${r.desc}</div>
+            </div>`).join('')}
+        </div>
+      </div>
+    </details>`;
+
+  // Guardar clasificados para que renderChartTotal() los use
+  _data._totalClasif = {
+    angloDia:   cls.angloDia,
+    angloNoche: cls.angloNoche,
+    totalAnglo: cls.totalAnglo,
+    esseDia:    cls.dia,
+    esseNoche:  cls.esseNoche,
+    totalESSE:  cls.totalESSE,
+    totalDia:   cls.angloDia + cls.dia,
+    totalNoche: cls.totalNoche,
+  };
+
+  // Registrar función de búsqueda de habitación en window
+  window._detAuditBuscar = (val) => {
+    const n     = parseInt(val || '0', 10);
+    const el    = document.getElementById('det-audit-result');
+    if (!el) return;
+    if (!n) { el.innerHTML = '<span style="color:var(--text-muted);font-style:italic">Ingresa un número de habitación.</span>'; return; }
+    const isR220local = false; // El usuario ingresa número de hab COPC; R220 se detecta por prefijo
+    const veredicto = lookupRoom(n, isR220local);
+    el.innerHTML = `
+      <div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:10px 12px">
+        <div style="font-size:12px;font-weight:800;color:var(--text);margin-bottom:8px">Habitación ${n}:</div>
+        ${veredicto.map(v => `
+          <div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:6px">
+            <span style="min-width:24px;font-weight:900;color:#6366f1">C${v.numCama}</span>
+            <span style="background:${v.ruleColor}18;border:1px solid ${v.ruleColor}55;border-radius:8px;
+                         padding:2px 8px;font-size:10px;font-weight:700;color:${v.ruleColor}">
+              ${v.ruleId}
+            </span>
+            <span style="font-size:11px;color:var(--text)">${v.auditNote}</span>
+          </div>`).join('')}
+      </div>`;
+  };
 
   return `
     ${kpiRow([
-    { icon: '🛏️', val: total,           lbl: 'Total Camas',     color: '#6366f1' },
-    { icon: '🏢', val: camasCOPC.length, lbl: 'Camas COPC',      color: '#6366f1' },
-    { icon: '🏗️', val: camasR220.length, lbl: 'Camas REF 220',   color: '#0ea5e9' },
-    { icon: '☀️', val: totalCamasDia,   lbl: 'Camas Día',        color: '#f59e0b' },
-    { icon: '🤝', val: totalNocheAnglo, lbl: 'Noche Anglo',      color: '#d97706' },
-    { icon: '🌙', val: totalNochePura,  lbl: 'Noche (etiq.)',    color: '#4338ca' },
-  ])}
+      { icon: '🛏️', val: total,          lbl: 'Total Camas',    color: '#6366f1' },
+      { icon: '🏢', val: copc,           lbl: 'Camas COPC',     color: '#6366f1' },
+      { icon: '🏗️', val: r220,           lbl: 'Camas REF 220',  color: '#0ea5e9' },
+      { icon: '☀️', val: cls.angloDia + cls.dia,  lbl: 'Total Día',  color: '#f59e0b' },
+      { icon: '🤝', val: cls.angloNoche, lbl: 'Noche Anglo',    color: '#d97706' },
+      { icon: '🌙', val: cls.esseNoche,  lbl: 'Noche ESSE',     color: '#4338ca' },
+    ])}
 
-    ${balHTML}
+    <!-- Anglo vs ESSE resumen -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:18px">
+      <div style="background:var(--bg-card);border:2px solid #d97706;border-radius:14px;padding:14px 16px">
+        <div style="font-size:10px;font-weight:800;color:#d97706;text-transform:uppercase;
+                    letter-spacing:.07em;margin-bottom:8px">🤝 ANGLO — Total de Camas</div>
+        <div style="display:flex;gap:8px">
+          <div style="flex:1;text-align:center;padding:8px;background:rgba(217,119,6,.08);border-radius:10px">
+            <div style="font-size:22px;font-weight:900;color:#d97706">${cls.angloDia.toLocaleString('es-CL')}</div>
+            <div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;margin-top:2px">☀️ Día</div>
+          </div>
+          <div style="flex:1;text-align:center;padding:8px;background:rgba(99,102,241,.08);border-radius:10px">
+            <div style="font-size:22px;font-weight:900;color:#6366f1">${cls.angloNoche.toLocaleString('es-CL')}</div>
+            <div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;margin-top:2px">🌙 Noche</div>
+          </div>
+          <div style="flex:1;text-align:center;padding:8px;background:rgba(16,185,129,.06);border-radius:10px">
+            <div style="font-size:22px;font-weight:900;color:#10b981">${cls.totalAnglo.toLocaleString('es-CL')}</div>
+            <div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;margin-top:2px">📊 Total</div>
+          </div>
+        </div>
+      </div>
+      <div style="background:var(--bg-card);border:2px solid #059669;border-radius:14px;padding:14px 16px">
+        <div style="font-size:10px;font-weight:800;color:#059669;text-transform:uppercase;
+                    letter-spacing:.07em;margin-bottom:8px">🏢 ESSE — Total de Camas</div>
+        <div style="display:flex;gap:8px">
+          <div style="flex:1;text-align:center;padding:8px;background:rgba(5,150,105,.08);border-radius:10px">
+            <div style="font-size:22px;font-weight:900;color:#059669">${cls.dia.toLocaleString('es-CL')}</div>
+            <div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;margin-top:2px">☀️ Día</div>
+          </div>
+          <div style="flex:1;text-align:center;padding:8px;background:rgba(124,58,237,.08);border-radius:10px">
+            <div style="font-size:22px;font-weight:900;color:#7c3aed">${cls.esseNoche.toLocaleString('es-CL')}</div>
+            <div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;margin-top:2px">🌙 Noche</div>
+          </div>
+          <div style="flex:1;text-align:center;padding:8px;background:rgba(5,150,105,.06);border-radius:10px">
+            <div style="font-size:22px;font-weight:900;color:#059669">${cls.totalESSE.toLocaleString('es-CL')}</div>
+            <div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;margin-top:2px">📊 Total</div>
+          </div>
+        </div>
+      </div>
+    </div>
 
+    <!-- Gráfico donut -->
     <div class="det-chart-wrap">
       <div class="det-chart-canvas">
         <canvas id="det-chart-donut" style="max-height:240px"></canvas>
@@ -650,17 +1328,33 @@ function renderTotal() {
         <div style="font-size:15px;font-weight:900;color:var(--text-primary);margin-bottom:14px">
           Distribución por Sector
         </div>
-        ${sectorBar('🏢 COPC', copc, total, '#6366f1', pctCopc)}
-        ${sectorBar('🏗️ REF 220', r220, total, '#0ea5e9', pctR220)}
+        ${sectorBar('🏢 COPC', copc, total, '#6366f1', pct(copc))}
+        ${sectorBar('🏗️ REF 220', r220, total, '#0ea5e9', pct(r220))}
         <div style="margin-top:18px;font-size:15px;font-weight:900;color:var(--text-primary);margin-bottom:14px">
-          Día / Noche
+          Anglo vs ESSE (Día / Noche)
         </div>
-        ${sectorBar('☀️ Día', totalCamasDia, total, '#f59e0b', pctDia)}
-        ${sectorBar('🤝 Noche Anglo (C2)', totalNocheAnglo, total, '#d97706', Math.round(totalNocheAnglo*100/Math.max(total,1)))}
-        ${sectorBar('🌙 Noche (etiq. noche)', totalNochePura, total, '#4338ca', Math.round(totalNochePura*100/Math.max(total,1)))}
+        ${sectorBar('☀️ Anglo Día (C1)',        cls.angloDia,   total, '#d97706', pct(cls.angloDia))}
+        ${sectorBar('🌙 Anglo Noche (C2)',       cls.angloNoche, total, '#6366f1', pct(cls.angloNoche))}
+        ${sectorBar('☀️ ESSE Día',              cls.dia,        total, '#059669', pct(cls.dia))}
+        ${sectorBar('🌙 ESSE Noche (Pab7)', cls.esseNoche,  total, '#7c3aed', pct(cls.esseNoche))}
       </div>
-    </div>`;
+    </div>
+
+    ${window._portalMode ? '' : noClasifHTML}
+    ${window._portalMode ? '' : auditHTML}
+    ${window._portalMode ? '' : diagHTML}
+    ${window._portalMode ? '' : balHTML}`;
 }
+
+
+
+
+
+
+
+
+
+
 
 // ══════════════════════════════════════════════════════════════════════════════
 // TAB B — OCUPADAS
@@ -843,13 +1537,28 @@ function renderOcupadas() {
   window._empFiltro = (e) => { _empresaFiltro = e; renderTab(); };
   window._supFiltroFn = (s) => { _supFiltro = s; renderTab(); };
 
+  // Calcular RT para distribuir proporcionalmente entre sub-KPIs
+  const _ocBal      = engine.getBalance();
+  const _ocReal     = _ocBal.libres;
+  const _ocDisp     = _rtApply(_ocReal);
+  const _ocRtCount  = _ocReal - _ocDisp; // total buffer oculto
+  const _ocRtActivo = _ocRtCount > 0;
+
+  // Distribución proporcional del buffer entre los 3 sub-bloques
+  // → garantiza que COPC + R220 + Noche = Total mostrado exacto
+  const _ocSubTotal = kpiCOPC + kpiR220 + kpiNoche || 1;
+  const _rtCOPC  = _ocRtActivo ? Math.round(_ocRtCount * kpiCOPC  / _ocSubTotal) : 0;
+  const _rtR220  = _ocRtActivo ? Math.round(_ocRtCount * kpiR220  / _ocSubTotal) : 0;
+  const _rtNoche = _ocRtActivo ? (_ocRtCount - _rtCOPC - _rtR220) : 0; // resto al último → suma exacta
+
   return `
     ${kpiRow([
-    { icon: '🔴', val: kpiTotal, lbl: 'Total Ocupadas', color: '#ef4444' },
-    { icon: '🏢', val: kpiCOPC, lbl: 'Camas COPC (Día)', color: '#6366f1' },
-    { icon: '🏗️', val: kpiR220, lbl: 'Camas REF 220', color: '#0ea5e9' },
-    { icon: '🌙', val: kpiNoche, lbl: 'Camas Noche COPC', color: '#4338ca' },
+    { icon: '🔴', val: kpiTotal + (_ocRtActivo ? _ocRtCount : 0), lbl: 'Total Ocupadas', color: '#ef4444' },
+    { icon: '🏢', val: kpiCOPC  + _rtCOPC,  lbl: 'Camas COPC (Día)',  color: '#6366f1' },
+    { icon: '🏗️', val: kpiR220  + _rtR220,  lbl: 'Camas REF 220',     color: '#0ea5e9' },
+    { icon: '🌙', val: kpiNoche + _rtNoche,  lbl: 'Camas Noche COPC', color: '#4338ca' },
   ])}
+
 
     <!-- Filtros -->
     <div style="display:flex;flex-direction:column;gap:12px;margin-bottom:20px;padding:16px;background:var(--bg-card);border-radius:14px;border:1px solid var(--border)">
@@ -1107,48 +1816,103 @@ function renderReserva() {
 // TAB D — NO OCUPADO
 // ══════════════════════════════════════════════════════════════════════════════
 function renderLibre() {
-  const { camas, camasCOPC, camasR220, ocupadosSet, distEmpMap, habMap, asigPre,
-    camaNocheSet, habAngloIds, habNocheIds, camaById } = _data;
-  const preSet = new Set(asigPre.map(a => String(a.id_cama)));
+  // ── FUENTE ÚNICA: engine.getBalance() garantiza que los números cuadren ──
+  // FÓRMULA: Total = Ocupadas + Reservas + Libres + Bloqueadas
+  // renderLibre DEBE usar exactamente las mismas camasLibres del engine.
+  const engineData  = _data.engine._p;
+  const camasLibres = engineData.camasLibres;   // ya filtradas: -ocup -pre -bloqueadas
+  const { activas, reservas } = engineData;     // para mostrar quién ya está en la hab
+  const { distEmpMap, habMap, habAngloIds, habNocheIds, camaById,
+          camasR220 } = _data;
 
-  // Una cama es libre si: no está ocupada, no es pre-asignada futura, y no está en mantencion
-  const esLibre = c =>
-    !ocupadosSet.has(String(c.id_cama)) &&
-    !preSet.has(String(c.id_cama)) &&
-    !/manten|reparac/i.test(c.estado || '');
+  // Set de id_cama de REF 220 para lookup O(1)
+  const r220IdSet  = new Set(camasR220.map(c => String(c.id_cama)));
+  const libresAll  = camasLibres;
+  const libresR220 = camasLibres.filter(c =>  r220IdSet.has(String(c.id_cama)));
+  const libresCOPC = camasLibres.filter(c => !r220IdSet.has(String(c.id_cama)));
 
-  const libresCOPC = camasCOPC.filter(esLibre);
-  const libresR220 = camasR220.filter(esLibre);
-  const libresAll = [...libresCOPC, ...libresR220];
+  // ── MAPA DE OCUPANTES POR HABITACIÓN ────────────────────────────────────
+  // Permite mostrar quién ya está en la otra cama de una hab parcialmente libre.
+  // Clave: habitacion_id (string normalizado)
+  const habOcupantesMap = {};   // { habId: [{ nombre, empresa, numCama, tipo }] }
 
-  // ─ Clasificar camas libres por tipo ────────────────────────────────────
-  // Anglo C1 (cama 1 = da) : habitación con etiqueta anglo + numero_cama = 1
-  // Anglo C2 (cama 2 = noche): habitación con etiqueta anglo + numero_cama = 2
-  // Noche pura : habitación con etiqueta "noche" (sin ser Anglo)
-  // EECC : todo lo demás
+  const _addOcupante = (asig, tipo) => {
+    const rec    = camaById?.[String(asig.id_cama)] || asig;
+    const habId  = String(rec.habitacion_id || asig.habitacion_id || '');
+    if (!habId) return;
+    if (!habOcupantesMap[habId]) habOcupantesMap[habId] = [];
+    habOcupantesMap[habId].push({
+      nombre:   asig.nombre_huesped || '—',
+      empresa:  asig._empresa       || '—',
+      numCama:  Number(rec.numero_cama || asig.numero_cama || 0),
+      tipo,   // 'ocupada' | 'reservada'
+    });
+  };
 
-  const libresAngloDia = [];
+  activas.forEach(a => _addOcupante(a, 'ocupada'));
+  reservas.forEach(a => _addOcupante(a, 'reservada'));
+
+
+
+  // ── CLASIFICACIÓN UNIFICADA (mismo motor que renderTotal) ────────────────
+  // classifyAll() aplica las 10 REGLAS de infraestructura exactas.
+  const clsLibres = classifyAll(libresAll, habMap, camaById, r220IdSet);
+
+  // Listas por categoría (para chips y display)
+  const libresAngloDia   = [];
   const libresAngloNoche = [];
-  const libresNochePura = [];
-  const libresEECC = [];
+  const libresESSEDia    = [];
+  const libresESSENoche  = [];
+  const libresNoClasif   = [];
 
   libresAll.forEach(c => {
-    const cRec = camaById?.[String(c.id_cama)] || c;
-    const habId = cRec.habitacion_id || c.habitacion_id;
-    const numCama = Number(cRec.numero_cama || c.numero_cama || 0);
+    if (/deshabiit|deshabilit/i.test(c.estado || '')) return;
+    const rec      = camaById?.[String(c.id_cama)] || c;
+    const habId    = rec.habitacion_id || c.habitacion_id || '';
+    const numCama  = Number(rec.numero_cama || c.numero_cama || 0);
+    const numHab   = numHabInt(habId, c.id_cama, habMap);
+    const r220flag = r220IdSet.has(String(c.id_cama));
+    const { cat }  = classifyBed(numHab, numCama, r220flag);
 
-    if (habAngloIds?.has(habId)) {
-      // Habitación Anglo: C1 = día, C2 = noche
-      if (numCama === 1) libresAngloDia.push(c);
-      else libresAngloNoche.push(c);
-    } else if (habNocheIds?.has(habId)) {
-      // Habitación con etiqueta Noche pura
-      libresNochePura.push(c);
-    } else {
-      // Todo lo demás = EECC
-      libresEECC.push(c);
-    }
+    if      (cat === CAT.ANGLO_DIA)   libresAngloDia.push(c);
+    else if (cat === CAT.ANGLO_NOCHE) libresAngloNoche.push(c);
+    else if (cat === CAT.DIA)         libresESSEDia.push(c);
+    else if (cat === CAT.ESSE_NOCHE)  libresESSENoche.push(c);
+    else                               libresNoClasif.push(c);
   });
+
+  // Compatibilidad con código heredado que usa estas variables
+  const libresEECC      = [...libresESSEDia, ...libresESSENoche];
+  const libresEECCDia   = libresESSEDia;
+  const libresEECCNoche = libresESSENoche;
+
+  // ── CÁLCULO DE BUFFER A NIVEL FUNCIÓN ────────────────────────────────────
+  // Calculado UNA SOLA VEZ aquí para que sea consistente en toda la página.
+  // Todos los bloques HTML usan estas variables, no los .length crudos.
+  const _rtReal  = libresAll.length;
+  const _rtDisp  = _rtApply(_rtReal);          // total visible con buffer
+  const _rtCount = _rtReal - _rtDisp;          // camas ocultas (Reserva Técnica)
+  const _rtRatio = _rtReal > 0 ? _rtDisp / _rtReal : 1;  // 0.70 si buffer=30%
+  const _rtActivo = _rtBuffer > 0;
+
+  // Subcategorías con buffer aplicado proporcionalmente
+  const dispAngloDia   = Math.floor(libresAngloDia.length   * _rtRatio);
+  const dispAngloNoche = Math.floor(libresAngloNoche.length * _rtRatio);
+  const dispESSEDia    = Math.floor(libresESSEDia.length    * _rtRatio);
+  const dispESSENoche  = Math.floor(libresESSENoche.length  * _rtRatio);
+  const dispEECCDia    = dispESSEDia;
+  const dispEECCNoche  = dispESSENoche;
+  const dispAngloTotal = dispAngloDia + dispAngloNoche;
+  const dispEECCTotal  = dispESSEDia  + dispESSENoche;
+
+  // Helper: dado un array de camas, devuelve cuántas mostrar (con buffer proporcional)
+  const _dispN = (arr) => Math.floor(arr.length * _rtRatio);
+
+
+
+
+
+
 
   // ─ Helper: extraer número de habitación legible ──────────────────────────────
   // 1º: numero_hab del habRecord (habMap)
@@ -1190,7 +1954,8 @@ function renderLibre() {
 
       grupoHabs[hid] = {
         numHab, pabellon, piso, camas: [], empresa: null,
-        isR220: isR220(c.id_cama)
+        isR220: isR220(c.id_cama),
+        hid,   // habitacion_id normalizado para lookup en habOcupantesMap
       };
     }
     grupoHabs[hid].camas.push(c);
@@ -1245,58 +2010,375 @@ function renderLibre() {
     </div>`;
 
   const renderCard = (g) => {
-    const camasLabel = g.camas
-      .map(c => `C${c.numero_cama || '?'}`)
-      .sort().join(' · ');
     const sector = g.isR220 ? '🏗️ REF 220' : '🏢 COPC';
-    // Construir etiqueta de pabellón/piso solo si el número tiene formato PPFF (4 dígitos)
     const numStr = String(g.numHab || '');
-    const tienePabPiso = /^\d{4,}$/.test(numStr.replace(/\D/g, ''));
-    const pabPisoLabel = tienePabPiso && g.pabellon !== '?'
-      ? ` · 📍${g.pabellon}` : '';
-    return `<div class="det-hab-card" style="border-color:${g.empresa ? '#6366f1' : '#10b981'}">
-      <div class="det-hab-num" style="font-size:20px;font-weight:900">🏠 Hab. ${g.numHab}</div>
-      <div style="font-size:10px;color:var(--text-muted);margin-top:1px">${sector}${pabPisoLabel}</div>
-      <div class="det-hab-sub" style="margin-top:4px">— ${g.camas.length} cama${g.camas.length > 1 ? 's' : ''} libre${g.camas.length > 1 ? 's' : ''}</div>
-      <div style="font-size:11px;color:#10b981;font-weight:700;margin-top:2px">${camasLabel}</div>
-      ${g.empresa ? `<div class="det-hab-emp">🏢 Retenida: ${g.empresa}</div>` : ''}
+    const pabPisoLabel = g.pabellon !== '?' ? `📍${g.pabellon}` : '';
+    const ocupantes = habOcupantesMap[g.hid] || [];
+
+    // Color del borde de la card
+    let borderColor = '#10b981';             // verde = libre
+    if (g.empresa) borderColor = '#6366f1'; // azul = retenida
+    if (ocupantes.length > 0) borderColor = '#ef4444'; // rojo = hay alguien en la otra cama
+
+    // ── Puntos de cama (BED DOTS) ─────────────────────────────────────────────
+    // Primero los ocupantes (camas ocupadas/reservadas)
+    const ocupDots = ocupantes.map(o => {
+      const cls   = o.tipo === 'ocupada' ? 'bed-dot--occupied' : 'bed-dot--reserved';
+      const label = o.tipo === 'ocupada' ? '🔴' : '📌';
+      const title = `C${o.numCama} — ${o.nombre} (${o.empresa})`;
+      return `<span class="bed-dot ${cls}" title="${title}">C${o.numCama}</span>`;
+    }).join('');
+
+    // Luego las camas libres
+    const libreDots = g.camas.map(c => {
+      const numCama = c.numero_cama || '?';
+      return `<span class="bed-dot bed-dot--free" title="Cama ${numCama} — Libre">C${numCama}</span>`;
+    }).join('');
+
+    // Resumen de la card
+    const totalCamasHab = g.camas.length + ocupantes.length;
+    const libresCount   = g.camas.length;
+    const occCount      = ocupantes.filter(o => o.tipo === 'ocupada').length;
+    const resCount      = ocupantes.filter(o => o.tipo === 'reservada').length;
+
+    // Info de ocupantes para mostrar
+    const ocupantesHTML = ocupantes.length === 0 ? '' : `
+      <div style="margin-top:7px;padding:6px 8px;
+                  background:rgba(239,68,68,.06);border:1px solid rgba(239,68,68,.2);
+                  border-radius:8px;border-left:3px solid #ef4444">
+        ${ocupantes.map(o => {
+          const tipoColor = o.tipo === 'ocupada' ? '#ef4444' : '#8b5cf6';
+          const tipoIcon  = o.tipo === 'ocupada' ? '🔴' : '📌';
+          const nombreDisplay = o.nombre.length > 22 ? o.nombre.slice(0,22)+'…' : o.nombre;
+          const empresaDisplay = (o.empresa && o.empresa !== '—')
+            ? (o.empresa.length > 22 ? o.empresa.slice(0,22)+'…' : o.empresa)
+            : null;
+          return `<div style="display:flex;align-items:flex-start;gap:5px;margin-bottom:4px">
+            <span style="font-size:10px;flex-shrink:0;margin-top:1px">${tipoIcon}</span>
+            <div style="display:flex;flex-direction:column;gap:1px;overflow:hidden;min-width:0">
+              <span style="font-size:10px;font-weight:700;color:var(--text);
+                           white-space:nowrap;overflow:hidden;text-overflow:ellipsis"
+                    title="${o.nombre}">${nombreDisplay}</span>
+              ${empresaDisplay ? `<span style="font-size:9px;color:var(--text-muted);
+                           white-space:nowrap;overflow:hidden;text-overflow:ellipsis"
+                    title="${o.empresa}">🏢 ${empresaDisplay}</span>` : ''}
+            </div>
+          </div>`;
+        }).join('')}
+      </div>`;
+
+    return `<div class="det-hab-card" style="border-color:${borderColor}">
+      <!-- Room number + sector -->
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div class="det-hab-num">🏠 ${g.numHab}</div>
+        ${pabPisoLabel ? `<span style="font-size:9px;font-weight:700;color:var(--text-muted);
+          background:var(--bg);padding:2px 6px;border-radius:99px;border:1px solid var(--border)">
+          ${pabPisoLabel}</span>` : ''}
+      </div>
+      <div class="det-hab-sub">${sector} · ${totalCamasHab} cama${totalCamasHab !== 1 ? 's' : ''}</div>
+
+      <!-- Bed dots -->
+      <div class="bed-dots">
+        ${ocupDots}${libreDots}
+        <span class="bed-dot-lbl">${libresCount} libre${libresCount !== 1 ? 's' : ''}</span>
+      </div>
+
+      ${g.empresa ? `<div class="det-hab-emp">🏢 Retenida: ${g.empresa.length > 20 ? g.empresa.slice(0,20)+'…' : g.empresa}</div>` : ''}
+      ${ocupantesHTML}
     </div>`;
   };
 
   const pisosSections = Object.entries(porPiso)
     .sort(([a], [b]) => parseInt(a.replace(/\D/g, '')) - parseInt(b.replace(/\D/g, '')))
     .map(([piso, habs]) => {
-      const totalCamas = habs.reduce((s, g) => s + g.camas.length, 0);
-      const pabsEnPiso = [...new Set(habs.map(g => g.pabellon))].sort().join(', ');
+      const totalCamasReal = habs.reduce((s, g) => s + g.camas.length, 0);
+      const totalCamas     = Math.floor(totalCamasReal * _rtRatio);
+      const totalHabs      = Math.floor(habs.length    * _rtRatio);
+      const pabsEnPiso = [...new Set(habs.map(g => g.pabellon))].filter(p => p !== '?').sort().join(' · ');
       return `
-        <div style="margin-bottom:24px">
-          <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;
-                      padding:8px 14px;background:var(--bg-card);border-radius:10px;border-left:3px solid #10b981">
-            <span style="font-size:15px;font-weight:900;color:#10b981">🏢 ${piso}</span>
-            <span style="font-size:13px;color:var(--text-muted)">
-              ${habs.length} hab libres · ${totalCamas} camas libres
-              ${!_libreFiltroPab && pabsEnPiso ? ` · Pabellones: ${pabsEnPiso}` : ''}
+        <div class="piso-section" style="margin-bottom:20px">
+          <div class="piso-header">
+            <span class="piso-header-title">🏢 ${piso}</span>
+            <span class="piso-header-sub">
+              ${totalHabs} hab · ${totalCamas} camas libres
+              ${!_libreFiltroPab && pabsEnPiso ? ` · ${pabsEnPiso}` : ''}
             </span>
           </div>
           <div class="det-hab-grid">${habs.map(renderCard).join('')}</div>
         </div>`;
     }).join('');
 
-  return `
-    <!-- KPIs principales -->
-    ${kpiRow([
-    { icon: '🟢', val: libresAll.length, lbl: 'Total Libres', color: '#10b981' },
-    { icon: '🏢', val: libresCOPC.length, lbl: 'COPC Libres', color: '#6366f1' },
-    { icon: '🏗️', val: libresR220.length, lbl: 'REF 220 Libres', color: '#0ea5e9' },
-    { icon: '🏢', val: retenidas, lbl: 'Retenidas Empresa', color: '#8b5cf6' },
-  ])}
 
-    <!-- Desglose por tipo -->
-    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px">
-      ${kpiBox('☀️', libresAngloDia.length, 'Anglo C1 (Día)', '#d97706', 'Cama 1 — turno día')}
-      ${kpiBox('🌙', libresAngloNoche.length, 'Anglo C2 (Noche)', '#4338ca', 'Cama 2 — turno noche')}
-      ${libresNochePura.length > 0 ? kpiBox('🌙', libresNochePura.length, 'Camas Noche', '#7c3aed', 'Etiqueta "noche"') : ''}
-      ${kpiBox('🏢', libresEECC.length, 'Camas EECC', '#059669', 'Contratistas')}
+  return `
+    <!-- ══ BANNER CRÍTICO: DISPONIBILIDAD REAL ══ -->
+    ${(() => {
+      const bal     = _data.engine.getBalance();
+      // Usar variables pre-calculadas a nivel función (buffer ya aplicado)
+      const real     = _rtReal;
+      const disp     = _rtDisp;
+      const rtActivo = _rtActivo;
+      const dAngloDia   = dispAngloDia;
+      const dAngloNoche = dispAngloNoche;
+      const dESSEDia    = dispESSEDia;
+      const dESSENoche  = dispESSENoche;
+      const ahora = new Date().toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+      return `
+    <div style="background:linear-gradient(135deg,rgba(16,185,129,.12),rgba(5,150,105,.06));
+                border:2px solid #10b981;border-radius:16px;padding:18px 20px;margin-bottom:20px;
+                position:relative">
+
+      <!-- Título con badge de validación -->
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+        <div style="font-size:13px;font-weight:900;color:#10b981;text-transform:uppercase;
+                    letter-spacing:.08em">
+          ✅ CAMAS DISPONIBLES — DISPONIBILIDAD REAL
+        </div>
+        <div style="margin-left:auto;font-size:10px;color:#6ee7b7;font-weight:700;
+                    background:rgba(16,185,129,.15);border:1px solid #10b98140;
+                    border-radius:20px;padding:3px 10px">
+          🕐 Datos al ${ahora}
+        </div>
+      </div>
+
+      <!-- Número grande destacado -->
+      <div style="display:flex;align-items:center;gap:20px;margin-bottom:14px;flex-wrap:wrap">
+        <div style="text-align:center">
+          <div style="font-size:56px;font-weight:900;color:#10b981;line-height:1">
+            ${disp.toLocaleString('es-CL')}
+          </div>
+          <div style="font-size:11px;font-weight:700;color:#6ee7b7;text-transform:uppercase;
+                      letter-spacing:.06em">CAMAS DISPONIBLES</div>
+          <div style="font-size:10px;color:var(--text-muted);margin-top:2px">
+            para nuevas reservas
+          </div>
+          ${_rtIsAdmin() && _rtUnlocked && rtActivo ? `
+          <div style="margin-top:6px;font-size:10px;color:#f59e0b;font-weight:700;
+                      background:rgba(245,158,11,.1);border-radius:8px;padding:3px 8px">
+            🔐 Real: ${real.toLocaleString('es-CL')} · Buffer: ${_rtBuffer}%
+          </div>` : ''}
+        </div>
+
+        <div style="flex:1;min-width:220px">
+          <!-- Fórmula explícita -->
+          <div style="font-size:11px;font-weight:700;color:#059669;text-transform:uppercase;
+                      letter-spacing:.06em;margin-bottom:8px">📐 Cómo se calculó este número</div>
+          <div style="display:flex;flex-direction:column;gap:5px">
+            <div style="display:flex;justify-content:space-between;align-items:center;
+                        padding:5px 10px;background:rgba(99,102,241,.12);border-radius:8px">
+              <span style="font-size:12px;color:#6366f1;font-weight:600">🛏️ Total de camas físicas</span>
+              <span style="font-size:14px;font-weight:900;color:#6366f1">${bal.total.toLocaleString('es-CL')}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;
+                        padding:5px 10px;background:rgba(239,68,68,.1);border-radius:8px">
+              <span style="font-size:12px;color:#dc2626;font-weight:600">🔴 Menos: Ocupadas (confirmadas)</span>
+              <span style="font-size:14px;font-weight:900;color:#dc2626">− ${(bal.ocupadas + (rtActivo ? real - disp : 0)).toLocaleString('es-CL')}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;
+                        padding:5px 10px;background:rgba(139,92,246,.1);border-radius:8px">
+              <span style="font-size:12px;color:#7c3aed;font-weight:600">📌 Menos: Reservadas (pre-asignadas)</span>
+              <span style="font-size:14px;font-weight:900;color:#7c3aed">− ${bal.reservas.toLocaleString('es-CL')}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;
+                        padding:5px 10px;background:rgba(245,158,11,.1);border-radius:8px">
+              <span style="font-size:12px;color:#b45309;font-weight:600">🔒 Menos: Bloqueadas (mantención)</span>
+              <span style="font-size:14px;font-weight:900;color:#b45309">− ${bal.bloqueadas.toLocaleString('es-CL')}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;
+                        padding:6px 10px;background:rgba(16,185,129,.15);border-radius:8px;
+                        border:1px solid #10b98140;margin-top:2px">
+              <span style="font-size:12px;font-weight:800;color:#065f46">✅ DISPONIBLES (sin compromiso)</span>
+              <span style="font-size:16px;font-weight:900;color:#059669">= ${disp.toLocaleString('es-CL')}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+
+      <!-- Desglose por tipo (con buffer aplicado) -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;
+                  padding-top:12px;border-top:1px solid rgba(16,185,129,.2)">
+        <div style="text-align:center;padding:8px;background:rgba(217,119,6,.08);border-radius:10px">
+          <div style="font-size:20px;font-weight:900;color:#d97706">${dAngloDia.toLocaleString('es-CL')}</div>
+          <div style="font-size:9px;color:#d97706;font-weight:700;text-transform:uppercase">☀️ Anglo Día</div>
+        </div>
+        <div style="text-align:center;padding:8px;background:rgba(99,102,241,.08);border-radius:10px">
+          <div style="font-size:20px;font-weight:900;color:#6366f1">${dAngloNoche.toLocaleString('es-CL')}</div>
+          <div style="font-size:9px;color:#6366f1;font-weight:700;text-transform:uppercase">🌙 Anglo Noche</div>
+        </div>
+        <div style="text-align:center;padding:8px;background:rgba(5,150,105,.08);border-radius:10px">
+          <div style="font-size:20px;font-weight:900;color:#059669">${dESSEDia.toLocaleString('es-CL')}</div>
+          <div style="font-size:9px;color:#059669;font-weight:700;text-transform:uppercase">☀️ ESSE Día</div>
+        </div>
+        <div style="text-align:center;padding:8px;background:rgba(124,58,237,.08);border-radius:10px">
+          <div style="font-size:20px;font-weight:900;color:#7c3aed">${dESSENoche.toLocaleString('es-CL')}</div>
+          <div style="font-size:9px;color:#7c3aed;font-weight:700;text-transform:uppercase">🌙 ESSE Noche</div>
+        </div>
+        ${_rtIsAdmin() && rtActivo ? `
+        <div style="text-align:center;padding:8px;background:rgba(245,158,11,.08);border-radius:10px;
+                    border:1px solid rgba(245,158,11,.3)">
+          <div style="font-size:20px;font-weight:900;color:#f59e0b">${(real - disp).toLocaleString('es-CL')}</div>
+          <div style="font-size:9px;color:#f59e0b;font-weight:700;text-transform:uppercase">🔐 Res. Técnica</div>
+        </div>` : ''}
+        <div style="text-align:center;padding:8px;background:rgba(16,185,129,.08);border-radius:10px;
+                    border:1.5px solid #10b981">
+          <div style="font-size:20px;font-weight:900;color:#10b981">${disp.toLocaleString('es-CL')}</div>
+          <div style="font-size:9px;color:#10b981;font-weight:700;text-transform:uppercase">📊 TOTAL DISP.</div>
+        </div>
+      </div>
+
+
+
+
+      <!-- Botón admin — SOLO visible para Juan Garrido y Guissele Barrera -->
+      ${_rtIsAdmin() ? `
+      <button onclick="window._rtOpen()"
+        title="Configuración"
+        style="position:absolute;top:14px;right:14px;background:rgba(16,185,129,.1);
+               border:1px solid rgba(16,185,129,.25);border-radius:8px;
+               cursor:pointer;font-size:13px;color:rgba(16,185,129,.45);padding:4px 7px;
+               transition:all .25s;user-select:none;line-height:1"
+        onmouseover="this.style.color='#10b981';this.style.background='rgba(16,185,129,.2)'"
+        onmouseout="this.style.color='rgba(16,185,129,.45)';this.style.background='rgba(16,185,129,.1)'">
+        ${_rtUnlocked ? '⚙️' : '🔒'}
+      </button>` : ''}
+    </div>`;
+
+    })()}
+
+
+
+
+
+
+    <!-- Desglose ANGLO vs ESSE (separación estructural) -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px">
+
+      <!-- ── BLOQUE ANGLO (Pab1, Pab2, Pab3 3301-3637, etiqueta BD) ── -->
+      <div style="background:var(--bg-card);border:2px solid #d97706;border-radius:16px;padding:16px 18px">
+        <div style="font-size:11px;font-weight:800;color:#d97706;text-transform:uppercase;
+                    letter-spacing:.07em;margin-bottom:4px">🤝 ANGLO — Camas No Ocupadas</div>
+        <div style="font-size:9px;color:var(--text-muted);margin-bottom:12px">
+          Pab.1 · Pab.2 · Pab.3 (hab 3301–3637)
+        </div>
+        <div style="display:flex;gap:10px">
+          <div style="flex:1;text-align:center;padding:12px 8px;background:rgba(217,119,6,.08);
+                      border-radius:12px;border:1px solid rgba(217,119,6,.25)">
+            <div style="font-size:28px;font-weight:900;color:#d97706;line-height:1">
+              ${dispAngloDia.toLocaleString('es-CL')}
+            </div>
+            <div style="font-size:10px;font-weight:700;color:var(--text-muted);margin-top:4px;
+                        text-transform:uppercase">☀️ Día (C1)</div>
+            <div style="font-size:9px;color:var(--text-muted);margin-top:1px">Cama 1 · turno día</div>
+          </div>
+          <div style="flex:1;text-align:center;padding:12px 8px;background:rgba(99,102,241,.08);
+                      border-radius:12px;border:1px solid rgba(99,102,241,.25)">
+            <div style="font-size:28px;font-weight:900;color:#6366f1;line-height:1">
+              ${dispAngloNoche.toLocaleString('es-CL')}
+            </div>
+            <div style="font-size:10px;font-weight:700;color:var(--text-muted);margin-top:4px;
+                        text-transform:uppercase">🌙 Noche (C2)</div>
+            <div style="font-size:9px;color:var(--text-muted);margin-top:1px">Cama 2 · turno noche</div>
+          </div>
+          <div style="flex:1;text-align:center;padding:12px 8px;background:rgba(16,185,129,.06);
+                      border-radius:12px;border:1px solid rgba(16,185,129,.2)">
+            <div style="font-size:28px;font-weight:900;color:#10b981;line-height:1">
+              ${dispAngloTotal.toLocaleString('es-CL')}
+            </div>
+            <div style="font-size:10px;font-weight:700;color:var(--text-muted);margin-top:4px;
+                        text-transform:uppercase">📊 Total Anglo</div>
+            <div style="font-size:9px;color:var(--text-muted);margin-top:1px">Día + Noche</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── BLOQUE ESSE (todo lo que no es Anglo ni Pab7) ── -->
+      <div style="background:var(--bg-card);border:2px solid #059669;border-radius:16px;padding:16px 18px">
+        <div style="font-size:11px;font-weight:800;color:#059669;text-transform:uppercase;
+                    letter-spacing:.07em;margin-bottom:4px">🏢 ESSE — Camas No Ocupadas</div>
+        <div style="font-size:9px;color:var(--text-muted);margin-bottom:12px">
+          Contratistas (COPC + REF 220 no-Anglo)
+        </div>
+        <div style="display:flex;gap:10px">
+          <div style="flex:1;text-align:center;padding:12px 8px;background:rgba(245,158,11,.08);
+                      border-radius:12px;border:1px solid rgba(245,158,11,.25)">
+            <div style="font-size:28px;font-weight:900;color:#f59e0b;line-height:1">
+              ${dispEECCDia.toLocaleString('es-CL')}
+            </div>
+            <div style="font-size:10px;font-weight:700;color:var(--text-muted);margin-top:4px;
+                        text-transform:uppercase">☀️ Día (C1)</div>
+            <div style="font-size:9px;color:var(--text-muted);margin-top:1px">Cama 1 · turno día</div>
+          </div>
+          <div style="flex:1;text-align:center;padding:12px 8px;background:rgba(124,58,237,.08);
+                      border-radius:12px;border:1px solid rgba(124,58,237,.25)">
+            <div style="font-size:28px;font-weight:900;color:#7c3aed;line-height:1">
+              ${dispEECCNoche.toLocaleString('es-CL')}
+            </div>
+            <div style="font-size:10px;font-weight:700;color:var(--text-muted);margin-top:4px;
+                        text-transform:uppercase">🌙 Noche (C2)</div>
+            <div style="font-size:9px;color:var(--text-muted);margin-top:1px">Cama 2 · turno noche</div>
+          </div>
+          <div style="flex:1;text-align:center;padding:12px 8px;background:rgba(5,150,105,.06);
+                      border-radius:12px;border:1px solid rgba(5,150,105,.2)">
+            <div style="font-size:28px;font-weight:900;color:#059669;line-height:1">
+              ${dispEECCTotal.toLocaleString('es-CL')}
+            </div>
+            <div style="font-size:10px;font-weight:700;color:var(--text-muted);margin-top:4px;
+                        text-transform:uppercase">📊 Total ESSE</div>
+            <div style="font-size:9px;color:var(--text-muted);margin-top:1px">Día + Noche</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ═══════════ DETALLE CAMAS NOCHE LIBRES ═══════════ -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px">
+
+      <!-- ANGLO NOCHE LIBRE -->
+      <div style="background:var(--bg-card);border:1px solid rgba(99,102,241,.4);border-radius:14px;padding:14px 16px">
+        <div style="font-size:11px;font-weight:800;color:#6366f1;text-transform:uppercase;
+                    letter-spacing:.06em;margin-bottom:10px">
+          🌙 Anglo — Camas Noche Libres (${dispAngloNoche})
+        </div>
+        ${libresAngloNoche.length === 0
+          ? `<div style="font-size:12px;color:var(--text-muted);text-align:center;padding:8px">
+               ✅ Ninguna cama noche Anglo libre
+             </div>`
+          : `<div style="display:flex;flex-wrap:wrap;gap:5px;max-height:160px;overflow-y:auto">
+              ${libresAngloNoche.map(c => {
+                const habId  = (camaById?.[String(c.id_cama)] || c).habitacion_id || c.habitacion_id;
+                const numHab = habMap[String(habId || '')]?.numero_hab;
+                const label  = numHab ? `Hab.${numHab}` : String(c.id_cama).replace(/^COPC0*/i,'').replace(/-C\d+$/i,'');
+                return `<span style="padding:3px 8px;background:rgba(99,102,241,.12);border:1px solid rgba(99,102,241,.3);
+                                border-radius:20px;font-size:10px;font-weight:700;color:#6366f1">${label}</span>`;
+              }).join('')}
+             </div>`
+        }
+      </div>
+
+      <!-- ESSE NOCHE LIBRE -->
+      <div style="background:var(--bg-card);border:1px solid rgba(124,58,237,.4);border-radius:14px;padding:14px 16px">
+        <div style="font-size:11px;font-weight:800;color:#7c3aed;text-transform:uppercase;
+                    letter-spacing:.06em;margin-bottom:10px">
+          🌙 ESSE — Camas Noche Libres (${dispEECCNoche})
+        </div>
+        ${libresEECCNoche.length === 0
+          ? `<div style="font-size:12px;color:var(--text-muted);text-align:center;padding:8px">
+               ✅ Ninguna cama noche ESSE libre
+             </div>`
+          : `<div style="display:flex;flex-wrap:wrap;gap:5px;max-height:160px;overflow-y:auto">
+              ${libresEECCNoche.map(c => {
+                const habId  = (camaById?.[String(c.id_cama)] || c).habitacion_id || c.habitacion_id;
+                const numHab = habMap[String(habId || '')]?.numero_hab;
+                const label  = numHab ? `Hab.${numHab}` : String(c.id_cama).replace(/^COPC0*/i,'').replace(/-C\d+$/i,'');
+                return `<span style="padding:3px 8px;background:rgba(124,58,237,.12);border:1px solid rgba(124,58,237,.3);
+                                border-radius:20px;font-size:10px;font-weight:700;color:#7c3aed">${label}</span>`;
+              }).join('')}
+             </div>`
+        }
+      </div>
+
     </div>
 
     <!-- Filtros -->
@@ -1306,6 +2388,7 @@ function renderLibre() {
         ${btnFiltro('Todos', '', '_libreFiltroPab' in window ? _libreFiltroPab : '', `v2DetSetPab`)}
         ${pabellonesUnicos.map(p => btnFiltro(p, p, _libreFiltroPab, 'v2DetSetPab')).join('')}
       </div>
+
       ${pisosUnicos.length ? `
       <div style="font-size:12px;font-weight:700;color:var(--text-muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.06em">🏢 Filtrar por Piso</div>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
@@ -1317,10 +2400,12 @@ function renderLibre() {
     <!-- Info filtrado -->
     ${_libreFiltroPab || _libreFiltroPiso ? `
     <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:10px 14px;margin-bottom:12px;font-size:13px;color:#15803d;font-weight:700">
-      ✅ Mostrando: ${habsFiltradas.length} habitaciones · ${totalCamasFiltradas} camas libres
+      ✅ Mostrando: ${Math.floor(habsFiltradas.length * _rtRatio)} habitaciones · ${Math.floor(totalCamasFiltradas * _rtRatio)} camas libres
       ${_libreFiltroPab ? ` · Pabellón: ${_libreFiltroPab}` : ''}
       ${_libreFiltroPiso ? ` · Piso: ${_libreFiltroPiso}` : ''}
     </div>` : ''}
+
+
 
     <!-- Info borde -->
     <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;padding:10px 16px;margin-bottom:16px;font-size:12px;color:#15803d;font-weight:600">
@@ -1340,10 +2425,19 @@ function renderLibre() {
 // ══════════════════════════════════════════════════════════════════════════════
 function renderBloqueadas() {
   const { habitacionesAll } = _data;
-  const isBloq = h => /manten|reparac|bloquea|bloqu/i.test(h.estado || '');
+  const isBloq = h => /manten|reparac|bloquea|bloqu/i.test(h.estado || '') || h.en_mantencion === true;
   const bloqAll = habitacionesAll.filter(isBloq);
-  const bloqCOPC = bloqAll.filter(h => !isR220(h.id));
-  const bloqR220 = bloqAll.filter(h => isR220(h.id));
+  // Diagnóstico: ver qué contiene habitacionesAll
+  console.log('[Bloq] habitacionesAll:', habitacionesAll.length,
+    '| en_mantencion=true:', habitacionesAll.filter(h => h.en_mantencion === true).length,
+    '| estado manten:', habitacionesAll.filter(h => /manten/i.test(h.estado||'')).length,
+    '| bloqAll:', bloqAll.length);
+  if (bloqAll.length > 0) {
+    console.log('[Bloq] Primera bloqueada:', JSON.stringify(bloqAll[0]));
+  }
+  // FIX: usar id_custom (no id) para clasificar COPC vs REF220
+  const bloqCOPC = bloqAll.filter(h => !isR220(h.id_custom));
+  const bloqR220 = bloqAll.filter(h => isR220(h.id_custom));
   const hoy = new Date();
   const diasDesde = f => f ? Math.floor((hoy - new Date(f)) / 86400000) : null;
 
@@ -1358,8 +2452,8 @@ function renderBloqueadas() {
             <tbody>
               ${arr.map(h => {
       const pab = h.v2_pabellones?.nombre || h.pabellon || '—';
-      const motivo = h.motivo_bloqueo || h.estado || 'Sin motivo';
-      const dias = diasDesde(h.fecha_bloqueo);
+      const motivo = h.motivo_bloqueo || (h.en_mantencion ? 'Mantención' : h.estado) || 'Sin motivo';
+      const dias = diasDesde(h.fecha_bloqueo || null);
       const color = /reparac/i.test(h.estado) ? '#ef4444' : '#f59e0b';
       return `<tr>
                   <td style="font-weight:900">Hab. ${h.numero_hab || h.id}</td>
@@ -1379,15 +2473,350 @@ function renderBloqueadas() {
   return `
     ${kpiRow([
     { icon: '🔒', val: bloqAll.length, lbl: 'Total Bloqueadas', color: '#f59e0b' },
-    { icon: '🏢', val: bloqCOPC.length, lbl: 'COPC Bloqueadas', color: '#6366f1' },
-    { icon: '🏗️', val: bloqR220.length, lbl: 'REF 220 Bloqueadas', color: '#0ea5e9' },
-    { icon: '🔧', val: bloqAll.filter(h => /reparac/i.test(h.estado || '')).length, lbl: 'En Reparación', color: '#ef4444' },
-    { icon: '🛠️', val: bloqAll.filter(h => /manten/i.test(h.estado || '')).length, lbl: 'En Mantención', color: '#f59e0b' },
+    { icon: '🏢', val: bloqCOPC.length, lbl: 'BLOQUEADAS EN REPARACIÓN', color: '#6366f1' },
+    { icon: '🏗️', val: bloqR220.length, lbl: 'REF 220 BLOQUEADAS EN REPARACIÓN', color: '#0ea5e9' },
+    { icon: '🔧', val: bloqAll.filter(h => /reparac/i.test(h.estado || '')).length, lbl: 'BODEGAS', color: '#ef4444' },
+    { icon: '🛠️', val: bloqAll.filter(h => /manten/i.test(h.estado || '') || h.en_mantencion === true).length, lbl: 'En Mantención', color: '#f59e0b' },
   ])}
-    <div class="det-sector-hdr">🏢 COPC — ${bloqCOPC.length} habitaciones bloqueadas</div>
+    <div class="det-sector-hdr">🏢 COPC — ${bloqCOPC.length} bloqueadas en reparación</div>
     ${renderTable(bloqCOPC)}
-    <div class="det-sector-hdr" style="margin-top:8px">🏗️ REF 220 — ${bloqR220.length} habitaciones bloqueadas</div>
+    <div class="det-sector-hdr" style="margin-top:8px">🏗️ REF 220 — ${bloqR220.length} bloqueadas en reparación</div>
     ${renderTable(bloqR220)}`;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// TAB F — CAMAS PERDIDAS
+// Habitaciones con camas inutilizadas:
+//   · BLOQUEADA       → en_mantencion=true  O  empresa contiene "bloqueada/bloqueado"
+//   · OCUPACION PARCIAL → 2+ camas, 0 < ocupadas < total
+// ══════════════════════════════════════════════════════════════════════════════
+function _cpDetectar() {
+  const { camas, habitacionesAll, habMap, asigActivas } = _data;
+
+  // Mapa rápido: id_cama → asignación enriquecida
+  const asigMap = {};
+  (asigActivas || []).forEach(a => { asigMap[String(a.id_cama)] = a; });
+
+  // Agrupar camas activas por habitacion_id
+  const porHab = {};
+  (camas || [])
+    .filter(c => !/deshabilit/i.test(c.estado || ''))
+    .forEach(c => {
+      const hid = String(c.habitacion_id);
+      if (!porHab[hid]) porHab[hid] = [];
+      porHab[hid].push(c);
+    });
+
+  const perdidas = [];
+  Object.entries(porHab).forEach(([habId, cs]) => {
+    const hab = habMap[habId] || {};
+    if (!hab.numero_hab) return;
+
+    const nTotal    = cs.length;
+    const camasOcup = cs.filter(c => c.estado === 'Ocupada' || !!asigMap[String(c.id_cama)]);
+    const nOcupadas = camasOcup.length;
+
+    const asigRef = camasOcup[0] ? (asigMap[String(camasOcup[0].id_cama)] || null) : null;
+    const empresa = asigRef?._empresa || '';
+    const huesped = asigRef?.nombre_huesped || '—';
+    const pabellon = hab.pabellon || hab.v2_pabellones?.nombre || '—';
+
+    // BLOQUEADA: empresa dice "bloqueada" O habitación en mantención
+    const esBloqueo = ['bloqueada','bloqueado'].some(w => empresa.toLowerCase().includes(w));
+    const esManten  = hab.en_mantencion === true;
+
+    if (esBloqueo || esManten) {
+      perdidas.push({
+        habId, numero_hab: hab.numero_hab, pabellon,
+        nivel: hab.nivel || '—',
+        empresa: esManten ? 'MANTENCION' : empresa,
+        tipo: 'BLOQUEADA',
+        huesped: esManten ? '—' : huesped,
+        total_camas: nTotal, ocupadas: nOcupadas, camas_perdidas: nTotal,
+      });
+      return;
+    }
+
+    // OCUPACION PARCIAL: 2+ camas, al menos 1 ocupada, al menos 1 libre
+    if (nTotal < 2 || nOcupadas === 0 || nOcupadas >= nTotal) return;
+    perdidas.push({
+      habId, numero_hab: hab.numero_hab, pabellon,
+      nivel: hab.nivel || '—',
+      empresa, tipo: 'OCUPACION PARCIAL',
+      huesped, total_camas: nTotal, ocupadas: nOcupadas,
+      camas_perdidas: nTotal - nOcupadas,
+    });
+  });
+
+  return perdidas;
+}
+
+function renderCamasPerdidas() {
+  const perdidas = _cpDetectar();
+
+  // Timestamp de última actualización
+  const horaLoad = _lastLoad
+    ? _lastLoad.toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' })
+    : '--:--';
+  const fechaLoad = _lastLoad
+    ? _lastLoad.toLocaleDateString('es-CL', { day: '2-digit', month: '2-digit', year: 'numeric' })
+    : '—';
+
+  // KPIs globales
+  const total  = perdidas.reduce((s, p) => s + p.camas_perdidas, 0);
+  const nBloq  = perdidas.filter(p => p.tipo === 'BLOQUEADA').length;
+  const nParc  = perdidas.filter(p => p.tipo === 'OCUPACION PARCIAL').length;
+
+  // ── Anglo vs ESSE (ESSE = todas las empresas que NO son Anglo) ────────────
+  const perdidasAnglo = perdidas
+    .filter(p => /anglo/i.test(p.empresa))
+    .reduce((s, p) => s + p.camas_perdidas, 0);
+  const perdidasEsse  = perdidas
+    .filter(p => !/anglo/i.test(p.empresa))   // Todo lo que NO es Anglo
+    .reduce((s, p) => s + p.camas_perdidas, 0);
+  const pct = (n) => total > 0 ? Math.round(n / total * 1000) / 10 : 0;
+  const pctAnglo = pct(perdidasAnglo);
+  const pctEsse  = pct(perdidasEsse);
+
+
+  // Agrupación por empresa (ordenada por total descendente)
+  const grupos = {};
+  perdidas.forEach(p => {
+    const k = p.empresa || 'Sin empresa';
+    if (!grupos[k]) grupos[k] = { empresa: k, items: [], perdidas: 0 };
+    grupos[k].items.push(p);
+    grupos[k].perdidas += p.camas_perdidas;
+  });
+  const gruposArr = Object.values(grupos).sort((a, b) => b.perdidas - a.perdidas);
+
+  const empresaRow = (g) => {
+    const safeId = 'cpdet-' + g.empresa.replace(/[^a-zA-Z0-9]/g, '_');
+    const bloqCount = g.items.filter(p => p.tipo === 'BLOQUEADA').length;
+    const parcCount = g.items.filter(p => p.tipo === 'OCUPACION PARCIAL').length;
+    return `
+    <div style="background:var(--bg-card);border:1px solid var(--border);
+                border-radius:14px;overflow:hidden;margin-bottom:8px">
+      <!-- Empresa header -->
+      <div onclick="window._cpDetToggle('${safeId}')"
+        style="padding:14px 18px;display:flex;align-items:center;gap:12px;
+               cursor:pointer;border-left:4px solid #ef4444"
+        onmouseover="this.style.background='rgba(239,68,68,0.05)'"
+        onmouseout="this.style.background='transparent'">
+        <div style="width:38px;height:38px;border-radius:10px;
+                    background:linear-gradient(135deg,#ef4444,#b91c1c);
+                    display:flex;align-items:center;justify-content:center;
+                    font-size:18px;font-weight:900;color:white;flex-shrink:0">
+          ${g.empresa.charAt(0).toUpperCase()}
+        </div>
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:800;font-size:14px;color:var(--text-primary);
+                      overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+            ${g.empresa}
+          </div>
+          <div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:4px">
+            <span style="font-size:11px;font-weight:700;color:#ef4444;
+                         background:rgba(239,68,68,.12);padding:2px 7px;border-radius:99px">
+              🛏️ ${g.perdidas} cama${g.perdidas>1?'s':''} perdida${g.perdidas>1?'s':''}
+            </span>
+            ${bloqCount>0?`<span style="font-size:11px;font-weight:700;color:#f59e0b;
+              background:rgba(245,158,11,.12);padding:2px 7px;border-radius:99px">🔒 ${bloqCount} bloq.</span>`:''}
+            ${parcCount>0?`<span style="font-size:11px;font-weight:700;color:#8b5cf6;
+              background:rgba(139,92,246,.12);padding:2px 7px;border-radius:99px">🟡 ${parcCount} parc.</span>`:''}
+          </div>
+        </div>
+        <span id="arr-${safeId}" style="font-size:20px;color:#64748b;flex-shrink:0;transition:transform .25s">›</span>
+      </div>
+      <!-- Tabla de habitaciones (oculta por defecto) -->
+      <div id="${safeId}" style="display:none">
+        <div class="det-table-wrap" style="margin:0">
+          <table class="det-table">
+            <thead><tr>
+              <th>Habitación</th><th>Pabellón</th><th>Nivel</th>
+              <th>Tipo Pérdida</th><th>Camas Perdidas</th><th>Ocupante (cama ocup.)</th><th>Motivo</th>
+            </tr></thead>
+            <tbody>
+              ${g.items.map(p => {
+                const esBloq = p.tipo === 'BLOQUEADA';
+                const tagColor = esBloq ? '#ef4444' : '#f59e0b';
+                const tagBg    = esBloq ? 'rgba(239,68,68,.12)' : 'rgba(245,158,11,.12)';
+                // Leer motivo desde caché
+                const mReg = _cpMotivos[p.habId];
+                const motivoLbl = mReg
+                  ? (mReg.motivo === 'sin_motivo' || !mReg.motivo ? '—'
+                    : mReg.motivo === 'otros' ? (mReg.motivo_texto || 'Otro')
+                    : { acuerdo_anglo:'Acuerdo Anglo', impar_mujer:'Impar Mujer',
+                        impar_hombre:'Impar Hombre', motivos_medicos:'Motivos Médicos',
+                        motivos_personales:'Motivos Personales'
+                      }[mReg.motivo] || mReg.motivo)
+                  : '<span style="color:#475569;font-size:11px">Sin registro</span>';
+                return `<tr>
+                  <td style="font-weight:900">Hab. ${p.numero_hab}</td>
+                  <td style="font-size:12px">${p.pabellon}</td>
+                  <td style="font-size:12px">${p.nivel}</td>
+                  <td><span class="det-badge" style="background:${tagBg};color:${tagColor}">
+                    ${esBloq?'🔒 BLOQUEADA':'🟡 PARCIAL '+p.ocupadas+'/'+p.total_camas}
+                  </span></td>
+                  <td style="font-weight:900;color:#ef4444">${p.camas_perdidas}</td>
+                  <td style="font-size:12px;color:var(--text-muted)">${p.huesped}</td>
+                  <td style="font-size:12px;color:var(--text-primary);font-weight:600">${motivoLbl}</td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>`;
+  };
+
+  return `
+    <!-- ── Barra de actualización ─────────────────────────────────────────── -->
+    <div style="display:flex;align-items:center;justify-content:space-between;
+                background:rgba(16,185,129,.06);border:1.5px solid rgba(16,185,129,.2);
+                border-radius:12px;padding:10px 16px;margin-bottom:14px;gap:12px">
+      <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0">
+        <span style="font-size:16px">📅</span>
+        <div>
+          <div style="font-size:11px;font-weight:700;color:#10b981">Datos al día</div>
+          <div style="font-size:12px;color:var(--text-muted)">
+            Cargado: <strong style="color:var(--text-primary)">${fechaLoad}</strong>
+            a las <strong style="color:var(--text-primary)">${horaLoad}</strong>
+          </div>
+        </div>
+      </div>
+      <button onclick="window._detReloadAll && window._detReloadAll()"
+        style="display:flex;align-items:center;gap:6px;padding:8px 14px;
+               background:linear-gradient(135deg,#10b981,#059669);color:#fff;
+               border:none;border-radius:10px;font-size:12px;font-weight:800;
+               cursor:pointer;flex-shrink:0;transition:opacity .2s"
+        onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">
+        🔄 Actualizar
+      </button>
+    </div>
+
+    ${kpiRow([
+      { icon: '🛏️', val: total,  lbl: 'Total Camas Perdidas',  color: '#ef4444' },
+      { icon: '🔒', val: nBloq,  lbl: 'Hab. Bloqueadas',       color: '#f59e0b' },
+      { icon: '🟡', val: nParc,  lbl: 'Ocup. Parcial',         color: '#8b5cf6' },
+      { icon: '🏢', val: gruposArr.length, lbl: 'Empresas Afectadas', color: '#6366f1' },
+    ])}
+
+    <!-- ── Anglo vs ESSE comparison ───────────────────────────────────────── -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
+
+      <!-- Anglo -->
+      <div style="background:var(--bg-card);border:1px solid var(--border);
+                  border-radius:14px;padding:16px;border-top:3px solid #f59e0b;
+                  transition:box-shadow .2s" onmouseover="this.style.boxShadow='0 6px 20px rgba(245,158,11,.15)'"
+           onmouseout="this.style.boxShadow='none'">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <span style="font-size:18px">🤝</span>
+          <span style="font-weight:800;font-size:13px;color:var(--text-primary)">Anglo American</span>
+        </div>
+        <div style="font-size:34px;font-weight:900;color:#f59e0b;line-height:1;margin-bottom:2px">
+          ${perdidasAnglo.toLocaleString('es-CL')}
+        </div>
+        <div style="font-size:9px;font-weight:700;text-transform:uppercase;
+                    color:var(--text-muted);letter-spacing:.06em;margin-bottom:10px">
+          camas perdidas
+        </div>
+        <div style="height:7px;background:rgba(255,255,255,.07);border-radius:99px;overflow:hidden;margin-bottom:6px">
+          <div style="height:100%;width:${pctAnglo}%;
+                      background:linear-gradient(90deg,#f59e0b,#d97706);
+                      border-radius:99px;transition:width .6s ease"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span style="font-size:14px;font-weight:900;color:#f59e0b">${pctAnglo.toFixed(1)}%</span>
+          <span style="font-size:10px;color:var(--text-muted)">del total perdido</span>
+        </div>
+      </div>
+
+      <!-- ESSE -->
+      <div style="background:var(--bg-card);border:1px solid var(--border);
+                  border-radius:14px;padding:16px;border-top:3px solid #0ea5e9;
+                  transition:box-shadow .2s" onmouseover="this.style.boxShadow='0 6px 20px rgba(14,165,233,.15)'"
+           onmouseout="this.style.boxShadow='none'">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <span style="font-size:18px">🏗️</span>
+          <span style="font-weight:800;font-size:13px;color:var(--text-primary)">ESSE</span>
+        </div>
+        <div style="font-size:34px;font-weight:900;color:#0ea5e9;line-height:1;margin-bottom:2px">
+          ${perdidasEsse.toLocaleString('es-CL')}
+        </div>
+        <div style="font-size:9px;font-weight:700;text-transform:uppercase;
+                    color:var(--text-muted);letter-spacing:.06em;margin-bottom:10px">
+          camas perdidas
+        </div>
+        <div style="height:7px;background:rgba(255,255,255,.07);border-radius:99px;overflow:hidden;margin-bottom:6px">
+          <div style="height:100%;width:${pctEsse}%;
+                      background:linear-gradient(90deg,#0ea5e9,#0284c7);
+                      border-radius:99px;transition:width .6s ease"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span style="font-size:14px;font-weight:900;color:#0ea5e9">${pctEsse.toFixed(1)}%</span>
+          <span style="font-size:10px;color:var(--text-muted)">del total perdido</span>
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-bottom:12px;padding:12px 16px;background:rgba(239,68,68,.06);
+                border:1.5px solid rgba(239,68,68,.18);border-radius:12px;
+                font-size:12px;color:var(--text-muted)">
+      <strong style="color:var(--text-primary)">ℹ️ ¿Qué es una cama perdida?</strong>
+      Habitación con camas que no se están usando: bloqueada por mantención o empresa, o parcialmente ocupada
+      (hay lugar disponible pero no asignado).
+    </div>
+    <div style="font-size:12px;font-weight:700;color:var(--text-muted);
+                text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">
+      ${gruposArr.length} empresa${gruposArr.length!==1?'s':''} con camas perdidas — click para expandir
+    </div>
+    ${gruposArr.length === 0
+      ? `<div class="det-empty"><div class="det-empty-icon">✅</div><div class="det-empty-text">Sin camas perdidas detectadas</div></div>`
+      : gruposArr.map(g => empresaRow(g)).join('')
+    }`;
+}
+
+
+
+
+function attachCPEvents() {
+  window._cpDetToggle = (safeId) => {
+    const el  = document.getElementById(safeId);
+    const arr = document.getElementById('arr-' + safeId);
+    if (!el) return;
+    const isOpen = el.style.display !== 'none';
+    el.style.display  = isOpen ? 'none' : 'block';
+    if (arr) arr.style.transform = isOpen ? 'rotate(0deg)' : 'rotate(90deg)';
+  };
+}
+
+/** Carga los motivos desde v2_camas_perdidas y re-renderiza el tab */
+async function _loadCPMotivos() {
+  try {
+    const { data, error } = await supabase
+      .from('v2_camas_perdidas')
+      .select('habitacion_id, motivo, motivo_texto');
+
+    if (error) {
+      console.warn('[CP] Error cargando motivos:', error.message);
+      return;
+    }
+
+    // Construir mapa habitacion_id → motivo (last-write gana si hay varios)
+    _cpMotivos = {};
+    (data || []).forEach(r => {
+      if (r.habitacion_id) _cpMotivos[String(r.habitacion_id)] = r;
+    });
+    _cpMotivosLoaded = true;
+    console.log('[CP] ✅ Motivos cargados:', Object.keys(_cpMotivos).length);
+
+    // Re-renderizar si el tab sigue activo
+    if (_tab === 'camas_perdidas') {
+      const body = document.getElementById('det-body');
+      if (body) { body.innerHTML = renderCamasPerdidas(); attachCPEvents(); }
+    }
+  } catch(e) {
+    console.warn('[CP] Excepción cargando motivos:', e.message);
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1563,29 +2992,25 @@ function emptyRow(cols, msg) {
   return `<tr><td colspan="${cols}" style="text-align:center;color:var(--text-muted);padding:30px">${msg}</td></tr>`;
 }
 
+
 // ── Gráfico Donut Total ───────────────────────────────────────────────────────
 function renderChartTotal() {
   const canvas = document.getElementById('det-chart-donut');
   if (!canvas || !window.Chart) return;
-  const { camasCOPC, camasR220, camaNocheSet } = _data;
 
-  // Separar en 3 segmentos:
-  //   1. COPC Día   (camas COPC no en nocheSet) → morado
-  //   2. REF220 Día (camas REF220 no en nocheSet) → azul cian
-  //   3. Noche      (todas las camas en nocheSet)  → ámbar dorado
-  const copcDia = camasCOPC.filter(c => !camaNocheSet.has(String(c.id_cama))).length;
-  const r220Dia = camasR220.filter(c => !camaNocheSet.has(String(c.id_cama))).length;
-  const totalNoche = camaNocheSet.size;
+  // Usar la clasificación unificada computada en renderTotal() — MISMA fuente que las barras y KPIs
+  const cl = _data._totalClasif;
+  if (!cl) return; // renderTotal no fue llamado aún
 
   if (canvas._chart) canvas._chart.destroy();
   canvas._chart = new window.Chart(canvas, {
     type: 'doughnut',
     data: {
-      labels: ['🏢 COPC Día', '🏗️ REF 220 Día', '🌙 Noche'],
+      labels: ['☀️ Anglo Día', '🌙 Anglo Noche', '☀️ ESSE Día', '🌙 ESSE Noche'],
       datasets: [{
-        data: [copcDia, r220Dia, totalNoche],
-        backgroundColor: ['#6366f1', '#0ea5e9', '#f59e0b'],
-        borderColor: ['#4f46e5', '#0284c7', '#d97706'],
+        data: [cl.angloDia, cl.angloNoche, cl.esseDia, cl.esseNoche],
+        backgroundColor: ['#d97706', '#6366f1', '#f59e0b', '#7c3aed'],
+        borderColor:     ['#b45309', '#4f46e5', '#d97706', '#6d28d9'],
         borderWidth: 2,
         hoverOffset: 8,
       }]
@@ -1604,6 +3029,7 @@ function renderChartTotal() {
     }
   });
 }
+
 
 // ── Skeleton & Error ──────────────────────────────────────────────────────────
 function skeletonHTML() {
@@ -1628,3 +3054,223 @@ function errorHTML(msg) {
       </button>
     </div>`;
 }
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SISTEMA DE RESERVA TÉCNICA — Solo acceso con PIN
+// Acceso: hacer clic en el pequeño ícono 🔒 dentro del banner de disponibilidad.
+// ══════════════════════════════════════════════════════════════════════════════
+
+/** Inyecta el modal de PIN/admin en el DOM (si no existe ya) */
+function _rtRenderModal(mode) {
+  // Eliminar modal previo si existe
+  document.getElementById('_rt_modal')?.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = '_rt_modal';
+  overlay.style.cssText = `
+    position:fixed;inset:0;z-index:99999;
+    background:rgba(0,0,0,.65);backdrop-filter:blur(6px);
+    display:flex;align-items:center;justify-content:center;
+    animation:_rtFadeIn .15s ease;
+  `;
+  overlay.innerHTML = `
+    <style>
+      @keyframes _rtFadeIn{from{opacity:0;transform:scale(.96)}to{opacity:1;transform:scale(1)}}
+      #_rt_box{background:#0f172a;border:1px solid #10b981;border-radius:20px;
+                padding:28px 32px;width:360px;max-width:95vw;color:#e2e8f0;
+                box-shadow:0 20px 60px rgba(0,0,0,.5)}
+      #_rt_box input[type=password],#_rt_box input[type=text]{
+        width:100%;box-sizing:border-box;background:#1e293b;border:1.5px solid #334155;
+        border-radius:10px;padding:10px 14px;color:#f1f5f9;font-size:16px;
+        letter-spacing:.2em;text-align:center;outline:none;margin:10px 0 0;
+        transition:border-color .2s;font-family:monospace}
+      #_rt_box input:focus{border-color:#10b981}
+      #_rt_box button{cursor:pointer;border:none;border-radius:10px;
+                       padding:11px;font-size:14px;font-weight:700;width:100%;margin-top:8px}
+      #_rt_err{color:#ef4444;font-size:12px;min-height:16px;margin-top:6px;text-align:center}
+    </style>
+
+    <div id="_rt_box">
+      ${mode === 'admin' ? _rtAdminPanelHTML() : mode === 'setup' ? _rtSetupHTML() : _rtPinHTML()}
+    </div>`;
+
+  // Cerrar al hacer clic fuera del box
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+}
+
+/** HTML del formulario de ingreso de PIN */
+function _rtPinHTML() {
+  return `
+    <div style="text-align:center;margin-bottom:18px">
+      <div style="font-size:32px">🔐</div>
+      <div style="font-size:15px;font-weight:900;color:#10b981;margin-top:6px">Acceso Restringido</div>
+      <div style="font-size:11px;color:#64748b;margin-top:4px">Sistema de Reserva Técnica</div>
+    </div>
+    <input type="password" id="_rt_pin_input" placeholder="• • • • • •"
+           maxlength="20" autocomplete="off"
+           onkeydown="if(event.key==='Enter') window._rtSubmitPin()" />
+    <div id="_rt_err"></div>
+    <button onclick="window._rtSubmitPin()"
+      style="background:linear-gradient(135deg,#10b981,#059669);color:white;margin-top:12px">
+      Ingresar
+    </button>
+    <button onclick="document.getElementById('_rt_modal').remove()"
+      style="background:#1e293b;color:#64748b;margin-top:4px">
+      Cancelar
+    </button>`;
+}
+
+/** HTML del formulario de configuración inicial de PIN */
+function _rtSetupHTML() {
+  return `
+    <div style="text-align:center;margin-bottom:18px">
+      <div style="font-size:32px">🛡️</div>
+      <div style="font-size:15px;font-weight:900;color:#f59e0b;margin-top:6px">Primera Configuración</div>
+      <div style="font-size:11px;color:#64748b;margin-top:4px">Crea tu PIN para el sistema de Reserva Técnica</div>
+    </div>
+    <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">PIN nuevo (mínimo 4 caracteres):</div>
+    <input type="password" id="_rt_pin1" placeholder="Ingresa PIN" maxlength="20" autocomplete="off"/>
+    <div style="font-size:11px;color:#94a3b8;margin-top:10px;margin-bottom:4px">Confirmar PIN:</div>
+    <input type="password" id="_rt_pin2" placeholder="Repite el PIN" maxlength="20" autocomplete="off"
+           onkeydown="if(event.key==='Enter') window._rtSetupPin()"/>
+    <div id="_rt_err"></div>
+    <button onclick="window._rtSetupPin()"
+      style="background:linear-gradient(135deg,#f59e0b,#d97706);color:white;margin-top:12px">
+      Guardar PIN y Continuar
+    </button>
+    <button onclick="document.getElementById('_rt_modal').remove()"
+      style="background:#1e293b;color:#64748b;margin-top:4px">
+      Cancelar
+    </button>`;
+}
+
+/** HTML del panel de control de la reserva técnica */
+function _rtAdminPanelHTML() {
+  const real  = _data?.engine?._p?.camasLibres?.length ?? 0;
+  const disp  = _rtApply(real);
+  const oculto = real - disp;
+  const pctActivo = _rtBuffer;
+  return `
+    <div style="text-align:center;margin-bottom:16px">
+      <div style="font-size:28px">⚙️</div>
+      <div style="font-size:14px;font-weight:900;color:#10b981;margin-top:4px">Panel de Reserva Técnica</div>
+      <div style="font-size:10px;color:#64748b;margin-top:2px">Solo visible para administradores</div>
+    </div>
+
+    <!-- Comparación real vs mostrado -->
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:16px">
+      <div style="text-align:center;padding:10px 6px;background:#1e293b;border-radius:10px">
+        <div style="font-size:20px;font-weight:900;color:#6366f1">${real.toLocaleString('es-CL')}</div>
+        <div style="font-size:9px;color:#64748b;font-weight:700;text-transform:uppercase">Real BD</div>
+      </div>
+      <div style="text-align:center;padding:10px 6px;background:#1e293b;border-radius:10px">
+        <div style="font-size:20px;font-weight:900;color:#ef4444">−${oculto.toLocaleString('es-CL')}</div>
+        <div style="font-size:9px;color:#64748b;font-weight:700;text-transform:uppercase">Reserva oculta</div>
+      </div>
+      <div style="text-align:center;padding:10px 6px;background:rgba(16,185,129,.1);
+                  border:1.5px solid #10b981;border-radius:10px">
+        <div style="font-size:20px;font-weight:900;color:#10b981" id="_rt_preview_disp">${disp.toLocaleString('es-CL')}</div>
+        <div style="font-size:9px;color:#10b981;font-weight:700;text-transform:uppercase">Se muestra</div>
+      </div>
+    </div>
+
+    <!-- Slider de porcentaje -->
+    <div style="margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <span style="font-size:11px;color:#94a3b8;font-weight:700">% de Reserva Técnica</span>
+        <span style="font-size:16px;font-weight:900;color:#f59e0b" id="_rt_pct_label">${pctActivo}%</span>
+      </div>
+      <input type="range" id="_rt_slider" min="0" max="30" step="1" value="${pctActivo}"
+             style="width:100%;accent-color:#10b981;cursor:pointer"
+             oninput="
+               const pct = Number(this.value);
+               document.getElementById('_rt_pct_label').textContent = pct + '%';
+               const disp = Math.max(0, Math.floor(${real} * (1 - pct/100)));
+               document.getElementById('_rt_preview_disp').textContent = disp.toLocaleString('es-CL');
+             " />
+      <div style="display:flex;justify-content:space-between;font-size:9px;color:#475569;margin-top:2px">
+        <span>0% (sin reserva)</span><span>15%</span><span>30% (máximo)</span>
+      </div>
+    </div>
+
+    <!-- Info de impacto -->
+    <div style="padding:8px 10px;background:#0f172a;border-radius:8px;font-size:11px;
+                color:#64748b;margin-bottom:14px;line-height:1.5">
+      💡 Con ${pctActivo}% de reserva, de cada 100 camas libres se muestran
+      <strong style="color:#10b981">${100 - pctActivo}</strong> y
+      <strong style="color:#ef4444">${pctActivo}</strong> quedan como colchón operacional.
+    </div>
+
+    <button onclick="window._rtSave()"
+      style="background:linear-gradient(135deg,#10b981,#059669);color:white">
+      💾 Guardar y Aplicar
+    </button>
+    <button onclick="window._rtLock()"
+      style="background:#1e293b;color:#64748b;margin-top:4px">
+      🔒 Cerrar sesión admin
+    </button>
+    <button onclick="document.getElementById('_rt_modal').remove()"
+      style="background:#1e293b;color:#475569;margin-top:4px;font-size:12px">
+      Cancelar
+    </button>`;
+}
+
+// ── Window handlers del sistema RT ────────────────────────────────────────────
+
+/** Verificar PIN y desbloquear */
+window._rtSubmitPin = async () => {
+  const pin = document.getElementById('_rt_pin_input')?.value?.trim();
+  if (!pin) return;
+  const errEl = document.getElementById('_rt_err');
+  const ok = await _rtCheckPin(pin);
+  if (ok) {
+    _rtUnlocked = true;
+    _rtRenderModal('admin');
+  } else {
+    errEl.textContent = '❌ PIN incorrecto. Intenta nuevamente.';
+    document.getElementById('_rt_pin_input').value = '';
+    document.getElementById('_rt_pin_input').focus();
+  }
+};
+
+/** Configurar PIN por primera vez */
+window._rtSetupPin = async () => {
+  const p1 = document.getElementById('_rt_pin1')?.value?.trim();
+  const p2 = document.getElementById('_rt_pin2')?.value?.trim();
+  const errEl = document.getElementById('_rt_err');
+  if (!p1 || p1.length < 4) { errEl.textContent = '❌ El PIN debe tener al menos 4 caracteres.'; return; }
+  if (p1 !== p2) { errEl.textContent = '❌ Los PINs no coinciden.'; return; }
+  await _rtSetPin(p1);
+  _rtUnlocked = true;
+  _rtRenderModal('admin');
+};
+
+/** Guardar configuración del slider — Sincroniza en TODOS los dispositivos via Supabase */
+window._rtSave = () => {
+  const pct = Number(document.getElementById('_rt_slider')?.value ?? 0);
+  _rtSaveCfg(pct);                         // guarda en localStorage inmediatamente
+  _rtSaveToDB(pct);                        // guarda en Supabase (sincroniza otros dispositivos)
+  document.getElementById('_rt_modal')?.remove();
+  renderTab(null); // re-render para aplicar buffer inmediatamente en este dispositivo
+};
+
+
+/** Cerrar sesión admin sin cerrar modal */
+window._rtLock = () => {
+  _rtUnlocked = false;
+  document.getElementById('_rt_modal')?.remove();
+};
+
+/** Punto de entrada: al hacer clic en el ícono 🔒 oculto */
+window._rtOpen = () => {
+  if (_rtUnlocked) {
+    _rtRenderModal('admin');
+  } else if (!_rtHasPin()) {
+    _rtRenderModal('setup');
+  } else {
+    _rtRenderModal('pin');
+  }
+};
+

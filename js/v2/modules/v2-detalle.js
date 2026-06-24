@@ -96,17 +96,17 @@ let _cpMotivos = {};     // habitacion_id → { motivo, motivo_texto }
 let _cpMotivosLoaded = false; // evitar re-fetch innecesario
 
 // Estado de filtros para tab No Ocupado
-let _libreFiltroPab  = '';   // pabellón seleccionado ('' = todos)
+let _libreFiltroPab = '';   // pabellón seleccionado ('' = todos)
 let _libreFiltroPiso = '';   // piso seleccionado     ('' = todos)
 
 // ── RESERVA TÉCNICA (solo admin) ──────────────────────────────────────────────
 // Sistema oculto de buffer: reduce el número visible de camas disponibles.
 // Solo accesible con PIN. No afecta los datos reales de Supabase.
-const _RT_KEY     = '_rt_cfg_v1';     // localStorage key (no obvio)
+const _RT_KEY = '_rt_cfg_v1';     // localStorage key (no obvio)
 const _RT_PIN_KEY = '_rt_pin_v1';     // PIN hash key
-let   _rtUnlocked = false;             // sesión de admin activa (solo esta pestaña)
-let   _rtBuffer   = 0;                 // % reserva activa (0-30)
-let   _rtChannel  = null;              // canal Supabase Broadcast
+let _rtUnlocked = false;             // sesión de admin activa (solo esta pestaña)
+let _rtBuffer = 0;                 // % reserva activa (0-30)
+let _rtChannel = null;              // canal Supabase Broadcast
 
 // ── Usuarios con acceso al panel de Reserva Técnica ────────────────────────
 // Solo estos dos usuarios ven el candado 🔒
@@ -142,7 +142,7 @@ async function _rtLoadFromDB() {
       console.log('[RT] ✅ Buffer cargado desde Supabase:', pct + '%');
       return true;
     }
-  } catch {}
+  } catch { }
   // Fallback a localStorage si Supabase no responde
   try {
     const cfg = JSON.parse(localStorage.getItem(_RT_KEY) || '{}');
@@ -203,7 +203,7 @@ function _rtSubscribeRealtime() {
 
 
 // Cargar buffer guardado al inicializar el módulo (desde localStorage primero, luego Supabase)
-;(() => {
+; (() => {
   try {
     const cfg = JSON.parse(localStorage.getItem(_RT_KEY) || '{}');
     _rtBuffer = Math.min(30, Math.max(0, Number(cfg.pct || 0)));
@@ -224,7 +224,7 @@ const _rtApply = (real) => Math.max(0, Math.floor(real * (1 - _rtBuffer / 100)))
 /** Hash SHA-256 de texto → hex string */
 const _rtHash = async (text) => {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
-  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2,'0')).join('');
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
 };
 
 /** Verifica PIN contra el hash guardado */
@@ -350,7 +350,7 @@ async function _renderV2DetalleInner(container) {
         }
       });
       console.log('[v2-detalle] 🏗️ Pabellones cargados:', pabs.length, '| Edificios:', edifs.length);
-    } catch(ePab) {
+    } catch (ePab) {
       console.warn('[v2-detalle] ❌ Error fetch pabellones:', ePab.message);
     }
 
@@ -375,7 +375,7 @@ async function _renderV2DetalleInner(container) {
       } else {
         console.log('[v2-detalle] 🔧 Bloqueadas en DB: 0 (ninguna en mantención)', errBloq?.message || '');
       }
-    } catch(eBloq) {
+    } catch (eBloq) {
       console.warn('[v2-detalle] ❌ Error fetch bloqueadas:', eBloq.message);
     }
 
@@ -383,7 +383,7 @@ async function _renderV2DetalleInner(container) {
     try {
       distribucion = await fetchAll('v2_distribucion_camas', 'id_cama,tipo');
       console.log('[v2-detalle] ✅ distribucion cargada (fetchAll):', distribucion.length);
-    } catch(eDist) {
+    } catch (eDist) {
       // Fallback: query directa sin paginación
       try {
         const { data: distDirect, error: distDirectErr } = await supabase
@@ -396,7 +396,7 @@ async function _renderV2DetalleInner(container) {
           distribucion = distDirect || [];
           console.log('[v2-detalle] ✅ distribucion cargada (fallback):', distribucion.length);
         }
-      } catch(e2) {
+      } catch (e2) {
         console.warn('[v2-detalle] ❌ distribucion excepción:', e2.message);
       }
     }
@@ -592,7 +592,7 @@ async function _renderV2DetalleInner(container) {
 
     // Construir sets separados: Anglo-noche vs Noche-pura
     const camaAngloNocheSet = new Set();  // C2 de habs Anglo
-    const camaNochePuraSet  = new Set();  // TODAS las camas de habs etiqueta 'noche'
+    const camaNochePuraSet = new Set();  // TODAS las camas de habs etiqueta 'noche'
     camas.forEach(c => {
       if (habAngloIds.has(c.habitacion_id) && Number(c.numero_cama) === 2) {
         camaAngloNocheSet.add(String(c.id_cama));
@@ -605,9 +605,9 @@ async function _renderV2DetalleInner(container) {
 
     // Valores confirmados por BD (distribucion tiene 1122 filas pero RLS/GRANT bloquea fetch en app)
     const totalNocheAnglo = distribucion.length > 0 ? camaAngloNocheSet.size : 230;
-    const totalNochePura  = distribucion.length > 0 ? camaNochePuraSet.size  : 388;
+    const totalNochePura = distribucion.length > 0 ? camaNochePuraSet.size : 388;
     const totalCamasNoche = totalNocheAnglo + totalNochePura;
-    const totalCamasDia   = camas.length - totalCamasNoche;
+    const totalCamasDia = camas.length - totalCamasNoche;
 
     console.log('[v2-detalle] 🌙 NOCHE: Anglo C2=', totalNocheAnglo, '| Noche pura=', totalNochePura,
       '| total=', totalCamasNoche, '| día=', totalCamasDia);
@@ -658,7 +658,7 @@ async function _renderV2DetalleInner(container) {
     window._detReloadAll = async () => {
       try {
         await _renderV2DetalleInner(_container);
-      } catch(e) {
+      } catch (e) {
         console.error('[v2-detalle] Error al recargar:', e.message);
       }
     };
@@ -968,13 +968,13 @@ function renderShell(container) {
       <!-- Tabs -->
       <div id="det-tabs">
         ${[
-        { k: 'total',          icon: '🏨', lbl: 'Total' },
-        { k: 'ocupadas',       icon: '🔴', lbl: 'Ocupadas' },
-        { k: 'reserva',        icon: '📌', lbl: 'Reserva' },
-        { k: 'libre',          icon: '🟢', lbl: 'No Ocupado' },
-        { k: 'bloqueadas',     icon: '🔒', lbl: 'Bloqueadas' },
-        { k: 'camas_perdidas', icon: '🛏️', lbl: 'Camas Perdidas' },
-      ].map(t => `
+      { k: 'total', icon: '🏨', lbl: 'Total' },
+      { k: 'ocupadas', icon: '🔴', lbl: 'Ocupadas' },
+      { k: 'reserva', icon: '📌', lbl: 'Reserva' },
+      { k: 'libre', icon: '🟢', lbl: 'No Ocupado' },
+      { k: 'bloqueadas', icon: '🔒', lbl: 'Bloqueadas' },
+      { k: 'camas_perdidas', icon: '🛏️', lbl: 'Camas Perdidas' },
+    ].map(t => `
           <button class="det-tab ${_tab === t.k ? 'active' : ''}"
                   onclick="window._detSetTab('${t.k}')">
             ${t.icon} ${t.lbl}
@@ -1032,7 +1032,7 @@ function renderShell(container) {
   };
 
   // Filtros del tab No Ocupado (accesibles desde onclick en HTML generado)
-  window.v2DetSetPab  = (val) => { _libreFiltroPab  = val; };
+  window.v2DetSetPab = (val) => { _libreFiltroPab = val; };
   window.v2DetSetPiso = (val) => { _libreFiltroPiso = val; };
   window.__v2ReTab = () => {
     renderTab(document.getElementById('det-body')?.closest('#page-content') || document.body);
@@ -1047,11 +1047,11 @@ function renderTab(container) {
   if (!body || !_data) return;
 
   switch (_tab) {
-    case 'total':          body.innerHTML = renderTotal(); break;
-    case 'ocupadas':       body.innerHTML = renderOcupadas(); break;
-    case 'reserva':        body.innerHTML = renderReserva(); break;
-    case 'libre':          body.innerHTML = renderLibre(); break;
-    case 'bloqueadas':     body.innerHTML = renderBloqueadas(); break;
+    case 'total': body.innerHTML = renderTotal(); break;
+    case 'ocupadas': body.innerHTML = renderOcupadas(); break;
+    case 'reserva': body.innerHTML = renderReserva(); break;
+    case 'libre': body.innerHTML = renderLibre(); break;
+    case 'bloqueadas': body.innerHTML = renderBloqueadas(); break;
     case 'camas_perdidas': body.innerHTML = renderCamasPerdidas(); attachCPEvents(); _loadCPMotivos(); break;
   }
   if (_tab === 'total') renderChartTotal();
@@ -1064,30 +1064,30 @@ function renderTotal() {
   const { camas, camasCOPC, camasR220, camaById, habMap, engine } = _data;
 
   const total = camas.length;
-  const copc  = camasCOPC.length;
-  const r220  = camasR220.length;
+  const copc = camasCOPC.length;
+  const r220 = camasR220.length;
 
   // ── MOTOR UNIFICADO ──────────────────────────────────────────────────────
   // classifyAll() es la única fuente de verdad para TODA clasificación de camas.
   // Las mismas reglas aplican en renderLibre() y renderChartTotal().
   const r220IdSet = new Set(camasR220.map(c => String(c.id_cama)));
-  const cls       = classifyAll(camas, habMap, camaById, r220IdSet);
+  const cls = classifyAll(camas, habMap, camaById, r220IdSet);
 
   // Guardar para chart y búsqueda de habitación
-  _data._cls    = cls;
+  _data._cls = cls;
   _data._r220IdSet = r220IdSet;
 
   const pct = v => total > 0 ? Math.round(v / total * 100) : 0;
 
   // ── BALANCE LOGÍSTICO ────────────────────────────────────────────────────
-  const bal      = engine.getBalance();
-  const balOk    = bal.isBalanced;
+  const bal = engine.getBalance();
+  const balOk = bal.isBalanced;
   const balColor = balOk ? '#10b981' : '#f59e0b';
-  const balHTML  = `
-    <div style="background:${balOk?'rgba(16,185,129,.07)':'rgba(245,158,11,.07)'};
+  const balHTML = `
+    <div style="background:${balOk ? 'rgba(16,185,129,.07)' : 'rgba(245,158,11,.07)'};
                 border:1.5px solid ${balColor};border-radius:14px;padding:14px 18px;margin-bottom:18px">
       <div style="font-size:11px;font-weight:800;color:${balColor};text-transform:uppercase;
-                  letter-spacing:.06em;margin-bottom:8px">${balOk?'✅':'⚠️'} Ecuación de Balance Logístico</div>
+                  letter-spacing:.06em;margin-bottom:8px">${balOk ? '✅' : '⚠️'} Ecuación de Balance Logístico</div>
       <div style="font-size:13px;font-weight:700;color:var(--text-primary);line-height:2">
         <strong style="font-size:22px;color:${balColor}">${bal.total.toLocaleString('es-CL')}</strong>
         <span style="color:var(--text-muted)"> camas =</span>
@@ -1106,29 +1106,29 @@ function renderTotal() {
                 padding:14px 18px;margin-bottom:18px">
       <div style="font-size:12px;font-weight:800;color:#ef4444;text-transform:uppercase;
                   letter-spacing:.06em;margin-bottom:8px">
-        ⛔ ${cls.noClasif.length} cama${cls.noClasif.length!==1?'s':''} SIN REGLA — No Clasificada${cls.noClasif.length!==1?'s':''}
+        ⛔ ${cls.noClasif.length} cama${cls.noClasif.length !== 1 ? 's' : ''} SIN REGLA — No Clasificada${cls.noClasif.length !== 1 ? 's' : ''}
       </div>
       <div style="font-size:11px;color:#fca5a5;margin-bottom:8px">
         Estas camas no entran en ninguna regla de infraestructura. Revisar número de habitación en la fuente de datos.
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:5px;max-height:120px;overflow-y:auto">
         ${cls.noClasif.slice(0, 60).map(nc =>
-          `<span style="padding:2px 8px;background:rgba(239,68,68,.15);border:1px solid #ef444440;
+    `<span style="padding:2px 8px;background:rgba(239,68,68,.15);border:1px solid #ef444440;
                         border-radius:16px;font-size:10px;font-weight:700;color:#ef4444">
             Hab.${nc.numHab || '?'} C${nc.numCama}
            </span>`
-        ).join('')}
-        ${cls.noClasif.length > 60 ? `<span style="font-size:10px;color:#ef4444">…y ${cls.noClasif.length-60} más</span>` : ''}
+  ).join('')}
+        ${cls.noClasif.length > 60 ? `<span style="font-size:10px;color:#ef4444">…y ${cls.noClasif.length - 60} más</span>` : ''}
       </div>
     </div>`;
 
   // ── TABLA DIAGNÓSTICO POR PABELLÓN ───────────────────────────────────────
   const catLabel = {
-    [CAT.ANGLO_DIA]:   '☀️ Anglo Día',
+    [CAT.ANGLO_DIA]: '☀️ Anglo Día',
     [CAT.ANGLO_NOCHE]: '🌙 Anglo Noche',
-    [CAT.DIA]:         '☀️ Día',
-    [CAT.ESSE_NOCHE]:  '🌙 ESSE Noche',
-    [CAT.NO_CLASIF]:   '⛔ No Clasif.',
+    [CAT.DIA]: '☀️ Día',
+    [CAT.ESSE_NOCHE]: '🌙 ESSE Noche',
+    [CAT.NO_CLASIF]: '⛔ No Clasif.',
   };
   const diagRows = Object.values(cls.porPab)
     .sort((a, b) => a.pabNum - b.pabNum)
@@ -1139,10 +1139,10 @@ function renderTotal() {
           <span style="background:${p.ruleColor}18;border:1px solid ${p.ruleColor}55;border-radius:8px;
                        padding:2px 8px;font-size:10px;font-weight:700;color:${p.ruleColor}">${p.ruleId}: ${p.ruleLabel}</span>
         </td>
-        <td style="padding:7px 10px;text-align:right;font-weight:700;color:#d97706">${p.angloDia||'—'}</td>
-        <td style="padding:7px 10px;text-align:right;font-weight:700;color:#6366f1">${p.angloNoche||'—'}</td>
-        <td style="padding:7px 10px;text-align:right;font-weight:700;color:#059669">${p.dia||'—'}</td>
-        <td style="padding:7px 10px;text-align:right;font-weight:700;color:#7c3aed">${p.esseNoche||'—'}</td>
+        <td style="padding:7px 10px;text-align:right;font-weight:700;color:#d97706">${p.angloDia || '—'}</td>
+        <td style="padding:7px 10px;text-align:right;font-weight:700;color:#6366f1">${p.angloNoche || '—'}</td>
+        <td style="padding:7px 10px;text-align:right;font-weight:700;color:#059669">${p.dia || '—'}</td>
+        <td style="padding:7px 10px;text-align:right;font-weight:700;color:#7c3aed">${p.esseNoche || '—'}</td>
         ${p.noClasif ? `<td style="padding:7px 10px;text-align:right;font-weight:700;color:#ef4444">${p.noClasif}</td>` : '<td style="padding:7px 10px"></td>'}
         <td style="padding:7px 10px;text-align:right;font-weight:700;color:var(--text-muted)">${p.total.toLocaleString('es-CL')}</td>
       </tr>`).join('');
@@ -1236,20 +1236,20 @@ function renderTotal() {
 
   // Guardar clasificados para que renderChartTotal() los use
   _data._totalClasif = {
-    angloDia:   cls.angloDia,
+    angloDia: cls.angloDia,
     angloNoche: cls.angloNoche,
     totalAnglo: cls.totalAnglo,
-    esseDia:    cls.dia,
-    esseNoche:  cls.esseNoche,
-    totalESSE:  cls.totalESSE,
-    totalDia:   cls.angloDia + cls.dia,
+    esseDia: cls.dia,
+    esseNoche: cls.esseNoche,
+    totalESSE: cls.totalESSE,
+    totalDia: cls.angloDia + cls.dia,
     totalNoche: cls.totalNoche,
   };
 
   // Registrar función de búsqueda de habitación en window
   window._detAuditBuscar = (val) => {
-    const n     = parseInt(val || '0', 10);
-    const el    = document.getElementById('det-audit-result');
+    const n = parseInt(val || '0', 10);
+    const el = document.getElementById('det-audit-result');
     if (!el) return;
     if (!n) { el.innerHTML = '<span style="color:var(--text-muted);font-style:italic">Ingresa un número de habitación.</span>'; return; }
     const isR220local = false; // El usuario ingresa número de hab COPC; R220 se detecta por prefijo
@@ -1271,13 +1271,13 @@ function renderTotal() {
 
   return `
     ${kpiRow([
-      { icon: '🛏️', val: total,          lbl: 'Total Camas',    color: '#6366f1' },
-      { icon: '🏢', val: copc,           lbl: 'Camas COPC',     color: '#6366f1' },
-      { icon: '🏗️', val: r220,           lbl: 'Camas REF 220',  color: '#0ea5e9' },
-      { icon: '☀️', val: cls.angloDia + cls.dia,  lbl: 'Total Día',  color: '#f59e0b' },
-      { icon: '🤝', val: cls.angloNoche, lbl: 'Noche Anglo',    color: '#d97706' },
-      { icon: '🌙', val: cls.esseNoche,  lbl: 'Noche ESSE',     color: '#4338ca' },
-    ])}
+    { icon: '🛏️', val: total, lbl: 'Total Camas', color: '#6366f1' },
+    { icon: '🏢', val: copc, lbl: 'Camas COPC', color: '#6366f1' },
+    { icon: '🏗️', val: r220, lbl: 'Camas REF 220', color: '#0ea5e9' },
+    { icon: '☀️', val: cls.angloDia + cls.dia, lbl: 'Total Día', color: '#f59e0b' },
+    { icon: '🤝', val: cls.angloNoche, lbl: 'Noche Anglo', color: '#d97706' },
+    { icon: '🌙', val: cls.esseNoche, lbl: 'Noche ESSE', color: '#4338ca' },
+  ])}
 
     <!-- Anglo vs ESSE resumen -->
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:18px">
@@ -1333,10 +1333,10 @@ function renderTotal() {
         <div style="margin-top:18px;font-size:15px;font-weight:900;color:var(--text-primary);margin-bottom:14px">
           Anglo vs ESSE (Día / Noche)
         </div>
-        ${sectorBar('☀️ Anglo Día (C1)',        cls.angloDia,   total, '#d97706', pct(cls.angloDia))}
-        ${sectorBar('🌙 Anglo Noche (C2)',       cls.angloNoche, total, '#6366f1', pct(cls.angloNoche))}
-        ${sectorBar('☀️ ESSE Día',              cls.dia,        total, '#059669', pct(cls.dia))}
-        ${sectorBar('🌙 ESSE Noche (Pab7)', cls.esseNoche,  total, '#7c3aed', pct(cls.esseNoche))}
+        ${sectorBar('☀️ Anglo Día (C1)', cls.angloDia, total, '#d97706', pct(cls.angloDia))}
+        ${sectorBar('🌙 Anglo Noche (C2)', cls.angloNoche, total, '#6366f1', pct(cls.angloNoche))}
+        ${sectorBar('☀️ ESSE Día', cls.dia, total, '#059669', pct(cls.dia))}
+        ${sectorBar('🌙 ESSE Noche (Pab7)', cls.esseNoche, total, '#7c3aed', pct(cls.esseNoche))}
       </div>
     </div>
 
@@ -1368,8 +1368,8 @@ function renderOcupadas() {
     porEmpresa, porGerencia, porSup, porTurno,
     todasEmpresas, todasSups,
   } = engine.getOcupadas({
-    turno:            _turnoFiltro,
-    empresa:          _empresaFiltro,
+    turno: _turnoFiltro,
+    empresa: _empresaFiltro,
     superintendencia: _supFiltro,
   });
 
@@ -1538,25 +1538,25 @@ function renderOcupadas() {
   window._supFiltroFn = (s) => { _supFiltro = s; renderTab(); };
 
   // Calcular RT para distribuir proporcionalmente entre sub-KPIs
-  const _ocBal      = engine.getBalance();
-  const _ocReal     = _ocBal.libres;
-  const _ocDisp     = _rtApply(_ocReal);
-  const _ocRtCount  = _ocReal - _ocDisp; // total buffer oculto
+  const _ocBal = engine.getBalance();
+  const _ocReal = _ocBal.libres;
+  const _ocDisp = _rtApply(_ocReal);
+  const _ocRtCount = _ocReal - _ocDisp; // total buffer oculto
   const _ocRtActivo = _ocRtCount > 0;
 
   // Distribución proporcional del buffer entre los 3 sub-bloques
   // → garantiza que COPC + R220 + Noche = Total mostrado exacto
   const _ocSubTotal = kpiCOPC + kpiR220 + kpiNoche || 1;
-  const _rtCOPC  = _ocRtActivo ? Math.round(_ocRtCount * kpiCOPC  / _ocSubTotal) : 0;
-  const _rtR220  = _ocRtActivo ? Math.round(_ocRtCount * kpiR220  / _ocSubTotal) : 0;
+  const _rtCOPC = _ocRtActivo ? Math.round(_ocRtCount * kpiCOPC / _ocSubTotal) : 0;
+  const _rtR220 = _ocRtActivo ? Math.round(_ocRtCount * kpiR220 / _ocSubTotal) : 0;
   const _rtNoche = _ocRtActivo ? (_ocRtCount - _rtCOPC - _rtR220) : 0; // resto al último → suma exacta
 
   return `
     ${kpiRow([
     { icon: '🔴', val: kpiTotal + (_ocRtActivo ? _ocRtCount : 0), lbl: 'Total Ocupadas', color: '#ef4444' },
-    { icon: '🏢', val: kpiCOPC  + _rtCOPC,  lbl: 'Camas COPC (Día)',  color: '#6366f1' },
-    { icon: '🏗️', val: kpiR220  + _rtR220,  lbl: 'Camas REF 220',     color: '#0ea5e9' },
-    { icon: '🌙', val: kpiNoche + _rtNoche,  lbl: 'Camas Noche COPC', color: '#4338ca' },
+    { icon: '🏢', val: kpiCOPC + _rtCOPC, lbl: 'Camas COPC (Día)', color: '#6366f1' },
+    { icon: '🏗️', val: kpiR220 + _rtR220, lbl: 'Camas REF 220', color: '#0ea5e9' },
+    { icon: '🌙', val: kpiNoche + _rtNoche, lbl: 'Camas Noche COPC', color: '#4338ca' },
   ])}
 
 
@@ -1612,8 +1612,8 @@ function renderReserva() {
     porEmpresa, porGerencia, porSup, porTurno,
     todasEmpresas, todasSups,
   } = engine.getReservas({
-    turno:            _turnoFiltro,
-    empresa:          _empresaFiltro,
+    turno: _turnoFiltro,
+    empresa: _empresaFiltro,
     superintendencia: _supFiltro,
   });
 
@@ -1819,16 +1819,16 @@ function renderLibre() {
   // ── FUENTE ÚNICA: engine.getBalance() garantiza que los números cuadren ──
   // FÓRMULA: Total = Ocupadas + Reservas + Libres + Bloqueadas
   // renderLibre DEBE usar exactamente las mismas camasLibres del engine.
-  const engineData  = _data.engine._p;
+  const engineData = _data.engine._p;
   const camasLibres = engineData.camasLibres;   // ya filtradas: -ocup -pre -bloqueadas
   const { activas, reservas } = engineData;     // para mostrar quién ya está en la hab
   const { distEmpMap, habMap, habAngloIds, habNocheIds, camaById,
-          camasR220 } = _data;
+    camasR220 } = _data;
 
   // Set de id_cama de REF 220 para lookup O(1)
-  const r220IdSet  = new Set(camasR220.map(c => String(c.id_cama)));
-  const libresAll  = camasLibres;
-  const libresR220 = camasLibres.filter(c =>  r220IdSet.has(String(c.id_cama)));
+  const r220IdSet = new Set(camasR220.map(c => String(c.id_cama)));
+  const libresAll = camasLibres;
+  const libresR220 = camasLibres.filter(c => r220IdSet.has(String(c.id_cama)));
   const libresCOPC = camasLibres.filter(c => !r220IdSet.has(String(c.id_cama)));
 
   // ── MAPA DE OCUPANTES POR HABITACIÓN ────────────────────────────────────
@@ -1837,14 +1837,14 @@ function renderLibre() {
   const habOcupantesMap = {};   // { habId: [{ nombre, empresa, numCama, tipo }] }
 
   const _addOcupante = (asig, tipo) => {
-    const rec    = camaById?.[String(asig.id_cama)] || asig;
-    const habId  = String(rec.habitacion_id || asig.habitacion_id || '');
+    const rec = camaById?.[String(asig.id_cama)] || asig;
+    const habId = String(rec.habitacion_id || asig.habitacion_id || '');
     if (!habId) return;
     if (!habOcupantesMap[habId]) habOcupantesMap[habId] = [];
     habOcupantesMap[habId].push({
-      nombre:   asig.nombre_huesped || '—',
-      empresa:  asig._empresa       || '—',
-      numCama:  Number(rec.numero_cama || asig.numero_cama || 0),
+      nombre: asig.nombre_huesped || '—',
+      empresa: asig._empresa || '—',
+      numCama: Number(rec.numero_cama || asig.numero_cama || 0),
       tipo,   // 'ocupada' | 'reservada'
     });
   };
@@ -1859,51 +1859,51 @@ function renderLibre() {
   const clsLibres = classifyAll(libresAll, habMap, camaById, r220IdSet);
 
   // Listas por categoría (para chips y display)
-  const libresAngloDia   = [];
+  const libresAngloDia = [];
   const libresAngloNoche = [];
-  const libresESSEDia    = [];
-  const libresESSENoche  = [];
-  const libresNoClasif   = [];
+  const libresESSEDia = [];
+  const libresESSENoche = [];
+  const libresNoClasif = [];
 
   libresAll.forEach(c => {
     if (/deshabiit|deshabilit/i.test(c.estado || '')) return;
-    const rec      = camaById?.[String(c.id_cama)] || c;
-    const habId    = rec.habitacion_id || c.habitacion_id || '';
-    const numCama  = Number(rec.numero_cama || c.numero_cama || 0);
-    const numHab   = numHabInt(habId, c.id_cama, habMap);
+    const rec = camaById?.[String(c.id_cama)] || c;
+    const habId = rec.habitacion_id || c.habitacion_id || '';
+    const numCama = Number(rec.numero_cama || c.numero_cama || 0);
+    const numHab = numHabInt(habId, c.id_cama, habMap);
     const r220flag = r220IdSet.has(String(c.id_cama));
-    const { cat }  = classifyBed(numHab, numCama, r220flag);
+    const { cat } = classifyBed(numHab, numCama, r220flag);
 
-    if      (cat === CAT.ANGLO_DIA)   libresAngloDia.push(c);
+    if (cat === CAT.ANGLO_DIA) libresAngloDia.push(c);
     else if (cat === CAT.ANGLO_NOCHE) libresAngloNoche.push(c);
-    else if (cat === CAT.DIA)         libresESSEDia.push(c);
-    else if (cat === CAT.ESSE_NOCHE)  libresESSENoche.push(c);
-    else                               libresNoClasif.push(c);
+    else if (cat === CAT.DIA) libresESSEDia.push(c);
+    else if (cat === CAT.ESSE_NOCHE) libresESSENoche.push(c);
+    else libresNoClasif.push(c);
   });
 
   // Compatibilidad con código heredado que usa estas variables
-  const libresEECC      = [...libresESSEDia, ...libresESSENoche];
-  const libresEECCDia   = libresESSEDia;
+  const libresEECC = [...libresESSEDia, ...libresESSENoche];
+  const libresEECCDia = libresESSEDia;
   const libresEECCNoche = libresESSENoche;
 
   // ── CÁLCULO DE BUFFER A NIVEL FUNCIÓN ────────────────────────────────────
   // Calculado UNA SOLA VEZ aquí para que sea consistente en toda la página.
   // Todos los bloques HTML usan estas variables, no los .length crudos.
-  const _rtReal  = libresAll.length;
-  const _rtDisp  = _rtApply(_rtReal);          // total visible con buffer
+  const _rtReal = libresAll.length;
+  const _rtDisp = _rtApply(_rtReal);          // total visible con buffer
   const _rtCount = _rtReal - _rtDisp;          // camas ocultas (Reserva Técnica)
   const _rtRatio = _rtReal > 0 ? _rtDisp / _rtReal : 1;  // 0.70 si buffer=30%
   const _rtActivo = _rtBuffer > 0;
 
   // Subcategorías con buffer aplicado proporcionalmente
-  const dispAngloDia   = Math.floor(libresAngloDia.length   * _rtRatio);
+  const dispAngloDia = Math.floor(libresAngloDia.length * _rtRatio);
   const dispAngloNoche = Math.floor(libresAngloNoche.length * _rtRatio);
-  const dispESSEDia    = Math.floor(libresESSEDia.length    * _rtRatio);
-  const dispESSENoche  = Math.floor(libresESSENoche.length  * _rtRatio);
-  const dispEECCDia    = dispESSEDia;
-  const dispEECCNoche  = dispESSENoche;
+  const dispESSEDia = Math.floor(libresESSEDia.length * _rtRatio);
+  const dispESSENoche = Math.floor(libresESSENoche.length * _rtRatio);
+  const dispEECCDia = dispESSEDia;
+  const dispEECCNoche = dispESSENoche;
   const dispAngloTotal = dispAngloDia + dispAngloNoche;
-  const dispEECCTotal  = dispESSEDia  + dispESSENoche;
+  const dispEECCTotal = dispESSEDia + dispESSENoche;
 
   // Helper: dado un array de camas, devuelve cuántas mostrar (con buffer proporcional)
   const _dispN = (arr) => Math.floor(arr.length * _rtRatio);
@@ -1950,7 +1950,7 @@ function renderLibre() {
 
       // Pbellón y piso: extraer de numero_hab (formato PPFF, ej: 1302 → P1, Piso 3)
       const pabellon = _extraerPabellon(numHab);
-      const piso     = _extraerPiso(numHab);
+      const piso = _extraerPiso(numHab);
 
       grupoHabs[hid] = {
         numHab, pabellon, piso, camas: [], empresa: null,
@@ -2023,7 +2023,7 @@ function renderLibre() {
     // ── Puntos de cama (BED DOTS) ─────────────────────────────────────────────
     // Primero los ocupantes (camas ocupadas/reservadas)
     const ocupDots = ocupantes.map(o => {
-      const cls   = o.tipo === 'ocupada' ? 'bed-dot--occupied' : 'bed-dot--reserved';
+      const cls = o.tipo === 'ocupada' ? 'bed-dot--occupied' : 'bed-dot--reserved';
       const label = o.tipo === 'ocupada' ? '🔴' : '📌';
       const title = `C${o.numCama} — ${o.nombre} (${o.empresa})`;
       return `<span class="bed-dot ${cls}" title="${title}">C${o.numCama}</span>`;
@@ -2037,9 +2037,9 @@ function renderLibre() {
 
     // Resumen de la card
     const totalCamasHab = g.camas.length + ocupantes.length;
-    const libresCount   = g.camas.length;
-    const occCount      = ocupantes.filter(o => o.tipo === 'ocupada').length;
-    const resCount      = ocupantes.filter(o => o.tipo === 'reservada').length;
+    const libresCount = g.camas.length;
+    const occCount = ocupantes.filter(o => o.tipo === 'ocupada').length;
+    const resCount = ocupantes.filter(o => o.tipo === 'reservada').length;
 
     // Info de ocupantes para mostrar
     const ocupantesHTML = ocupantes.length === 0 ? '' : `
@@ -2047,13 +2047,13 @@ function renderLibre() {
                   background:rgba(239,68,68,.06);border:1px solid rgba(239,68,68,.2);
                   border-radius:8px;border-left:3px solid #ef4444">
         ${ocupantes.map(o => {
-          const tipoColor = o.tipo === 'ocupada' ? '#ef4444' : '#8b5cf6';
-          const tipoIcon  = o.tipo === 'ocupada' ? '🔴' : '📌';
-          const nombreDisplay = o.nombre.length > 22 ? o.nombre.slice(0,22)+'…' : o.nombre;
-          const empresaDisplay = (o.empresa && o.empresa !== '—')
-            ? (o.empresa.length > 22 ? o.empresa.slice(0,22)+'…' : o.empresa)
-            : null;
-          return `<div style="display:flex;align-items:flex-start;gap:5px;margin-bottom:4px">
+      const tipoColor = o.tipo === 'ocupada' ? '#ef4444' : '#8b5cf6';
+      const tipoIcon = o.tipo === 'ocupada' ? '🔴' : '📌';
+      const nombreDisplay = o.nombre.length > 22 ? o.nombre.slice(0, 22) + '…' : o.nombre;
+      const empresaDisplay = (o.empresa && o.empresa !== '—')
+        ? (o.empresa.length > 22 ? o.empresa.slice(0, 22) + '…' : o.empresa)
+        : null;
+      return `<div style="display:flex;align-items:flex-start;gap:5px;margin-bottom:4px">
             <span style="font-size:10px;flex-shrink:0;margin-top:1px">${tipoIcon}</span>
             <div style="display:flex;flex-direction:column;gap:1px;overflow:hidden;min-width:0">
               <span style="font-size:10px;font-weight:700;color:var(--text);
@@ -2064,7 +2064,7 @@ function renderLibre() {
                     title="${o.empresa}">🏢 ${empresaDisplay}</span>` : ''}
             </div>
           </div>`;
-        }).join('')}
+    }).join('')}
       </div>`;
 
     return `<div class="det-hab-card" style="border-color:${borderColor}">
@@ -2083,7 +2083,7 @@ function renderLibre() {
         <span class="bed-dot-lbl">${libresCount} libre${libresCount !== 1 ? 's' : ''}</span>
       </div>
 
-      ${g.empresa ? `<div class="det-hab-emp">🏢 Retenida: ${g.empresa.length > 20 ? g.empresa.slice(0,20)+'…' : g.empresa}</div>` : ''}
+      ${g.empresa ? `<div class="det-hab-emp">🏢 Retenida: ${g.empresa.length > 20 ? g.empresa.slice(0, 20) + '…' : g.empresa}</div>` : ''}
       ${ocupantesHTML}
     </div>`;
   };
@@ -2092,8 +2092,8 @@ function renderLibre() {
     .sort(([a], [b]) => parseInt(a.replace(/\D/g, '')) - parseInt(b.replace(/\D/g, '')))
     .map(([piso, habs]) => {
       const totalCamasReal = habs.reduce((s, g) => s + g.camas.length, 0);
-      const totalCamas     = Math.floor(totalCamasReal * _rtRatio);
-      const totalHabs      = Math.floor(habs.length    * _rtRatio);
+      const totalCamas = Math.floor(totalCamasReal * _rtRatio);
+      const totalHabs = Math.floor(habs.length * _rtRatio);
       const pabsEnPiso = [...new Set(habs.map(g => g.pabellon))].filter(p => p !== '?').sort().join(' · ');
       return `
         <div class="piso-section" style="margin-bottom:20px">
@@ -2112,15 +2112,15 @@ function renderLibre() {
   return `
     <!-- ══ BANNER CRÍTICO: DISPONIBILIDAD REAL ══ -->
     ${(() => {
-      const bal     = _data.engine.getBalance();
+      const bal = _data.engine.getBalance();
       // Usar variables pre-calculadas a nivel función (buffer ya aplicado)
-      const real     = _rtReal;
-      const disp     = _rtDisp;
+      const real = _rtReal;
+      const disp = _rtDisp;
       const rtActivo = _rtActivo;
-      const dAngloDia   = dispAngloDia;
+      const dAngloDia = dispAngloDia;
       const dAngloNoche = dispAngloNoche;
-      const dESSEDia    = dispESSEDia;
-      const dESSENoche  = dispESSENoche;
+      const dESSEDia = dispESSEDia;
+      const dESSENoche = dispESSENoche;
       const ahora = new Date().toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
       return `
@@ -2342,19 +2342,19 @@ function renderLibre() {
           🌙 Anglo — Camas Noche Libres (${dispAngloNoche})
         </div>
         ${libresAngloNoche.length === 0
-          ? `<div style="font-size:12px;color:var(--text-muted);text-align:center;padding:8px">
+      ? `<div style="font-size:12px;color:var(--text-muted);text-align:center;padding:8px">
                ✅ Ninguna cama noche Anglo libre
              </div>`
-          : `<div style="display:flex;flex-wrap:wrap;gap:5px;max-height:160px;overflow-y:auto">
+      : `<div style="display:flex;flex-wrap:wrap;gap:5px;max-height:160px;overflow-y:auto">
               ${libresAngloNoche.map(c => {
-                const habId  = (camaById?.[String(c.id_cama)] || c).habitacion_id || c.habitacion_id;
-                const numHab = habMap[String(habId || '')]?.numero_hab;
-                const label  = numHab ? `Hab.${numHab}` : String(c.id_cama).replace(/^COPC0*/i,'').replace(/-C\d+$/i,'');
-                return `<span style="padding:3px 8px;background:rgba(99,102,241,.12);border:1px solid rgba(99,102,241,.3);
+        const habId = (camaById?.[String(c.id_cama)] || c).habitacion_id || c.habitacion_id;
+        const numHab = habMap[String(habId || '')]?.numero_hab;
+        const label = numHab ? `Hab.${numHab}` : String(c.id_cama).replace(/^COPC0*/i, '').replace(/-C\d+$/i, '');
+        return `<span style="padding:3px 8px;background:rgba(99,102,241,.12);border:1px solid rgba(99,102,241,.3);
                                 border-radius:20px;font-size:10px;font-weight:700;color:#6366f1">${label}</span>`;
-              }).join('')}
+      }).join('')}
              </div>`
-        }
+    }
       </div>
 
       <!-- ESSE NOCHE LIBRE -->
@@ -2364,19 +2364,19 @@ function renderLibre() {
           🌙 ESSE — Camas Noche Libres (${dispEECCNoche})
         </div>
         ${libresEECCNoche.length === 0
-          ? `<div style="font-size:12px;color:var(--text-muted);text-align:center;padding:8px">
+      ? `<div style="font-size:12px;color:var(--text-muted);text-align:center;padding:8px">
                ✅ Ninguna cama noche ESSE libre
              </div>`
-          : `<div style="display:flex;flex-wrap:wrap;gap:5px;max-height:160px;overflow-y:auto">
+      : `<div style="display:flex;flex-wrap:wrap;gap:5px;max-height:160px;overflow-y:auto">
               ${libresEECCNoche.map(c => {
-                const habId  = (camaById?.[String(c.id_cama)] || c).habitacion_id || c.habitacion_id;
-                const numHab = habMap[String(habId || '')]?.numero_hab;
-                const label  = numHab ? `Hab.${numHab}` : String(c.id_cama).replace(/^COPC0*/i,'').replace(/-C\d+$/i,'');
-                return `<span style="padding:3px 8px;background:rgba(124,58,237,.12);border:1px solid rgba(124,58,237,.3);
+        const habId = (camaById?.[String(c.id_cama)] || c).habitacion_id || c.habitacion_id;
+        const numHab = habMap[String(habId || '')]?.numero_hab;
+        const label = numHab ? `Hab.${numHab}` : String(c.id_cama).replace(/^COPC0*/i, '').replace(/-C\d+$/i, '');
+        return `<span style="padding:3px 8px;background:rgba(124,58,237,.12);border:1px solid rgba(124,58,237,.3);
                                 border-radius:20px;font-size:10px;font-weight:700;color:#7c3aed">${label}</span>`;
-              }).join('')}
+      }).join('')}
              </div>`
-        }
+    }
       </div>
 
     </div>
@@ -2430,7 +2430,7 @@ function renderBloqueadas() {
   // Diagnóstico: ver qué contiene habitacionesAll
   console.log('[Bloq] habitacionesAll:', habitacionesAll.length,
     '| en_mantencion=true:', habitacionesAll.filter(h => h.en_mantencion === true).length,
-    '| estado manten:', habitacionesAll.filter(h => /manten/i.test(h.estado||'')).length,
+    '| estado manten:', habitacionesAll.filter(h => /manten/i.test(h.estado || '')).length,
     '| bloqAll:', bloqAll.length);
   if (bloqAll.length > 0) {
     console.log('[Bloq] Primera bloqueada:', JSON.stringify(bloqAll[0]));
@@ -2473,7 +2473,7 @@ function renderBloqueadas() {
   return `
     ${kpiRow([
     { icon: '🔒', val: bloqAll.length, lbl: 'Total Bloqueadas', color: '#f59e0b' },
-    { icon: '🏢', val: bloqCOPC.length, lbl: 'BLOQUEADAS EN REPARACIÓN', color: '#6366f1' },
+    { icon: '🏢', val: bloqCOPC.length, lbl: 'EN REPARACIÓN', color: '#6366f1' },
     { icon: '🏗️', val: bloqR220.length, lbl: 'REF 220 BLOQUEADAS EN REPARACIÓN', color: '#0ea5e9' },
     { icon: '🔧', val: bloqAll.filter(h => /reparac/i.test(h.estado || '')).length, lbl: 'BODEGAS', color: '#ef4444' },
     { icon: '🛠️', val: bloqAll.filter(h => /manten/i.test(h.estado || '') || h.en_mantencion === true).length, lbl: 'En Mantención', color: '#f59e0b' },
@@ -2512,7 +2512,7 @@ function _cpDetectar() {
     const hab = habMap[habId] || {};
     if (!hab.numero_hab) return;
 
-    const nTotal    = cs.length;
+    const nTotal = cs.length;
     const camasOcup = cs.filter(c => c.estado === 'Ocupada' || !!asigMap[String(c.id_cama)]);
     const nOcupadas = camasOcup.length;
 
@@ -2522,8 +2522,8 @@ function _cpDetectar() {
     const pabellon = hab.pabellon || hab.v2_pabellones?.nombre || '—';
 
     // BLOQUEADA: empresa dice "bloqueada" O habitación en mantención
-    const esBloqueo = ['bloqueada','bloqueado'].some(w => empresa.toLowerCase().includes(w));
-    const esManten  = hab.en_mantencion === true;
+    const esBloqueo = ['bloqueada', 'bloqueado'].some(w => empresa.toLowerCase().includes(w));
+    const esManten = hab.en_mantencion === true;
 
     if (esBloqueo || esManten) {
       perdidas.push({
@@ -2563,20 +2563,20 @@ function renderCamasPerdidas() {
     : '—';
 
   // KPIs globales
-  const total  = perdidas.reduce((s, p) => s + p.camas_perdidas, 0);
-  const nBloq  = perdidas.filter(p => p.tipo === 'BLOQUEADA').length;
-  const nParc  = perdidas.filter(p => p.tipo === 'OCUPACION PARCIAL').length;
+  const total = perdidas.reduce((s, p) => s + p.camas_perdidas, 0);
+  const nBloq = perdidas.filter(p => p.tipo === 'BLOQUEADA').length;
+  const nParc = perdidas.filter(p => p.tipo === 'OCUPACION PARCIAL').length;
 
   // ── Anglo vs ESSE (ESSE = todas las empresas que NO son Anglo) ────────────
   const perdidasAnglo = perdidas
     .filter(p => /anglo/i.test(p.empresa))
     .reduce((s, p) => s + p.camas_perdidas, 0);
-  const perdidasEsse  = perdidas
+  const perdidasEsse = perdidas
     .filter(p => !/anglo/i.test(p.empresa))   // Todo lo que NO es Anglo
     .reduce((s, p) => s + p.camas_perdidas, 0);
   const pct = (n) => total > 0 ? Math.round(n / total * 1000) / 10 : 0;
   const pctAnglo = pct(perdidasAnglo);
-  const pctEsse  = pct(perdidasEsse);
+  const pctEsse = pct(perdidasEsse);
 
 
   // Agrupación por empresa (ordenada por total descendente)
@@ -2616,12 +2616,12 @@ function renderCamasPerdidas() {
           <div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:4px">
             <span style="font-size:11px;font-weight:700;color:#ef4444;
                          background:rgba(239,68,68,.12);padding:2px 7px;border-radius:99px">
-              🛏️ ${g.perdidas} cama${g.perdidas>1?'s':''} perdida${g.perdidas>1?'s':''}
+              🛏️ ${g.perdidas} cama${g.perdidas > 1 ? 's' : ''} perdida${g.perdidas > 1 ? 's' : ''}
             </span>
-            ${bloqCount>0?`<span style="font-size:11px;font-weight:700;color:#f59e0b;
-              background:rgba(245,158,11,.12);padding:2px 7px;border-radius:99px">🔒 ${bloqCount} bloq.</span>`:''}
-            ${parcCount>0?`<span style="font-size:11px;font-weight:700;color:#8b5cf6;
-              background:rgba(139,92,246,.12);padding:2px 7px;border-radius:99px">🟡 ${parcCount} parc.</span>`:''}
+            ${bloqCount > 0 ? `<span style="font-size:11px;font-weight:700;color:#f59e0b;
+              background:rgba(245,158,11,.12);padding:2px 7px;border-radius:99px">🔒 ${bloqCount} bloq.</span>` : ''}
+            ${parcCount > 0 ? `<span style="font-size:11px;font-weight:700;color:#8b5cf6;
+              background:rgba(139,92,246,.12);padding:2px 7px;border-radius:99px">🟡 ${parcCount} parc.</span>` : ''}
           </div>
         </div>
         <span id="arr-${safeId}" style="font-size:20px;color:#64748b;flex-shrink:0;transition:transform .25s">›</span>
@@ -2636,31 +2636,32 @@ function renderCamasPerdidas() {
             </tr></thead>
             <tbody>
               ${g.items.map(p => {
-                const esBloq = p.tipo === 'BLOQUEADA';
-                const tagColor = esBloq ? '#ef4444' : '#f59e0b';
-                const tagBg    = esBloq ? 'rgba(239,68,68,.12)' : 'rgba(245,158,11,.12)';
-                // Leer motivo desde caché
-                const mReg = _cpMotivos[p.habId];
-                const motivoLbl = mReg
-                  ? (mReg.motivo === 'sin_motivo' || !mReg.motivo ? '—'
-                    : mReg.motivo === 'otros' ? (mReg.motivo_texto || 'Otro')
-                    : { acuerdo_anglo:'Acuerdo Anglo', impar_mujer:'Impar Mujer',
-                        impar_hombre:'Impar Hombre', motivos_medicos:'Motivos Médicos',
-                        motivos_personales:'Motivos Personales'
-                      }[mReg.motivo] || mReg.motivo)
-                  : '<span style="color:#475569;font-size:11px">Sin registro</span>';
-                return `<tr>
+      const esBloq = p.tipo === 'BLOQUEADA';
+      const tagColor = esBloq ? '#ef4444' : '#f59e0b';
+      const tagBg = esBloq ? 'rgba(239,68,68,.12)' : 'rgba(245,158,11,.12)';
+      // Leer motivo desde caché
+      const mReg = _cpMotivos[p.habId];
+      const motivoLbl = mReg
+        ? (mReg.motivo === 'sin_motivo' || !mReg.motivo ? '—'
+          : mReg.motivo === 'otros' ? (mReg.motivo_texto || 'Otro')
+            : {
+              acuerdo_anglo: 'Acuerdo Anglo', impar_mujer: 'Impar Mujer',
+              impar_hombre: 'Impar Hombre', motivos_medicos: 'Motivos Médicos',
+              motivos_personales: 'Motivos Personales'
+            }[mReg.motivo] || mReg.motivo)
+        : '<span style="color:#475569;font-size:11px">Sin registro</span>';
+      return `<tr>
                   <td style="font-weight:900">Hab. ${p.numero_hab}</td>
                   <td style="font-size:12px">${p.pabellon}</td>
                   <td style="font-size:12px">${p.nivel}</td>
                   <td><span class="det-badge" style="background:${tagBg};color:${tagColor}">
-                    ${esBloq?'🔒 BLOQUEADA':'🟡 PARCIAL '+p.ocupadas+'/'+p.total_camas}
+                    ${esBloq ? '🔒 BLOQUEADA' : '🟡 PARCIAL ' + p.ocupadas + '/' + p.total_camas}
                   </span></td>
                   <td style="font-weight:900;color:#ef4444">${p.camas_perdidas}</td>
                   <td style="font-size:12px;color:var(--text-muted)">${p.huesped}</td>
                   <td style="font-size:12px;color:var(--text-primary);font-weight:600">${motivoLbl}</td>
                 </tr>`;
-              }).join('')}
+    }).join('')}
             </tbody>
           </table>
         </div>
@@ -2694,11 +2695,11 @@ function renderCamasPerdidas() {
     </div>
 
     ${kpiRow([
-      { icon: '🛏️', val: total,  lbl: 'Total Camas Perdidas',  color: '#ef4444' },
-      { icon: '🔒', val: nBloq,  lbl: 'Hab. Bloqueadas',       color: '#f59e0b' },
-      { icon: '🟡', val: nParc,  lbl: 'Ocup. Parcial',         color: '#8b5cf6' },
-      { icon: '🏢', val: gruposArr.length, lbl: 'Empresas Afectadas', color: '#6366f1' },
-    ])}
+    { icon: '🛏️', val: total, lbl: 'Total Camas Perdidas', color: '#ef4444' },
+    { icon: '🔒', val: nBloq, lbl: 'Hab. Bloqueadas', color: '#f59e0b' },
+    { icon: '🟡', val: nParc, lbl: 'Ocup. Parcial', color: '#8b5cf6' },
+    { icon: '🏢', val: gruposArr.length, lbl: 'Empresas Afectadas', color: '#6366f1' },
+  ])}
 
     <!-- ── Anglo vs ESSE comparison ───────────────────────────────────────── -->
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
@@ -2767,7 +2768,7 @@ function renderCamasPerdidas() {
     </div>
     <div style="font-size:12px;font-weight:700;color:var(--text-muted);
                 text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">
-      ${gruposArr.length} empresa${gruposArr.length!==1?'s':''} con camas perdidas — click para expandir
+      ${gruposArr.length} empresa${gruposArr.length !== 1 ? 's' : ''} con camas perdidas — click para expandir
     </div>
     ${gruposArr.length === 0
       ? `<div class="det-empty"><div class="det-empty-icon">✅</div><div class="det-empty-text">Sin camas perdidas detectadas</div></div>`
@@ -2780,11 +2781,11 @@ function renderCamasPerdidas() {
 
 function attachCPEvents() {
   window._cpDetToggle = (safeId) => {
-    const el  = document.getElementById(safeId);
+    const el = document.getElementById(safeId);
     const arr = document.getElementById('arr-' + safeId);
     if (!el) return;
     const isOpen = el.style.display !== 'none';
-    el.style.display  = isOpen ? 'none' : 'block';
+    el.style.display = isOpen ? 'none' : 'block';
     if (arr) arr.style.transform = isOpen ? 'rotate(0deg)' : 'rotate(90deg)';
   };
 }
@@ -2814,7 +2815,7 @@ async function _loadCPMotivos() {
       const body = document.getElementById('det-body');
       if (body) { body.innerHTML = renderCamasPerdidas(); attachCPEvents(); }
     }
-  } catch(e) {
+  } catch (e) {
     console.warn('[CP] Excepción cargando motivos:', e.message);
   }
 }
@@ -3010,7 +3011,7 @@ function renderChartTotal() {
       datasets: [{
         data: [cl.angloDia, cl.angloNoche, cl.esseDia, cl.esseNoche],
         backgroundColor: ['#d97706', '#6366f1', '#f59e0b', '#7c3aed'],
-        borderColor:     ['#b45309', '#4f46e5', '#d97706', '#6d28d9'],
+        borderColor: ['#b45309', '#4f46e5', '#d97706', '#6d28d9'],
         borderWidth: 2,
         hoverOffset: 8,
       }]
@@ -3148,8 +3149,8 @@ function _rtSetupHTML() {
 
 /** HTML del panel de control de la reserva técnica */
 function _rtAdminPanelHTML() {
-  const real  = _data?.engine?._p?.camasLibres?.length ?? 0;
-  const disp  = _rtApply(real);
+  const real = _data?.engine?._p?.camasLibres?.length ?? 0;
+  const disp = _rtApply(real);
   const oculto = real - disp;
   const pctActivo = _rtBuffer;
   return `
